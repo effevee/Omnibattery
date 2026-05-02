@@ -842,6 +842,7 @@
       "delay_soc_setpoint": { "name": "Charge Delay SOC Setpoint" },
       "capacity_protection_limit": { "name": "Peak Shaving Limit" },
       "backup_offgrid_threshold": { "name": "Backup Offgrid Threshold" },
+      "charge_hysteresis_percent": { "name": "Charge Hysteresis Percent" },
       "predictive_safety_margin_kwh": { "name": "Solar Forecast Safety Margin" }
     },
     "button": {

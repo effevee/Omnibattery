@@ -843,6 +843,7 @@
       "delay_soc_setpoint": { "name": "Retard de Charge – SOC Seuil" },
       "capacity_protection_limit": { "name": "Écrêtement de Pointe – Limite" },
       "backup_offgrid_threshold": { "name": "Seuil Offgrid Backup" },
+      "charge_hysteresis_percent": { "name": "Pourcentage Hystérésis Charge" },
       "predictive_safety_margin_kwh": { "name": "Marge de Sécurité Prévision Solaire" }
     },
     "button": {

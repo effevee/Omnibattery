@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.7.4] - 2026-05-02
+
+### Added
+- **Live charge hysteresis control per battery**: A new number entity (`Charge Hysteresis Percent`) is now exposed for each battery that has charge hysteresis enabled. The value can be changed at runtime from the battery's configuration menu without reloading the integration. Range expanded from 5-20% to **5-50%**.
+
+### Changed
+- **Charge hysteresis maximum increased to 50%**: The config flow slider now allows values up to 50% (previously 20%), giving more flexibility for batteries with aggressive BMS cutoff behavior.
+
 ## [1.7.3] - 2026-04-29
 
 ### Fixed

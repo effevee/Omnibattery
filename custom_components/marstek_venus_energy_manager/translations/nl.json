@@ -843,6 +843,7 @@
       "delay_soc_setpoint": { "name": "Laadvertraging – SOC-drempel" },
       "capacity_protection_limit": { "name": "Piekbegrenzing Limiet" },
       "backup_offgrid_threshold": { "name": "Backup Offgrid Drempel" },
+      "charge_hysteresis_percent": { "name": "Laadhysterese Percentage" },
       "predictive_safety_margin_kwh": { "name": "Veiligheidsmarge Zonneprognose" }
     },
     "button": {

@@ -843,6 +843,7 @@
       "delay_soc_setpoint": { "name": "Ladungsverzögerung – SOC-Schwellwert" },
       "capacity_protection_limit": { "name": "Spitzenlastkappung Limit" },
       "backup_offgrid_threshold": { "name": "Backup Offgrid Schwellenwert" },
+      "charge_hysteresis_percent": { "name": "Ladehysterese Prozent" },
       "predictive_safety_margin_kwh": { "name": "Sicherheitspuffer Solarprognose" }
     },
     "button": {

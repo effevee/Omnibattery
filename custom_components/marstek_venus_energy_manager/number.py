@@ -39,6 +39,9 @@ async def async_setup_entry(
             entities.append(MarstekSoftSocLimitNumber(coordinator, "max"))
             entities.append(MarstekSoftSocLimitNumber(coordinator, "min"))
 
+        if coordinator.enable_charge_hysteresis:
+            entities.append(MarstekChargeHysteresisNumber(coordinator))
+
     # Add config numbers (system-level, PD parameters)
     for definition in CONFIG_NUMBER_DEFINITIONS:
         # Skip conditional entities if their feature has never been configured
@@ -305,6 +308,53 @@ class MarstekBackupThresholdNumber(CoordinatorEntity, NumberEntity):
         _LOGGER.info(
             "%s: backup_offgrid_threshold updated to %dW",
             self.coordinator.name, int(value),
+        )
+        self.async_write_ha_state()
+
+    @property
+    def device_info(self):
+        """Return device information."""
+        return {
+            "identifiers": {(DOMAIN, f"{self.coordinator.host}_{self.coordinator.port}")},
+            "name": self.coordinator.name,
+            "manufacturer": "Marstek",
+            "model": "Venus",
+        }
+
+
+class MarstekChargeHysteresisNumber(CoordinatorEntity, NumberEntity):
+    """Number entity for the per-battery charge hysteresis percentage.
+
+    This value is stored in config_entry.data and read by the PD controller at runtime.
+    """
+
+    def __init__(self, coordinator: MarstekVenusDataUpdateCoordinator) -> None:
+        """Initialize the entity."""
+        super().__init__(coordinator)
+        self._attr_has_entity_name = True
+        self._attr_translation_key = "charge_hysteresis_percent"
+        self._attr_unique_id = f"{coordinator.host}_{coordinator.port}_charge_hysteresis_percent"
+        self._attr_icon = "mdi:battery-sync"
+        self._attr_native_unit_of_measurement = "%"
+        self._attr_native_min_value = 5
+        self._attr_native_max_value = 50
+        self._attr_native_step = 1
+        self._attr_should_poll = False
+
+    @property
+    def native_value(self) -> float:
+        """Return the current hysteresis percentage from the coordinator."""
+        return float(self.coordinator.charge_hysteresis_percent)
+
+    async def async_set_native_value(self, value: float) -> None:
+        """Update the hysteresis on the coordinator and persist it."""
+        new_value = int(value)
+        old = self.coordinator.charge_hysteresis_percent
+        self.coordinator.charge_hysteresis_percent = new_value
+        self.coordinator.persist_battery_config("charge_hysteresis_percent", new_value)
+        _LOGGER.info(
+            "%s: charge_hysteresis_percent %d%% → %d%%",
+            self.coordinator.name, old, new_value,
         )
         self.async_write_ha_state()
 

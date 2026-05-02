@@ -330,7 +330,7 @@ class MarstekVenusConfigFlow(ConfigFlow, domain=DOMAIN):
                         NumberSelector(NumberSelectorConfig(min=12, max=30, step=1, mode=NumberSelectorMode.SLIDER)),
                     vol.Required("enable_charge_hysteresis", default=False): bool,
                     vol.Optional("charge_hysteresis_percent", default=5):
-                        NumberSelector(NumberSelectorConfig(min=5, max=20, step=1, mode=NumberSelectorMode.SLIDER)),
+                        NumberSelector(NumberSelectorConfig(min=5, max=50, step=1, mode=NumberSelectorMode.SLIDER)),
                     vol.Required("backup_offgrid_threshold", default=50):
                         NumberSelector(NumberSelectorConfig(min=0, max=500, step=10, unit_of_measurement="W", mode=NumberSelectorMode.SLIDER)),
                 }
@@ -1492,7 +1492,7 @@ class OptionsFlowHandler(OptionsFlow):
                         NumberSelector(NumberSelectorConfig(min=12, max=30, step=1, mode=NumberSelectorMode.SLIDER)),
                     vol.Required("enable_charge_hysteresis", default=defaults["enable_charge_hysteresis"]): bool,
                     vol.Optional("charge_hysteresis_percent", default=defaults["charge_hysteresis_percent"]):
-                        NumberSelector(NumberSelectorConfig(min=5, max=20, step=1, mode=NumberSelectorMode.SLIDER)),
+                        NumberSelector(NumberSelectorConfig(min=5, max=50, step=1, mode=NumberSelectorMode.SLIDER)),
                     vol.Required("backup_offgrid_threshold", default=defaults["backup_offgrid_threshold"]):
                         NumberSelector(NumberSelectorConfig(min=0, max=500, step=10, unit_of_measurement="W", mode=NumberSelectorMode.SLIDER)),
                 }
