@@ -5,6 +5,7 @@
 ### Changed
 - **Centralized price-based discharge block computation**: The `_price_based_discharge_blocked` flag is now computed once per cycle in a dedicated `_apply_price_discharge_block()` method before mode dispatch, instead of being set inside each price handler (dynamic pricing and real-time price). This guarantees the flag is always set even when a handler returns early (override active, cheap-slot active, max_soc transition), preventing PD discharge under cheap prices in those edge cases.
 - **More specific blocking reason in logs**: When charging is not allowed, the log message now distinguishes between "charge delay active" and "time slot configuration" so users can immediately understand why charging was blocked.
+- **Venus A maximum charge/discharge power updated to 1500 W**: `MAX_POWER_BY_VERSION["vA"]` was set to 1200 W, which underestimated the hardware limit. Updated to 1500 W so the config flow slider and all power calculations reflect the correct physical maximum.
 
 ## [1.7.3] - 2026-04-29
 
