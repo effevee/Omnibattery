@@ -750,6 +750,21 @@ class IntegrationStatusSensor(SensorEntity):
         return "balanced"
 
     @property
+    def extra_state_attributes(self) -> dict:
+        """Return setpoint offset details for diagnostics."""
+        c = self._controller
+        attrs = {
+            "setpoint_active": c.compute_active_target(),
+        }
+        offsets = dict(c._setpoint_offsets)
+        if offsets:
+            attrs["setpoint_offsets"] = offsets
+        overrides = {k: v[1] for k, v in c._setpoint_overrides.items()}
+        if overrides:
+            attrs["setpoint_overrides"] = overrides
+        return attrs
+
+    @property
     def device_info(self):
         """Return device information for the system."""
         return {

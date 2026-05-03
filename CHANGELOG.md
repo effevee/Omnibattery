@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.7.5] - 2026-05-03
+
+### Added
+- **Setpoint offset registry**: New two-layer system for dynamic PD target control with a fixed reference of 0 W (zero grid flow). Features that need to adjust the PD target can now register either **additive offsets** (summed together to form the default target) or **absolute overrides** (highest priority wins, replaces the additive sum entirely). The user's `target_grid_power` preference is registered as an additive offset (`user_target`), and capacity protection uses an absolute override with priority 10. Public API: `set_setpoint_offset()`, `remove_setpoint_offset()`, `set_setpoint_override()`, `remove_setpoint_override()`, `compute_active_target()`. This provides a clean extension point for future features like hourly net balance or price-based arbitrage.
+- **Setpoint diagnostics on Integration Status sensor**: The `Integration Status` sensor now exposes `setpoint_active`, `setpoint_offsets`, and `setpoint_overrides` as extra state attributes, showing the effective PD target and which features are contributing to it.
+
+### Changed
+- **Capacity protection migrated to setpoint overrides**: Capacity protection no longer directly modifies the internal `active_target` variable. It registers an absolute override via the new setpoint registry, allowing proper composition with other features. Behaviour is unchanged — when capacity protection is active, its override (priority 10) takes full control of the PD target.
+
 ## [1.7.4] - 2026-05-02
 
 ### Added
