@@ -145,6 +145,10 @@ async def async_setup_entry(
     from . import balance_sensors as _balance_sensors
     await _balance_sensors.async_setup_entry(hass, entry, async_add_entities)
 
+    # Hourly balance sensors
+    from . import hourly_balance_sensors as _hourly_balance_sensors
+    await _hourly_balance_sensors.async_setup_entry(hass, entry, async_add_entities)
+
 
 class MarstekVenusSensor(CoordinatorEntity, SensorEntity):
     """Representation of a Marstek Venus sensor."""

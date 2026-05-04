@@ -90,8 +90,18 @@ from .const import (
     MULTI_BATTERY_HYSTERESIS_GAP,
     MULTI_BATTERY_MIN_ACTIVATION,
     MULTI_BATTERY_MAX_ACTIVATION,
+    CONF_ENABLE_HOURLY_BALANCE,
+    CONF_HOURLY_BALANCE_TARGET_NET_WH,
+    CONF_HOURLY_BALANCE_MAX_OFFSET_W,
+    CONF_HOURLY_BALANCE_HYSTERESIS_W,
+    CONF_HOURLY_BALANCE_RAMP_IN_MIN,
+    DEFAULT_HOURLY_BALANCE_TARGET_NET_WH,
+    DEFAULT_HOURLY_BALANCE_MAX_OFFSET_W,
+    DEFAULT_HOURLY_BALANCE_HYSTERESIS_W,
+    DEFAULT_HOURLY_BALANCE_RAMP_IN_MIN,
 )
 from .coordinator import MarstekVenusDataUpdateCoordinator
+from .hourly_balance import HourlyBalanceManager
 from .non_responsive_tracker import NonResponsiveTracker
 from .weekly_full_charge import WeeklyFullChargeManager
 
@@ -305,6 +315,13 @@ class ChargeDischargeController:
         self._predictive_safety_margin_kwh: float = config_entry.data.get(CONF_PREDICTIVE_SAFETY_MARGIN_KWH, DEFAULT_PREDICTIVE_SAFETY_MARGIN_KWH)
         self._charge_delay_unlocked = False       # True when delay has been unlocked today
         self._balance_monitor = None  # Set from async_setup_entry after monitor is created
+
+        # Hourly Net Balance
+        self.hourly_balance_enabled = config_entry.data.get(CONF_ENABLE_HOURLY_BALANCE, False)
+        self._hourly_balance_mgr: HourlyBalanceManager | None = (
+            HourlyBalanceManager(hass, config_entry, self)
+            if self.hourly_balance_enabled else None
+        )
         self._charge_delay_last_date = None       # For daily reset
         self._charge_delay_forecast_cache = None  # Last forecast value used for balance check
         self._charge_delay_balance_needs_charge = True  # Cached balance result (conservative default)
@@ -367,6 +384,9 @@ class ChargeDischargeController:
                      self.capacity_protection_soc_threshold,
                      self.capacity_protection_limit)
 
+        _LOGGER.info("Hourly Net Balance: %s",
+                     "ENABLED" if self.hourly_balance_enabled else "DISABLED")
+
     def update_pd_parameters(self):
         """Re-read PD controller parameters from config_entry.data (hot-reload)."""
         # Update weekly full charge settings; reset completion state if day changed
@@ -417,6 +437,19 @@ class ChargeDischargeController:
         self.capacity_protection_enabled = self.config_entry.data.get(CONF_CAPACITY_PROTECTION_ENABLED, False)
         self.capacity_protection_soc_threshold = self.config_entry.data.get(CONF_CAPACITY_PROTECTION_SOC_THRESHOLD, DEFAULT_CAPACITY_PROTECTION_SOC)
         self.capacity_protection_limit = self.config_entry.data.get(CONF_CAPACITY_PROTECTION_LIMIT, DEFAULT_CAPACITY_PROTECTION_LIMIT)
+
+        # Hourly balance: ON→OFF cleans up offset; OFF→ON requires integration reload
+        new_hb_enabled = self.config_entry.data.get(CONF_ENABLE_HOURLY_BALANCE, False)
+        if self.hourly_balance_enabled and not new_hb_enabled:
+            self.remove_setpoint_offset("hourly_balance")
+            self._hourly_balance_mgr = None
+            _LOGGER.info("Hourly Net Balance: DISABLED via hot-reload")
+        elif not self.hourly_balance_enabled and new_hb_enabled:
+            _LOGGER.warning(
+                "Hourly Net Balance: enabled — integration reload required to activate sensors"
+            )
+        self.hourly_balance_enabled = new_hb_enabled
+
         _LOGGER.info("PD parameters hot-reloaded: Kp=%.2f, Kd=%.2f, deadband=%d, max_change=%d, hysteresis=%d, min_charge=%d, min_discharge=%d",
                      self.kp, self.kd, self.deadband, self.max_power_change_per_cycle, self.direction_hysteresis, self.min_charge_power, self.min_discharge_power)
 
@@ -3788,6 +3821,13 @@ class ChargeDischargeController:
         _LOGGER.debug("ChargeDischargeController: sensor_actual=%fW, UPDATING BATTERIES!",
                       sensor_actual)
         
+        # HOURLY NET BALANCE: Update setpoint offset based on current-hour net energy.
+        # Runs before capacity protection so the offset is already in _setpoint_offsets
+        # when compute_active_target() is called; CP override wins automatically.
+        if self._hourly_balance_mgr is not None:
+            await self._hourly_balance_mgr.async_process(sensor_actual)
+            active_target = self.compute_active_target()
+
         # CAPACITY PROTECTION MODE: When enabled and SOC is below threshold,
         # only discharge to cover consumption above the peak limit.
         # Uses setpoint offset registry so other features can compose with it.
@@ -4467,6 +4507,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
     entry.async_on_unload(unsub_refresh)
 
+    # Set up hourly balance manager if enabled
+    if controller._hourly_balance_mgr is not None:
+        await controller._hourly_balance_mgr.async_setup()
+
     # Set up balance monitor if enabled
     balance_monitor = None
     if entry.data.get(CONF_ENABLE_BALANCE_MONITOR, DEFAULT_ENABLE_BALANCE_MONITOR):
@@ -4615,6 +4659,11 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
         # Disconnect from all coordinators
         await asyncio.gather(*[c.disconnect() for c in coordinators])
+
+        # Persist hourly balance state
+        controller = data.get("controller")
+        if controller and controller._hourly_balance_mgr is not None:
+            await controller._hourly_balance_mgr.async_unload()
 
         if unload_ok:
             hass.data[DOMAIN].pop(entry.entry_id, None)

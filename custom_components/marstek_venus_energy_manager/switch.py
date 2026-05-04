@@ -10,7 +10,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN, CONF_CAPACITY_PROTECTION_ENABLED, CONF_ENABLE_CHARGE_DELAY, CONF_ENABLE_WEEKLY_FULL_CHARGE_DELAY, CONF_MANUAL_MODE_ENABLED, CONF_PREDICTIVE_CHARGING_OVERRIDDEN
+from .const import DOMAIN, CONF_CAPACITY_PROTECTION_ENABLED, CONF_ENABLE_CHARGE_DELAY, CONF_ENABLE_WEEKLY_FULL_CHARGE_DELAY, CONF_MANUAL_MODE_ENABLED, CONF_PREDICTIVE_CHARGING_OVERRIDDEN, CONF_ENABLE_HOURLY_BALANCE
 from .coordinator import MarstekVenusDataUpdateCoordinator
 
 _LOGGER = logging.getLogger(__name__)
@@ -50,6 +50,10 @@ async def async_setup_entry(
     )
     if controller and has_charge_delay_config:
         entities.append(ChargeDelaySwitch(hass, entry, controller))
+
+    # Add hourly balance switch (system-level, when hourly balance is configured)
+    if controller and CONF_ENABLE_HOURLY_BALANCE in entry.data:
+        entities.append(HourlyBalanceSwitch(hass, entry, controller))
 
     # Add time slot enable/disable switches
     time_slots = entry.data.get("no_discharge_time_slots", [])
@@ -609,6 +613,56 @@ class ManualModeSwitch(SwitchEntity):
             "dismiss",
             {"notification_id": "manual_mode_active"},
         )
+        self.async_write_ha_state()
+
+    @property
+    def device_info(self):
+        """Return device information for the system."""
+        return {
+            "identifiers": {(DOMAIN, "marstek_venus_system")},
+            "name": "Marstek Venus System",
+            "manufacturer": "Marstek",
+            "model": "Venus Multi-Battery System",
+        }
+
+
+class HourlyBalanceSwitch(SwitchEntity):
+    """Switch to enable/disable the hourly balance feature at runtime."""
+
+    def __init__(self, hass: HomeAssistant, entry: ConfigEntry, controller) -> None:
+        """Initialize the hourly balance switch."""
+        self.hass = hass
+        self.entry = entry
+        self.controller = controller
+
+        self._attr_has_entity_name = True
+        self._attr_translation_key = "hourly_balance"
+        self._attr_unique_id = f"{entry.entry_id}_hourly_balance"
+        self._attr_icon = "mdi:scale-balance"
+        self._attr_should_poll = False
+
+    @property
+    def is_on(self) -> bool:
+        """Return True if hourly balance is enabled."""
+        return self.controller.hourly_balance_enabled
+
+    async def async_turn_on(self, **kwargs) -> None:
+        """Enable hourly balance."""
+        self.controller.hourly_balance_enabled = True
+        new_data = dict(self.entry.data)
+        new_data[CONF_ENABLE_HOURLY_BALANCE] = True
+        self.hass.config_entries.async_update_entry(self.entry, data=new_data)
+        _LOGGER.info("Hourly Balance ENABLED")
+        self.async_write_ha_state()
+
+    async def async_turn_off(self, **kwargs) -> None:
+        """Disable hourly balance."""
+        self.controller.hourly_balance_enabled = False
+        self.controller.remove_setpoint_offset("hourly_balance")
+        new_data = dict(self.entry.data)
+        new_data[CONF_ENABLE_HOURLY_BALANCE] = False
+        self.hass.config_entries.async_update_entry(self.entry, data=new_data)
+        _LOGGER.info("Hourly Balance DISABLED")
         self.async_write_ha_state()
 
     @property

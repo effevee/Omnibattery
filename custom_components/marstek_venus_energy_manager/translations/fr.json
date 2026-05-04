@@ -296,6 +296,29 @@
           "pd_min_discharge_power": "Puissance minimale pour décharger. En dessous de ce seuil, le contrôleur reste en veille au lieu de décharger à faible puissance. 0 = désactivé.",
           "pd_target_grid_power": "Consigne de puissance réseau que le contrôleur régule. Négatif = injection réseau, positif = soutirage, 0 = bilan nul. Plage : -500 à +500 W, défaut : 0 W."
         }
+      },
+      "hourly_balance": {
+        "title": "Bilan Horaire Net",
+        "description": "Activer le contrôle du bilan net horaire ? Cette fonction suit les importations/exportations réseau par heure et ajuste automatiquement le point de consigne de la batterie pour atteindre un bilan énergétique cible.",
+        "data": {
+          "configure_hourly_balance": "Configurer le bilan horaire"
+        }
+      },
+      "hourly_balance_config": {
+        "title": "Configuration du Bilan Horaire",
+        "description": "Configurez le bilan énergétique cible et les paramètres de contrôle. Le système ajustera la puissance de la batterie pour atteindre le bilan Wh cible chaque heure.",
+        "data": {
+          "hourly_balance_target_net_wh": "Bilan net cible (Wh)",
+          "hourly_balance_max_offset_w": "Décalage maximum (W)",
+          "hourly_balance_hysteresis_w": "Hystérésis (W)",
+          "hourly_balance_ramp_in_min": "Temps de rampe (min)"
+        },
+        "data_description": {
+          "hourly_balance_target_net_wh": "Bilan énergétique net cible par heure. 0 = bilan nul (par défaut). Positif = autoriser l importation, négatif = objectif d exportation.",
+          "hourly_balance_max_offset_w": "Décalage de puissance maximal que le contrôleur peut appliquer pour corriger le déséquilibre. Des valeurs plus élevées corrigent plus rapidement mais peuvent provoquer des oscillations.",
+          "hourly_balance_hysteresis_w": "Changement minimum requis avant que le décalage ne soit mis à jour. Évite les petits ajustements rapides.",
+          "hourly_balance_ramp_in_min": "Durée au début de chaque heure pendant laquelle le décalage est augmenté progressivement. Évite les changements brusques de puissance aux limites d heure."
+        }
       }
     },
     "error": {
@@ -324,7 +347,8 @@
           "weekly_full_charge": "Charge complète hebdomadaire",
           "charge_delay": "Retard de charge solaire",
           "capacity_protection": "Protection de capacité",
-          "pd_advanced": "Contrôleur PD (avancé)"
+          "pd_advanced": "Contrôleur PD (avancé)",
+          "hourly_balance": "Bilan horaire net"
         }
       },
       "sensors": {
@@ -622,6 +646,29 @@
           "pd_min_discharge_power": "Puissance minimale pour décharger. En dessous de ce seuil, le contrôleur reste en veille au lieu de décharger à faible puissance. 0 = désactivé.",
           "pd_target_grid_power": "Consigne de puissance réseau que le contrôleur régule. Négatif = injection réseau, positif = soutirage, 0 = bilan nul. Plage : -500 à +500 W, défaut : 0 W."
         }
+      },
+      "hourly_balance": {
+        "title": "Bilan Horaire Net",
+        "description": "Activer le contrôle du bilan net horaire ? Cette fonction suit les importations/exportations réseau par heure et ajuste automatiquement le point de consigne de la batterie pour atteindre un bilan énergétique cible.",
+        "data": {
+          "configure_hourly_balance": "Configurer le bilan horaire"
+        }
+      },
+      "hourly_balance_config": {
+        "title": "Configuration du Bilan Horaire",
+        "description": "Configurez le bilan énergétique cible et les paramètres de contrôle. Le système ajustera la puissance de la batterie pour atteindre le bilan Wh cible chaque heure.",
+        "data": {
+          "hourly_balance_target_net_wh": "Bilan net cible (Wh)",
+          "hourly_balance_max_offset_w": "Décalage maximum (W)",
+          "hourly_balance_hysteresis_w": "Hystérésis (W)",
+          "hourly_balance_ramp_in_min": "Temps de rampe (min)"
+        },
+        "data_description": {
+          "hourly_balance_target_net_wh": "Bilan énergétique net cible par heure. 0 = bilan nul (par défaut). Positif = autoriser l importation, négatif = objectif d exportation.",
+          "hourly_balance_max_offset_w": "Décalage de puissance maximal que le contrôleur peut appliquer pour corriger le déséquilibre. Des valeurs plus élevées corrigent plus rapidement mais peuvent provoquer des oscillations.",
+          "hourly_balance_hysteresis_w": "Changement minimum requis avant que le décalage ne soit mis à jour. Évite les petits ajustements rapides.",
+          "hourly_balance_ramp_in_min": "Durée au début de chaque heure pendant laquelle le décalage est augmenté progressivement. Évite les changements brusques de puissance aux limites d heure."
+        }
       }
     },
     "error": {
@@ -662,19 +709,44 @@
   },
   "entity": {
     "switch": {
-      "manual_mode": { "name": "Mode Manuel" },
-      "predictive_charging": { "name": "Charge Prédictive" },
-      "charge_delay": { "name": "Délai de Charge" },
-      "capacity_protection": { "name": "Écrêtement de Pointe" },
-      "backup_function": { "name": "Fonction de Secours" },
-      "rs485_control_mode": { "name": "Mode de Contrôle RS485" },
-      "automation_charging_active": { "name": "Charge par Prix Externe" },
-      "excluded_device_enabled": { "name": "{device} – Actif" },
-      "excluded_device_solar_surplus": { "name": "{device} – Surplus Solaire" },
-      "time_slot": { "name": "Plage Horaire {slot_number}" }
+      "manual_mode": {
+        "name": "Mode Manuel"
+      },
+      "predictive_charging": {
+        "name": "Charge Prédictive"
+      },
+      "charge_delay": {
+        "name": "Délai de Charge"
+      },
+      "capacity_protection": {
+        "name": "Écrêtement de Pointe"
+      },
+      "backup_function": {
+        "name": "Fonction de Secours"
+      },
+      "rs485_control_mode": {
+        "name": "Mode de Contrôle RS485"
+      },
+      "automation_charging_active": {
+        "name": "Charge par Prix Externe"
+      },
+      "excluded_device_enabled": {
+        "name": "{device} – Actif"
+      },
+      "excluded_device_solar_surplus": {
+        "name": "{device} – Surplus Solaire"
+      },
+      "time_slot": {
+        "name": "Plage Horaire {slot_number}"
+      },
+      "hourly_balance": {
+        "name": "Bilan Horaire"
+      }
     },
     "time": {
-      "automation_charging_end_time": { "name": "Fin de Charge Externe" }
+      "automation_charging_end_time": {
+        "name": "Fin de Charge Externe"
+      }
     },
     "sensor": {
       "discharge_window": {
@@ -685,9 +757,15 @@
           "active": "Actif"
         }
       },
-      "active_batteries": { "name": "Batteries Actives" },
-      "non_responsive_batteries": { "name": "Batteries Non Réactives" },
-      "configuration_summary": { "name": "Résumé de Configuration" },
+      "active_batteries": {
+        "name": "Batteries Actives"
+      },
+      "non_responsive_batteries": {
+        "name": "Batteries Non Réactives"
+      },
+      "configuration_summary": {
+        "name": "Résumé de Configuration"
+      },
       "integration_status": {
         "name": "État de l'Intégration",
         "state": {
@@ -726,49 +804,135 @@
           "charging_to_setpoint": "Charge jusqu'au seuil"
         }
       },
-      "battery_soc": { "name": "SOC Batterie" },
-      "battery_total_energy": { "name": "Énergie Totale Batterie" },
-      "battery_power": { "name": "Puissance Batterie" },
-      "internal_temperature": { "name": "Température Interne" },
-      "ac_power": { "name": "Puissance CA" },
-      "total_charging_energy": { "name": "Énergie de Charge Totale" },
-      "total_discharging_energy": { "name": "Énergie de Décharge Totale" },
-      "total_daily_charging_energy": { "name": "Énergie de Charge Journalière" },
-      "total_daily_discharging_energy": { "name": "Énergie de Décharge Journalière" },
-      "inverter_state": { "name": "État de l'Onduleur" },
-      "battery_voltage": { "name": "Tension Batterie" },
-      "max_cell_voltage": { "name": "Tension Maximale de Cellule" },
-      "min_cell_voltage": { "name": "Tension Minimale de Cellule" },
-      "fault_status": { "name": "État de Défaut" },
-      "alarm_status": { "name": "État d'Alarme" },
-      "ac_offgrid_power": { "name": "Puissance CA Hors Réseau" },
-      "mppt1_power": { "name": "Puissance MPPT1" },
-      "mppt2_power": { "name": "Puissance MPPT2" },
-      "mppt3_power": { "name": "Puissance MPPT3" },
-      "mppt4_power": { "name": "Puissance MPPT4" },
-      "round_trip_efficiency_total": { "name": "Rendement Total Aller-Retour" },
-      "stored_energy": { "name": "Énergie Stockée" },
-      "system_soc": { "name": "SOC du Système" },
-      "system_charge_power": { "name": "Puissance de Charge du Système" },
-      "system_discharge_power": { "name": "Puissance de Décharge du Système" },
-      "system_total_energy": { "name": "Énergie Totale du Système" },
-      "system_stored_energy": { "name": "Énergie Stockée du Système" },
-      "system_daily_charging_energy": { "name": "Énergie de Charge Journalière du Système" },
-      "system_daily_discharging_energy": { "name": "Énergie de Décharge Journalière du Système" },
-      "system_daily_grid_at_min_soc_energy": { "name": "Réseau au SOC Min." },
-      "system_alarm_status": { "name": "État d'Alarme du Système" },
-      "device_name": { "name": "Nom du Dispositif" },
-      "sn_code": { "name": "Numéro de Série" },
-      "software_version": { "name": "Version Logiciel" },
-      "bms_version": { "name": "Version BMS" },
-      "ems_version": { "name": "Version EMS" },
-      "vms_version": { "name": "Version VMS" },
-      "comm_module_firmware": { "name": "Firmware Module Communication" },
-      "mac_address": { "name": "Adresse MAC" },
-      "wifi_signal_strength": { "name": "Force du Signal WiFi" },
-      "battery_cycle_count": { "name": "Cycles Batterie" },
-      "battery_cycle_count_calc": { "name": "Cycles Batterie (Calculé)" },
-      "cell_delta": { "name": "Delta Cellule" },
+      "battery_soc": {
+        "name": "SOC Batterie"
+      },
+      "battery_total_energy": {
+        "name": "Énergie Totale Batterie"
+      },
+      "battery_power": {
+        "name": "Puissance Batterie"
+      },
+      "internal_temperature": {
+        "name": "Température Interne"
+      },
+      "ac_power": {
+        "name": "Puissance CA"
+      },
+      "total_charging_energy": {
+        "name": "Énergie de Charge Totale"
+      },
+      "total_discharging_energy": {
+        "name": "Énergie de Décharge Totale"
+      },
+      "total_daily_charging_energy": {
+        "name": "Énergie de Charge Journalière"
+      },
+      "total_daily_discharging_energy": {
+        "name": "Énergie de Décharge Journalière"
+      },
+      "inverter_state": {
+        "name": "État de l'Onduleur"
+      },
+      "battery_voltage": {
+        "name": "Tension Batterie"
+      },
+      "max_cell_voltage": {
+        "name": "Tension Maximale de Cellule"
+      },
+      "min_cell_voltage": {
+        "name": "Tension Minimale de Cellule"
+      },
+      "fault_status": {
+        "name": "État de Défaut"
+      },
+      "alarm_status": {
+        "name": "État d'Alarme"
+      },
+      "ac_offgrid_power": {
+        "name": "Puissance CA Hors Réseau"
+      },
+      "mppt1_power": {
+        "name": "Puissance MPPT1"
+      },
+      "mppt2_power": {
+        "name": "Puissance MPPT2"
+      },
+      "mppt3_power": {
+        "name": "Puissance MPPT3"
+      },
+      "mppt4_power": {
+        "name": "Puissance MPPT4"
+      },
+      "round_trip_efficiency_total": {
+        "name": "Rendement Total Aller-Retour"
+      },
+      "stored_energy": {
+        "name": "Énergie Stockée"
+      },
+      "system_soc": {
+        "name": "SOC du Système"
+      },
+      "system_charge_power": {
+        "name": "Puissance de Charge du Système"
+      },
+      "system_discharge_power": {
+        "name": "Puissance de Décharge du Système"
+      },
+      "system_total_energy": {
+        "name": "Énergie Totale du Système"
+      },
+      "system_stored_energy": {
+        "name": "Énergie Stockée du Système"
+      },
+      "system_daily_charging_energy": {
+        "name": "Énergie de Charge Journalière du Système"
+      },
+      "system_daily_discharging_energy": {
+        "name": "Énergie de Décharge Journalière du Système"
+      },
+      "system_daily_grid_at_min_soc_energy": {
+        "name": "Réseau au SOC Min."
+      },
+      "system_alarm_status": {
+        "name": "État d'Alarme du Système"
+      },
+      "device_name": {
+        "name": "Nom du Dispositif"
+      },
+      "sn_code": {
+        "name": "Numéro de Série"
+      },
+      "software_version": {
+        "name": "Version Logiciel"
+      },
+      "bms_version": {
+        "name": "Version BMS"
+      },
+      "ems_version": {
+        "name": "Version EMS"
+      },
+      "vms_version": {
+        "name": "Version VMS"
+      },
+      "comm_module_firmware": {
+        "name": "Firmware Module Communication"
+      },
+      "mac_address": {
+        "name": "Adresse MAC"
+      },
+      "wifi_signal_strength": {
+        "name": "Force du Signal WiFi"
+      },
+      "battery_cycle_count": {
+        "name": "Cycles Batterie"
+      },
+      "battery_cycle_count_calc": {
+        "name": "Cycles Batterie (Calculé)"
+      },
+      "cell_delta": {
+        "name": "Delta Cellule"
+      },
       "balance_status": {
         "name": "État d'Équilibrage",
         "state": {
@@ -788,18 +952,50 @@
           "unknown": "Inconnu"
         }
       },
-      "last_balance_read": { "name": "Dernière Lecture d'Équilibrage" },
-      "delta_avg_4w": { "name": "Delta Moyen (4 lectures)" }
+      "last_balance_read": {
+        "name": "Dernière Lecture d'Équilibrage"
+      },
+      "delta_avg_4w": {
+        "name": "Delta Moyen (4 lectures)"
+      },
+      "hourly_net_energy": {
+        "name": "Énergie Nette Horaire"
+      },
+      "hourly_balance_offset": {
+        "name": "Décalage Bilan Horaire"
+      },
+      "hourly_balance_status": {
+        "name": "État Bilan Horaire",
+        "state": {
+          "idle": "Inactif",
+          "out_of_slot": "Hors créneau",
+          "capped": "Limité",
+          "compensating_import": "Compensation Import",
+          "compensating_export": "Compensation Export"
+        }
+      }
     },
     "binary_sensor": {
-      "capacity_protection_active": { "name": "Écrêtement de Pointe Actif" },
-      "predictive_charging_active": { "name": "Charge Prédictive Active" },
-      "wifi_status": { "name": "État WiFi" },
-      "cloud_status": { "name": "État Cloud" },
-      "charge_hysteresis": { "name": "Hystérésis de Charge" }
+      "capacity_protection_active": {
+        "name": "Écrêtement de Pointe Actif"
+      },
+      "predictive_charging_active": {
+        "name": "Charge Prédictive Active"
+      },
+      "wifi_status": {
+        "name": "État WiFi"
+      },
+      "cloud_status": {
+        "name": "État Cloud"
+      },
+      "charge_hysteresis": {
+        "name": "Hystérésis de Charge"
+      }
     },
     "select": {
-      "force_mode": { "name": "Mode Forcé" },
+      "force_mode": {
+        "name": "Mode Forcé"
+      },
       "user_work_mode": {
         "name": "Mode de Fonctionnement",
         "state": {
@@ -822,32 +1018,80 @@
       }
     },
     "number": {
-      "set_charge_power": { "name": "Puissance de Charge" },
-      "set_discharge_power": { "name": "Puissance de Décharge" },
-      "max_charge_power": { "name": "Puissance de Charge Max." },
-      "max_discharge_power": { "name": "Puissance de Décharge Max." },
-      "charging_cutoff_capacity": { "name": "SOC Limite de Charge" },
-      "discharging_cutoff_capacity": { "name": "SOC Limite de Décharge" },
-      "charge_to_soc": { "name": "Charger jusqu'à SOC" },
-      "pd_controller_kp": { "name": "PD Kp" },
-      "pd_controller_kd": { "name": "PD Kd" },
-      "pd_controller_deadband": { "name": "PD Bande Morte" },
-      "pd_controller_max_power_change": { "name": "PD Changement de Puissance Max." },
-      "pd_controller_direction_hysteresis": { "name": "PD Hystérésis de Direction" },
-      "pd_min_charge_power": { "name": "PD Puissance Min. de Charge" },
-      "pd_min_discharge_power": { "name": "PD Puissance Min. de Décharge" },
-      "pd_target_grid_power": { "name": "PD Puissance Cible Réseau" },
-      "max_contracted_power": { "name": "Puissance Contractuelle Max." },
-      "capacity_protection_soc_threshold": { "name": "Écrêtement de Pointe – Seuil SOC" },
-      "delay_safety_margin_min": { "name": "Retard de Charge – Marge" },
-      "delay_soc_setpoint": { "name": "Retard de Charge – SOC Seuil" },
-      "capacity_protection_limit": { "name": "Écrêtement de Pointe – Limite" },
-      "backup_offgrid_threshold": { "name": "Seuil Offgrid Backup" },
-      "charge_hysteresis_percent": { "name": "Pourcentage Hystérésis Charge" },
-      "predictive_safety_margin_kwh": { "name": "Marge de Sécurité Prévision Solaire" }
+      "set_charge_power": {
+        "name": "Puissance de Charge"
+      },
+      "set_discharge_power": {
+        "name": "Puissance de Décharge"
+      },
+      "max_charge_power": {
+        "name": "Puissance de Charge Max."
+      },
+      "max_discharge_power": {
+        "name": "Puissance de Décharge Max."
+      },
+      "charging_cutoff_capacity": {
+        "name": "SOC Limite de Charge"
+      },
+      "discharging_cutoff_capacity": {
+        "name": "SOC Limite de Décharge"
+      },
+      "charge_to_soc": {
+        "name": "Charger jusqu'à SOC"
+      },
+      "pd_controller_kp": {
+        "name": "PD Kp"
+      },
+      "pd_controller_kd": {
+        "name": "PD Kd"
+      },
+      "pd_controller_deadband": {
+        "name": "PD Bande Morte"
+      },
+      "pd_controller_max_power_change": {
+        "name": "PD Changement de Puissance Max."
+      },
+      "pd_controller_direction_hysteresis": {
+        "name": "PD Hystérésis de Direction"
+      },
+      "pd_min_charge_power": {
+        "name": "PD Puissance Min. de Charge"
+      },
+      "pd_min_discharge_power": {
+        "name": "PD Puissance Min. de Décharge"
+      },
+      "pd_target_grid_power": {
+        "name": "PD Puissance Cible Réseau"
+      },
+      "max_contracted_power": {
+        "name": "Puissance Contractuelle Max."
+      },
+      "capacity_protection_soc_threshold": {
+        "name": "Écrêtement de Pointe – Seuil SOC"
+      },
+      "delay_safety_margin_min": {
+        "name": "Retard de Charge – Marge"
+      },
+      "delay_soc_setpoint": {
+        "name": "Retard de Charge – SOC Seuil"
+      },
+      "capacity_protection_limit": {
+        "name": "Écrêtement de Pointe – Limite"
+      },
+      "backup_offgrid_threshold": {
+        "name": "Seuil Offgrid Backup"
+      },
+      "charge_hysteresis_percent": {
+        "name": "Pourcentage Hystérésis Charge"
+      },
+      "predictive_safety_margin_kwh": {
+        "name": "Marge de Sécurité Prévision Solaire"
+      }
     },
     "button": {
-      "reset_device": { "name": "Réinitialiser l'Appareil" }
+      "reset_device": {
+        "name": "Réinitialiser l'Appareil"
+      }
     }
   }
 }
