@@ -971,7 +971,8 @@
           "out_of_slot": "Buiten tijdslot",
           "capped": "Begrensd",
           "compensating_import": "Import compenseren",
-          "compensating_export": "Export compenseren"
+          "compensating_export": "Export compenseren",
+          "compensation_stopped": "Compensatie Gestopt"
         }
       }
     },

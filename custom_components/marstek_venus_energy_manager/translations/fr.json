@@ -971,7 +971,8 @@
           "out_of_slot": "Hors créneau",
           "capped": "Limité",
           "compensating_import": "Compensation Import",
-          "compensating_export": "Compensation Export"
+          "compensating_export": "Compensation Export",
+          "compensation_stopped": "Compensation Arrêtée"
         }
       }
     },

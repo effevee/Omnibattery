@@ -970,7 +970,8 @@
           "out_of_slot": "Out of Slot",
           "capped": "Capped",
           "compensating_import": "Compensating Import",
-          "compensating_export": "Compensating Export"
+          "compensating_export": "Compensating Export",
+          "compensation_stopped": "Compensation Stopped"
         }
       }
     },

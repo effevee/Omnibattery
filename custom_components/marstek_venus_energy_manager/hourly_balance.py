@@ -57,6 +57,10 @@ class HourlyBalanceManager:
 
         # History and save throttle
         self._history: list[dict] = []
+        
+        # Internal state
+        self._last_theoretical_offset_w: float = 0.0
+        self._last_block_reason: str | None = None
         self._save_counter: int = 0
 
         # Registered sensor entities for push updates
@@ -227,9 +231,9 @@ class HourlyBalanceManager:
         if remaining_min < HOURLY_BALANCE_MIN_REMAINING_MIN:
             offset_w = 0.0
         else:
-            deficit_wh = target_net_wh - net_wh  # >0 means we imported more than target
+            deficit_wh = target_net_wh - net_wh  # >0 means we exported too much, need to import
             needed_avg_w = deficit_wh / (remaining_min / 60.0)
-            offset_w = -needed_avg_w  # negative = push more export
+            offset_w = needed_avg_w  # positive = shift target towards import
 
             # Ramp-in: attenuate during the first ramp_in_min minutes
             ramp_in_min = self._config_entry.data.get(
@@ -252,12 +256,18 @@ class HourlyBalanceManager:
             if abs(offset_w - self._last_offset_w) < hysteresis_w:
                 offset_w = self._last_offset_w
 
-        # Log if capacity protection override is active
-        if self._controller._setpoint_overrides.get("capacity_protection"):
+        # If compensation is blocked, zero the offset so the PD controller
+        # doesn't chase an unreachable target. The integration (imp/exp)
+        # continues tracking so the correct offset will be applied once
+        # the block lifts.
+        self._last_theoretical_offset_w = offset_w
+        self._last_block_reason = self._get_compensation_block_reason(offset_w)
+        if self._last_block_reason is not None:
             _LOGGER.debug(
-                "HourlyBalance: offset=%.0fW set but capacity_protection override is active",
-                offset_w,
+                "HourlyBalance: offset would be %.0fW but blocked by %s → applying 0W",
+                offset_w, self._last_block_reason,
             )
+            offset_w = 0.0
 
         self._controller.set_setpoint_offset("hourly_balance", offset_w)
         self._last_offset_w = offset_w
@@ -323,6 +333,36 @@ class HourlyBalanceManager:
 
         return False
 
+    def _get_compensation_block_reason(self, offset: float) -> str | None:
+        """Return a reason string if compensation is currently blocked, else None.
+
+        solar_charge_delay blocks both offset directions: when active the
+        battery can't charge so solar surplus accumulates as export, swinging
+        the offset negative; the balance can't correct either way.
+        Hysteresis and max_soc only prevent charging, so they are checked
+        only for offset > 0.
+        Uses _charge_delay_status (kept current by the PD cycle) to avoid
+        calling _is_charge_delayed() which has side-effects.
+        """
+        ctrl = self._controller
+        if ctrl.charge_delay_enabled:
+            delay_state = ctrl._charge_delay_status.get("state", "")
+            _delay_not_blocking = {
+                "Disabled", "Charging allowed", "Skipped - Full Charge Day",
+                "Charging to setpoint",
+            }
+            if delay_state not in _delay_not_blocking and not delay_state.startswith("Unlocking"):
+                return "solar_charge_delay"
+        if offset > 0:
+            if any(getattr(c, "_hysteresis_active", False) for c in ctrl.coordinators):
+                return "hysteresis"
+            with_data = [c for c in ctrl.coordinators if c.data]
+            if with_data and all(
+                c.data.get("battery_soc", 0) >= c.max_soc for c in with_data
+            ):
+                return "max_soc"
+        return None
+
     def get_status_dict(self) -> dict:
         """Return a snapshot dict for sensor attributes."""
         now_local = dt_util.now()
@@ -332,16 +372,19 @@ class HourlyBalanceManager:
             elapsed_min = (now_local - self._hour_started_local).total_seconds() / 60.0
             remaining_min = max(0.0, 60.0 - elapsed_min)
 
+        offset = self._last_offset_w
         return {
-            "net_wh": round(self._imp_wh - self._exp_wh, 1),
+            "net_kwh": round((self._exp_wh - self._imp_wh) / 1000, 3),
             "imp_wh": round(self._imp_wh, 1),
             "exp_wh": round(self._exp_wh, 1),
             "elapsed_min": round(elapsed_min, 1),
             "remaining_min": round(remaining_min, 1),
             "target_net_wh": self._target_net_wh(),
-            "offset_w": round(self._last_offset_w, 1),
+            "offset_w": round(offset, 1),
+            "theoretical_offset_w": round(self._last_theoretical_offset_w, 1),
             "in_active_slot": self._is_in_active_slot(),
             "hour_iso": self._hour_started_local.isoformat() if self._hour_started_local else None,
+            "charge_block_reason": self._last_block_reason,
             "history": self._history[-24:],
         }
 
@@ -352,14 +395,16 @@ class HourlyBalanceManager:
         if self._current_hour is None:
             return "idle"
 
+        if self._last_block_reason:
+            return "compensation_stopped"
+
         max_offset_w = self._config_entry.data.get(
             CONF_HOURLY_BALANCE_MAX_OFFSET_W, DEFAULT_HOURLY_BALANCE_MAX_OFFSET_W
         )
-        offset = self._last_offset_w
-        if abs(offset) >= max_offset_w - 0.5:
+        if abs(self._last_theoretical_offset_w) >= max_offset_w - 0.5:
             return "capped"
-        if offset > 0:
-            return "compensating_import"
-        if offset < 0:
-            return "compensating_export"
+
+        if self._last_theoretical_offset_w != 0:
+            return "compensating_import" if self._last_theoretical_offset_w > 0 else "compensating_export"
+            
         return "idle"

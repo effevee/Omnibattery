@@ -971,7 +971,8 @@
           "out_of_slot": "Außerhalb des Zeitfensters",
           "capped": "Begrenzt",
           "compensating_import": "Import-Kompensation",
-          "compensating_export": "Export-Kompensation"
+          "compensating_export": "Export-Kompensation",
+          "compensation_stopped": "Kompensation Gestoppt"
         }
       }
     },

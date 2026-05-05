@@ -70,10 +70,10 @@ class _HourlyBalanceBase(SensorEntity):
 # ---------------------------------------------------------------------------
 
 class HourlyNetEnergySensor(_HourlyBalanceBase):
-    """Current hour net energy (import − export) in Wh."""
+    """Current hour net energy in kWh. Positive = net export, negative = net import."""
 
     _attr_translation_key = "hourly_net_energy"
-    _attr_native_unit_of_measurement = "Wh"
+    _attr_native_unit_of_measurement = "kWh"
     _attr_device_class = SensorDeviceClass.ENERGY
     _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_icon = "mdi:scale-balance"
@@ -84,8 +84,7 @@ class HourlyNetEnergySensor(_HourlyBalanceBase):
 
     @property
     def native_value(self) -> float | None:
-        status = self._mgr.get_status_dict()
-        return status["net_wh"]
+        return self._mgr.get_status_dict()["net_kwh"]
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
@@ -135,8 +134,8 @@ class HourlyBalanceStatusSensor(_HourlyBalanceBase):
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         status = self._mgr.get_status_dict()
-        return {
-            "net_wh": status["net_wh"],
+        attrs = {
+            "net_kwh": status["net_kwh"],
             "imp_wh": status["imp_wh"],
             "exp_wh": status["exp_wh"],
             "elapsed_min": status["elapsed_min"],
@@ -147,3 +146,6 @@ class HourlyBalanceStatusSensor(_HourlyBalanceBase):
             "hour_iso": status["hour_iso"],
             "history": status["history"],
         }
+        if status["charge_block_reason"]:
+            attrs["charge_block_reason"] = status["charge_block_reason"]
+        return attrs

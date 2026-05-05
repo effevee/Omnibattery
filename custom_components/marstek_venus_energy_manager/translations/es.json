@@ -971,7 +971,8 @@
           "out_of_slot": "Fuera de Franja",
           "capped": "Limitado",
           "compensating_import": "Compensando Importación",
-          "compensating_export": "Compensando Exportación"
+          "compensating_export": "Compensando Exportación",
+          "compensation_stopped": "Compensación Detenida"
         }
       }
     },
