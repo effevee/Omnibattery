@@ -2128,8 +2128,8 @@ class ChargeDischargeController:
         """Parse CKW (Switzerland) price attributes.
 
         Expected format in 'prices':
-            [{"start": "2026-03-27T00:00+01:00", "end": "2026-03-27T00:15+01:00", "price": 24.02}, ...]
-        96 slots per day (15-minute intervals). Prices in CHF.
+            [{"start": "2026-03-27T00:00+01:00", "end": "2026-03-27T00:15+01:00", "price": 0.2402}, ...]
+        96 slots per day (15-minute intervals). Prices in CHF/kWh.
         Returns list[PriceSlot] in local time.
         """
         from homeassistant.util import dt as dt_util
@@ -2162,7 +2162,7 @@ class ChargeDischargeController:
     def _get_price_unit(self) -> str:
         """Return the price unit label for the configured integration."""
         if self.price_integration_type == PRICE_INTEGRATION_CKW:
-            return "Rp/kWh"
+            return "CHF/kWh"
         return "€/kWh"
 
     def _parse_price_data(self) -> list:
@@ -3365,11 +3365,32 @@ class ChargeDischargeController:
         if mode == PREDICTIVE_MODE_DYNAMIC_PRICING:
             if not self.dp_price_discharge_control or not self.price_sensor:
                 return
-            threshold = (
-                self._dp_daily_avg_price
-                if self._dp_daily_avg_price is not None
-                else self.max_price_threshold
-            )
+            # Short-circuit: if we are inside a selected cheap slot, the slot was
+            # already identified as the cheapest window during evaluation.  Block
+            # discharge unconditionally rather than relying on a floating-point
+            # price comparison that can fail when threshold ≈ current_price (e.g.
+            # CKW sensor exposes only end-of-day slots all at the same price, making
+            # _dp_daily_avg_price == sensor state exactly, so tiny precision
+            # differences between the prices attribute and the entity state flip
+            # current_price > threshold to True and leave the flag unset).
+            # Override bypasses slot-based logic, so skip the short-circuit.
+            if (
+                self._dynamic_pricing_schedule is not None
+                and not self.predictive_charging_overridden
+                and self._is_in_dynamic_pricing_slot()
+            ):
+                self._price_based_discharge_blocked = True
+                _LOGGER.debug(
+                    "Price-based discharge BLOCKED (inside selected DP cheap slot, mode=%s)",
+                    mode,
+                )
+                return
+            # Outside selected slots: use max_price_threshold as discharge boundary,
+            # matching the RT price mode semantics — discharge is blocked whenever
+            # the current price is below the user-configured charging threshold.
+            # _dp_daily_avg_price was used before but caused discharge to be allowed
+            # when price < max_price_threshold yet > daily_avg (e.g. mid-range hours).
+            threshold = self.max_price_threshold
         elif mode == PREDICTIVE_MODE_REALTIME_PRICE:
             if not self.rt_price_discharge_control or not self.price_sensor:
                 return
