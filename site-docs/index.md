@@ -42,6 +42,7 @@
 - **Weekly full charge**: charges to 100% once a week for cell balancing.
 - **Cell balance monitor**: measures the voltage spread between the strongest and weakest cell after each full charge; tracks imbalance trends over time, sends alerts for moderate or high imbalance, and blocks discharge during the open-circuit voltage rest period.
 - **Solar charge delay**: postpones morning battery charging (both solar and grid) while expected solar production is enough to cover the remaining energy needed.
+- **Hourly net balance**: adjusts the PD setpoint continuously to keep hourly net grid energy at a configurable target (default: net zero per hour). Supports external net balance sensors and composes cleanly with all other features via the setpoint registry.
 - **Load exclusion**: exclude high-power devices (e.g. EV chargers) so the controller does not try to compensate their consumption.
 - **Proactive alarm notifications (v2 batteries only)**: monitors battery fault and alarm registers every 5 seconds and sends a Home Assistant notification the moment a new condition is detected, with the exact fault or alarm name. A system-level `System Alarm Status` sensor (`OK` / `Warning` / `Fault`) provides an at-a-glance view across all batteries.
 
