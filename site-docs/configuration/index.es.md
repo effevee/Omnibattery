@@ -34,3 +34,5 @@ flowchart TD
 
 Una vez instalada, puedes modificar cualquier parámetro en:
 **Ajustes → Dispositivos y servicios → Marstek Venus Energy Manager → Configurar**
+
+![Reconfigure Marstek Venus Energy Manager](../assets/screenshots/configuration/reconfigure-marstek-venus-energy-manager.png){ width="650" style="display: block; margin: 0 auto;"}

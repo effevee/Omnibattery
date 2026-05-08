@@ -145,6 +145,10 @@ async def async_setup_entry(
     from . import balance_sensors as _balance_sensors
     await _balance_sensors.async_setup_entry(hass, entry, async_add_entities)
 
+    # Hourly balance sensors
+    from . import hourly_balance_sensors as _hourly_balance_sensors
+    await _hourly_balance_sensors.async_setup_entry(hass, entry, async_add_entities)
+
 
 class MarstekVenusSensor(CoordinatorEntity, SensorEntity):
     """Representation of a Marstek Venus sensor."""
@@ -748,6 +752,21 @@ class IntegrationStatusSensor(SensorEntity):
         elif prev_power < 0:
             return "discharging"
         return "balanced"
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        """Return setpoint offset details for diagnostics."""
+        c = self._controller
+        attrs = {
+            "setpoint_active": c.compute_active_target(),
+        }
+        offsets = dict(c._setpoint_offsets)
+        if offsets:
+            attrs["setpoint_offsets"] = offsets
+        overrides = {k: v[1] for k, v in c._setpoint_overrides.items()}
+        if overrides:
+            attrs["setpoint_overrides"] = overrides
+        return attrs
 
     @property
     def device_info(self):

@@ -33,9 +33,7 @@ Only present when the [cell balance monitor](../features/cell-balance-monitor.md
 | `sensor.*_delta_avg_4w` | Rolling average of the last 4 formal readings | mV |
 
 ## Device information sensors
-## Device information sensors
 
-| Entity | Description |
 | Entity | Description |
 |---|---|
 | `sensor.*_device_name` | Device name |
@@ -50,9 +48,7 @@ Only present when the [cell balance monitor](../features/cell-balance-monitor.md
 | `sensor.*_mac_address` | MAC address |
 
 ## Binary sensors
-## Binary sensors
 
-| Entity | Description |
 | Entity | Description |
 |---|---|
 | `binary_sensor.*_wifi_status` | WiFi status |
@@ -63,9 +59,7 @@ Only present when the [cell balance monitor](../features/cell-balance-monitor.md
 | `binary_sensor.marstek_venus_system_predictive_charging_active` | Predictive charging active (system) |
 
 ## Numbers (sliders)
-## Numbers (sliders)
 
-| Entity | Description | Range |
 | Entity | Description | Range |
 |---|---|---|
 | `number.*_max_soc` | Maximum SOC | 0–100 % |
@@ -78,9 +72,7 @@ Only present when the [cell balance monitor](../features/cell-balance-monitor.md
 | `number.*_max_discharge_power` | Max discharge power | W |
 
 ## Selects
-## Selects
 
-| Entity | Options |
 | Entity | Options |
 |---|---|
 | `select.*_force_mode` | None / Charge / Discharge |
@@ -139,5 +131,4 @@ Available under the `sensor.marstek_venus_system_*` prefix, summing values acros
 - `system_alarm_status` — Aggregated alarm state across all batteries (`OK` / `Warning` / `Fault`); attributes list active conditions per battery
 - `household_energy_today` — Today's household energy consumption accumulated from the optional household power sensor, during the solar+battery window (kWh). Only present when a household consumption sensor is configured. Resets at midnight.
 
-![Entity list in Home Assistant](../assets/screenshots/reference/entities-list.png){ width="700"  style="display: block; margin: 0 auto;"}
 ![Entity list in Home Assistant](../assets/screenshots/reference/entities-list.png){ width="700"  style="display: block; margin: 0 auto;"}
