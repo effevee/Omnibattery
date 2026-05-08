@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.7.6] - 2026-05-08
+
+### Fixed
+- **Multi-battery selection oscillates near the activation threshold**: The previous hysteresis logic only guarded deactivation (removing the last added battery if power dropped slightly below threshold), but had no guard on activation. In practice this caused batteries to rapidly turn on and off when load hovered near the crossover point. Replaced with a symmetric deadband: **Case A** (deactivation) — a previously-active battery dropped by the greedy loop is re-added unless power has fallen clearly below `activation_threshold − hysteresis_gap`; **Case B** (activation) — a newly-added battery is removed again unless power has risen clearly above `activation_threshold + hysteresis_gap`. Both cases cover all batteries in `previous_active`, not just the last one selected.
+
 ## [1.7.5] - 2026-05-08
 
 ### Added
