@@ -90,8 +90,14 @@ from .const import (
     MULTI_BATTERY_HYSTERESIS_GAP,
     MULTI_BATTERY_MIN_ACTIVATION,
     MULTI_BATTERY_MAX_ACTIVATION,
+    CONF_ENABLE_HOURLY_BALANCE,
+    CONF_HOURLY_BALANCE_TARGET_NET_WH,
+    CONF_HOURLY_BALANCE_MAX_OFFSET_W,
+    DEFAULT_HOURLY_BALANCE_TARGET_NET_WH,
+    DEFAULT_HOURLY_BALANCE_MAX_OFFSET_W,
 )
 from .coordinator import MarstekVenusDataUpdateCoordinator
+from .hourly_balance import HourlyBalanceManager
 from .non_responsive_tracker import NonResponsiveTracker
 from .weekly_full_charge import WeeklyFullChargeManager
 
@@ -258,6 +264,14 @@ class ChargeDischargeController:
         # Manual mode state
         self.manual_mode_enabled = config_entry.data.get(CONF_MANUAL_MODE_ENABLED, False)
 
+        # Setpoint offset registry (reference = 0 W grid flow)
+        # - Additive offsets: summed to form the base target
+        # - Absolute overrides: highest priority wins, replaces additive sum
+        self._setpoint_offsets: dict[str, float] = {
+            "user_target": self.target_grid_power,  # user's preference from config
+        }
+        self._setpoint_overrides: dict[str, tuple[int, float]] = {}  # source → (priority, value_w)
+
         # Capacity Protection Mode state
         self.capacity_protection_enabled = config_entry.data.get(CONF_CAPACITY_PROTECTION_ENABLED, False)
         self.capacity_protection_soc_threshold = config_entry.data.get(CONF_CAPACITY_PROTECTION_SOC_THRESHOLD, DEFAULT_CAPACITY_PROTECTION_SOC)
@@ -297,6 +311,13 @@ class ChargeDischargeController:
         self._predictive_safety_margin_kwh: float = config_entry.data.get(CONF_PREDICTIVE_SAFETY_MARGIN_KWH, DEFAULT_PREDICTIVE_SAFETY_MARGIN_KWH)
         self._charge_delay_unlocked = False       # True when delay has been unlocked today
         self._balance_monitor = None  # Set from async_setup_entry after monitor is created
+
+        # Hourly Net Balance
+        self.hourly_balance_enabled = config_entry.data.get(CONF_ENABLE_HOURLY_BALANCE, False)
+        self._hourly_balance_mgr: HourlyBalanceManager | None = (
+            HourlyBalanceManager(hass, config_entry, self)
+            if self.hourly_balance_enabled else None
+        )
         self._charge_delay_last_date = None       # For daily reset
         self._charge_delay_forecast_cache = None  # Last forecast value used for balance check
         self._charge_delay_balance_needs_charge = True  # Cached balance result (conservative default)
@@ -359,6 +380,9 @@ class ChargeDischargeController:
                      self.capacity_protection_soc_threshold,
                      self.capacity_protection_limit)
 
+        _LOGGER.info("Hourly Net Balance: %s",
+                     "ENABLED" if self.hourly_balance_enabled else "DISABLED")
+
     def update_pd_parameters(self):
         """Re-read PD controller parameters from config_entry.data (hot-reload)."""
         # Update weekly full charge settings; reset completion state if day changed
@@ -387,6 +411,7 @@ class ChargeDischargeController:
         self.min_charge_power = self.config_entry.data.get(CONF_PD_MIN_CHARGE_POWER, DEFAULT_PD_MIN_CHARGE_POWER)
         self.min_discharge_power = self.config_entry.data.get(CONF_PD_MIN_DISCHARGE_POWER, DEFAULT_PD_MIN_DISCHARGE_POWER)
         self.target_grid_power = self.config_entry.data.get(CONF_TARGET_GRID_POWER, DEFAULT_TARGET_GRID_POWER)
+        self._setpoint_offsets["user_target"] = self.target_grid_power
         self.max_contracted_power = self.config_entry.data.get(CONF_MAX_CONTRACTED_POWER, 7000)
         self._delay_safety_margin_h = self.config_entry.data.get(CONF_DELAY_SAFETY_MARGIN_MIN, DEFAULT_DELAY_SAFETY_MARGIN_MIN) / 60.0
         self._charge_delay_status["safety_margin_min"] = int(self._delay_safety_margin_h * 60)
@@ -408,6 +433,19 @@ class ChargeDischargeController:
         self.capacity_protection_enabled = self.config_entry.data.get(CONF_CAPACITY_PROTECTION_ENABLED, False)
         self.capacity_protection_soc_threshold = self.config_entry.data.get(CONF_CAPACITY_PROTECTION_SOC_THRESHOLD, DEFAULT_CAPACITY_PROTECTION_SOC)
         self.capacity_protection_limit = self.config_entry.data.get(CONF_CAPACITY_PROTECTION_LIMIT, DEFAULT_CAPACITY_PROTECTION_LIMIT)
+
+        # Hourly balance: ON→OFF cleans up offset; OFF→ON requires integration reload
+        new_hb_enabled = self.config_entry.data.get(CONF_ENABLE_HOURLY_BALANCE, False)
+        if self.hourly_balance_enabled and not new_hb_enabled:
+            self.remove_setpoint_offset("hourly_balance")
+            self._hourly_balance_mgr = None
+            _LOGGER.info("Hourly Net Balance: DISABLED via hot-reload")
+        elif not self.hourly_balance_enabled and new_hb_enabled:
+            _LOGGER.warning(
+                "Hourly Net Balance: enabled — integration reload required to activate sensors"
+            )
+        self.hourly_balance_enabled = new_hb_enabled
+
         _LOGGER.info("PD parameters hot-reloaded: Kp=%.2f, Kd=%.2f, deadband=%d, max_change=%d, hysteresis=%d, min_charge=%d, min_discharge=%d",
                      self.kp, self.kd, self.deadband, self.max_power_change_per_cycle, self.direction_hysteresis, self.min_charge_power, self.min_discharge_power)
 
@@ -747,6 +785,82 @@ class ChargeDischargeController:
     def _balance_monitor_overrides_delay(self) -> bool:
         """Return True when the full-charge-day skip-delay option is active for the current day."""
         return self._balance_monitor_enabled and self._weekly_charge_mgr.is_active()
+
+    # -------------------------------------------------------------------------
+    # Setpoint offset management
+    #
+    # Reference = 0 W (zero grid flow). Two layers:
+    #
+    #   1. Additive offsets (_setpoint_offsets):
+    #      Summed to form the default target.
+    #      Use for preferences that compose with each other.
+    #      Examples:
+    #        "user_target" = -50 W  (slight export preference from config)
+    #        "hourly_balance" = +200 W  (shift to compensate hourly deficit)
+    #
+    #   2. Absolute overrides (_setpoint_overrides):
+    #      Each has a priority (int). When any override is active, the one
+    #      with the highest priority wins and REPLACES the additive sum.
+    #      Use for modes that need full control of the target.
+    #      Examples:
+    #        "capacity_protection" (pri=10) → 2000 W  (peak shaving limit)
+    #        "hourly_balance"      (pri=5)  → -1500 W (compensate surplus)
+    #
+    # Resolution:
+    #   active_target = highest-priority override  (if any override exists)
+    #                 | sum(additive offsets)       (otherwise)
+    # -------------------------------------------------------------------------
+
+    def compute_active_target(self) -> float:
+        """Compute the effective PD target from offsets and overrides."""
+        if self._setpoint_overrides:
+            # Highest priority override wins
+            source, (_, value) = max(self._setpoint_overrides.items(), key=lambda x: x[1][0])
+            return value
+        return sum(self._setpoint_offsets.values())
+
+    def set_setpoint_offset(self, source: str, offset_w: float) -> None:
+        """Register or update an additive offset (summed with others)."""
+        old = self._setpoint_offsets.get(source)
+        self._setpoint_offsets[source] = offset_w
+        if old != offset_w:
+            _LOGGER.debug("Setpoint offset '%s': %s → %.0fW",
+                          source, f"{old:.0f}W" if old is not None else "None", offset_w)
+
+    def remove_setpoint_offset(self, source: str) -> None:
+        """Remove an additive offset. No-op if not present."""
+        removed = self._setpoint_offsets.pop(source, None)
+        if removed is not None:
+            _LOGGER.debug("Setpoint offset '%s' removed (was %.0fW)", source, removed)
+
+    def set_setpoint_override(self, source: str, value_w: float, priority: int = 0) -> None:
+        """Register an absolute override. Highest priority wins over all offsets."""
+        old = self._setpoint_overrides.get(source)
+        self._setpoint_overrides[source] = (priority, value_w)
+        old_str = f"{old[1]:.0f}W (pri={old[0]})" if old else "None"
+        _LOGGER.debug("Setpoint override '%s': %s → %.0fW (pri=%d)",
+                      source, old_str, value_w, priority)
+
+    def remove_setpoint_override(self, source: str) -> None:
+        """Remove an absolute override. No-op if not present."""
+        removed = self._setpoint_overrides.pop(source, None)
+        if removed is not None:
+            _LOGGER.debug("Setpoint override '%s' removed (was %.0fW, pri=%d)",
+                          source, removed[1], removed[0])
+
+    def get_setpoint_offset(self, source: str) -> float:
+        """Return the current additive offset for *source*, or 0.0 if not set."""
+        return self._setpoint_offsets.get(source, 0.0)
+
+    def clear_all_setpoint_offsets(self) -> None:
+        """Remove all additive offsets and overrides."""
+        if self._setpoint_offsets:
+            _LOGGER.debug("Clearing all setpoint offsets: %s", dict(self._setpoint_offsets))
+            self._setpoint_offsets.clear()
+        if self._setpoint_overrides:
+            _LOGGER.debug("Clearing all setpoint overrides: %s",
+                          {k: v[1] for k, v in self._setpoint_overrides.items()})
+            self._setpoint_overrides.clear()
 
     def _is_charge_delayed(self) -> bool:
         """Unified gate: check if charging should be delayed based on solar forecast.
@@ -3589,7 +3703,7 @@ class ChargeDischargeController:
         # Use moving average to smooth out instantaneous spikes
         sensor_filtered = sum(self.sensor_history) / len(self.sensor_history) if self.sensor_history else sensor_raw
 
-        active_target = self.target_grid_power
+        active_target = self.compute_active_target()
         min_charge = self.min_charge_power
         min_discharge = self.min_discharge_power
 
@@ -3732,9 +3846,16 @@ class ChargeDischargeController:
         _LOGGER.debug("ChargeDischargeController: sensor_actual=%fW, UPDATING BATTERIES!",
                       sensor_actual)
         
+        # HOURLY NET BALANCE: Update setpoint offset based on current-hour net energy.
+        # Runs before capacity protection so the offset is already in _setpoint_offsets
+        # when compute_active_target() is called; CP override wins automatically.
+        if self._hourly_balance_mgr is not None:
+            await self._hourly_balance_mgr.async_process()
+            active_target = self.compute_active_target()
+
         # CAPACITY PROTECTION MODE: When enabled and SOC is below threshold,
         # only discharge to cover consumption above the peak limit.
-        # This conserves battery energy for essential peak shaving.
+        # Uses setpoint offset registry so other features can compose with it.
         if self.capacity_protection_enabled:
             coordinators_with_data = [c for c in self.coordinators if c.data]
             if coordinators_with_data:
@@ -3759,7 +3880,8 @@ class ChargeDischargeController:
                         _LOGGER.info("Capacity Protection overriding excluded device adjustment (%.0fW) for peak shaving",
                                     self._excluded_included_adjustment)
                         sensor_actual += self._excluded_included_adjustment
-                    active_target = self.capacity_protection_limit
+                    self.set_setpoint_override("capacity_protection", self.capacity_protection_limit, priority=10)
+                    active_target = self.compute_active_target()
                     _LOGGER.info("Capacity Protection ACTIVE: SOC=%.1f%% < %d%%, house_load=%.0fW > limit=%dW → target=%dW",
                                 avg_soc, self.capacity_protection_soc_threshold,
                                 estimated_house_load, self.capacity_protection_limit, active_target)
@@ -3778,7 +3900,8 @@ class ChargeDischargeController:
                         _LOGGER.info("Capacity Protection overriding excluded device adjustment (%.0fW) for conservation",
                                     self._excluded_included_adjustment)
                         sensor_actual += self._excluded_included_adjustment
-                    active_target = estimated_house_load
+                    self.set_setpoint_override("capacity_protection", estimated_house_load, priority=10)
+                    active_target = self.compute_active_target()
                     _LOGGER.info("Capacity Protection ACTIVE: SOC=%.1f%% < %d%%, house_load=%.0fW ≤ limit=%dW → idle (target=%.0fW)",
                                 avg_soc, self.capacity_protection_soc_threshold,
                                 estimated_house_load, self.capacity_protection_limit, active_target)
@@ -3791,6 +3914,8 @@ class ChargeDischargeController:
                     })
                 else:
                     # Solar surplus: normal charging, but SOC is still below threshold
+                    self.remove_setpoint_override("capacity_protection")
+                    active_target = self.compute_active_target()
                     self._capacity_protection_active = True
                     self._capacity_protection_status.update({
                         "active": True, "avg_soc": round(avg_soc, 1),
@@ -3800,6 +3925,8 @@ class ChargeDischargeController:
                     })
             else:
                 # SOC above threshold: protection not needed
+                self.remove_setpoint_override("capacity_protection")
+                active_target = self.compute_active_target()
                 self._capacity_protection_active = False
                 self._capacity_protection_status.update({
                     "active": False, "avg_soc": round(avg_soc, 1),
@@ -3812,6 +3939,7 @@ class ChargeDischargeController:
             self._capacity_protection_status["soc_threshold"] = self.capacity_protection_soc_threshold
             self._capacity_protection_status["peak_limit"] = self.capacity_protection_limit
         else:
+            self.remove_setpoint_override("capacity_protection")
             self._capacity_protection_active = False
             self._capacity_protection_status["active"] = False
             self._capacity_protection_status["action"] = "disabled"
@@ -4404,6 +4532,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     )
     entry.async_on_unload(unsub_refresh)
 
+    # Set up hourly balance manager if enabled
+    if controller._hourly_balance_mgr is not None:
+        await controller._hourly_balance_mgr.async_setup()
+
     # Set up balance monitor if enabled
     balance_monitor = None
     if entry.data.get(CONF_ENABLE_BALANCE_MONITOR, DEFAULT_ENABLE_BALANCE_MONITOR):
@@ -4552,6 +4684,11 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
         # Disconnect from all coordinators
         await asyncio.gather(*[c.disconnect() for c in coordinators])
+
+        # Persist hourly balance state
+        controller = data.get("controller")
+        if controller and controller._hourly_balance_mgr is not None:
+            await controller._hourly_balance_mgr.async_unload()
 
         if unload_ok:
             hass.data[DOMAIN].pop(entry.entry_id, None)

@@ -78,6 +78,7 @@ plugins:
             Peak shaving: Peak shaving
             Solar charge delay: Retraso de carga solar
             Load exclusion: Exclusión de cargas
+            Hourly net balance: Balance neto horario
             Technical reference: Referencia técnica
             Architecture: Arquitectura
             Modbus registers: Registros Modbus
@@ -140,6 +141,7 @@ nav:
       - Peak shaving: features/peak-shaving.md
       - Solar charge delay: features/solar-charge-delay.md
       - Load exclusion: features/load-exclusion.md
+      - Hourly net balance: features/hourly-net-balance.md
   - Technical reference:
       - Architecture: reference/architecture.md
       - Modbus registers: reference/modbus-registers.md
