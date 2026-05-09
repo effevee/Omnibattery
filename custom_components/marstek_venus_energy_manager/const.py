@@ -32,6 +32,9 @@ MULTI_BATTERY_MIN_ACTIVATION        = 0.50   # floor: never activate below this 
 # Cap at 0.95: stage 5% before single-battery saturation to absorb demand transients,
 # even when efficiency analysis alone would keep a single battery active.
 MULTI_BATTERY_MAX_ACTIVATION        = 0.95
+# Keep additional batteries active long enough to avoid pulsing when bursty loads
+# repeatedly cross the split-load threshold. Refreshed while the split condition holds.
+MULTI_BATTERY_SELECTION_HOLD_CYCLES = 48      # ~2 min at the normal 2.5 s loop
 
 # Version-specific register map for control operations
 # Maps logical register names to physical addresses per battery version

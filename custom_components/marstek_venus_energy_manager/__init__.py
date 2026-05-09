@@ -91,6 +91,7 @@ from .const import (
     MULTI_BATTERY_HYSTERESIS_GAP,
     MULTI_BATTERY_MIN_ACTIVATION,
     MULTI_BATTERY_MAX_ACTIVATION,
+    MULTI_BATTERY_SELECTION_HOLD_CYCLES,
     CONF_ENABLE_HOURLY_BALANCE,
     CONF_HOURLY_BALANCE_TARGET_NET_WH,
     CONF_HOURLY_BALANCE_MAX_OFFSET_W,
@@ -190,6 +191,8 @@ class ChargeDischargeController:
         # Load sharing state: track which batteries were active last cycle
         self._active_discharge_batteries = []
         self._active_charge_batteries = []
+        self._discharge_selection_hold_cycles = {}
+        self._charge_selection_hold_cycles = {}
 
         # Non-responsive battery tracking: excludes batteries that ACK commands but don't deliver power
         self._non_responsive = NonResponsiveTracker()
@@ -1965,15 +1968,19 @@ class ChargeDischargeController:
             if is_charging:
                 self._active_charge_batteries = selected
                 self._active_discharge_batteries = []
+                self._discharge_selection_hold_cycles.clear()
             else:
                 self._active_discharge_batteries = selected
                 self._active_charge_batteries = []
+                self._charge_selection_hold_cycles.clear()
             return selected
 
         # No power requested — clear state and return empty
         if total_power <= 0:
             self._active_discharge_batteries = []
             self._active_charge_batteries = []
+            self._discharge_selection_hold_cycles.clear()
+            self._charge_selection_hold_cycles.clear()
             return list(available_batteries)
 
         crossover_w = (
@@ -1987,6 +1994,10 @@ class ChargeDischargeController:
         previous_active = (
             self._active_charge_batteries if is_charging
             else self._active_discharge_batteries
+        )
+        hold_cycles = (
+            self._charge_selection_hold_cycles if is_charging
+            else self._discharge_selection_hold_cycles
         )
 
         def sort_key(coordinator):
@@ -2065,6 +2076,42 @@ class ChargeDischargeController:
                         selected.pop()
                         combined_capacity -= last_limit
 
+        split_condition_active = len(selected) > 1
+        hold_refreshed = set()
+
+        # Minimum split duration: when the selector decides that more than one
+        # battery should participate, refresh a 2-minute hold for every battery
+        # in the split. If the next PD correction drops below the activation
+        # threshold, the held batteries still remain in the load-sharing set.
+        if split_condition_active:
+            for battery in selected:
+                hold_cycles[battery] = MULTI_BATTERY_SELECTION_HOLD_CYCLES
+                hold_refreshed.add(battery)
+
+        for battery in previous_active:
+            if (
+                battery not in selected
+                and battery in available_batteries
+                and hold_cycles.get(battery, 0) > 0
+            ):
+                selected.append(battery)
+                held_limit = battery.max_charge_power if is_charging else battery.max_discharge_power
+                combined_capacity += held_limit
+                _LOGGER.debug(
+                    "Load sharing [%s]: holding %s active for %d more cycles",
+                    "charge" if is_charging else "discharge",
+                    battery.name,
+                    hold_cycles[battery],
+                )
+
+        for battery in list(hold_cycles):
+            if battery not in selected:
+                hold_cycles.pop(battery, None)
+            elif battery not in hold_refreshed:
+                hold_cycles[battery] -= 1
+                if hold_cycles[battery] <= 0:
+                    hold_cycles.pop(battery, None)
+
         # Log when selection changes
         if set(selected) != set(previous_active):
             mode = "charge" if is_charging else "discharge"
@@ -2080,9 +2127,11 @@ class ChargeDischargeController:
         if is_charging:
             self._active_charge_batteries = list(selected)
             self._active_discharge_batteries = []
+            self._discharge_selection_hold_cycles.clear()
         else:
             self._active_discharge_batteries = list(selected)
             self._active_charge_batteries = []
+            self._charge_selection_hold_cycles.clear()
 
         return selected
 
@@ -4199,6 +4248,7 @@ class ChargeDischargeController:
                 )
                 new_power = 0
                 self._active_discharge_batteries = []
+                operation_restricted = True
 
         # Get available batteries (after checking restrictions to determine correct operation mode)
         available_batteries = self._get_available_batteries(is_charging)
