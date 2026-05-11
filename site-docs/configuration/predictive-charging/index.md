@@ -1,6 +1,6 @@
 # Predictive charging
 
-Predictive charging is an **optional** feature that charges batteries from the grid when the expected energy balance for the following day is negative.
+Predictive charging is an **optional** feature that charges batteries from the grid when the expected energy balance for today is negative.
 
 ## Decision logic
 
