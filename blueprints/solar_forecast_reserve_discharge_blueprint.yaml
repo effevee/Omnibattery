@@ -1,0 +1,222 @@
+blueprint:
+  name: "Marstek Venus - Solar Forecast Reserve Discharge"
+  description: >
+    Keeps a configurable night reserve by disabling automatic discharge when
+    system SOC reaches the reserve target, unless the remaining solar forecast
+    is high enough to recharge the battery from minimum SOC back to that
+    reserve target.
+
+    Typical use:
+    - Keep around 50% SOC overnight for backup and battery health.
+    - In the morning, allow discharge down to the configured minimum SOC only
+      when the remaining solar forecast can refill the reserve.
+    - If the forecast is not enough, stop discharge at the reserve SOC.
+
+    This blueprint controls the Marstek Venus Allow Discharge switches only. It
+    does not write battery Modbus registers or force charge/discharge modes.
+  domain: automation
+  source_url: "https://github.com/ffunes/Marstek-Venus-Energy-Manager/blob/main/blueprints/solar_forecast_reserve_discharge_blueprint.yaml"
+
+  input:
+    allow_discharge_switches:
+      name: "Allow Discharge Switches"
+      description: "Select all Marstek Venus battery Allow Discharge switches that should be controlled."
+      selector:
+        entity:
+          domain: switch
+          multiple: true
+
+    system_soc_sensor:
+      name: "System SOC Sensor"
+      description: "Marstek Venus system SOC sensor."
+      default: sensor.marstek_venus_system_system_soc
+      selector:
+        entity:
+          filter:
+            domain: sensor
+
+    system_total_energy_sensor:
+      name: "System Total Energy Sensor"
+      description: "Marstek Venus system total battery capacity sensor in kWh."
+      default: sensor.marstek_venus_system_system_total_energy
+      selector:
+        entity:
+          filter:
+            domain: sensor
+
+    solar_forecast_energy_sensor:
+      name: "Remaining Solar Forecast Sensor"
+      description: >
+        Sensor with the expected remaining usable solar production in kWh for
+        today. If your forecast integration exposes a full-day forecast, create
+        a template sensor that represents the remaining energy from now.
+      selector:
+        entity:
+          filter:
+            domain: sensor
+
+    minimum_soc_numbers:
+      name: "Minimum SOC Number Entities"
+      description: >
+        Select the Marstek Venus Minimum SOC number entities for the controlled
+        batteries. If multiple entities are selected, the highest configured
+        minimum SOC is used as the safe lower limit.
+      selector:
+        entity:
+          domain: number
+          multiple: true
+
+    reserve_soc_pct:
+      name: "Night Reserve SOC"
+      description: "SOC to preserve when solar forecast is not high enough."
+      default: 50
+      selector:
+        number:
+          min: 5
+          max: 100
+          step: 1
+          unit_of_measurement: "%"
+          mode: box
+
+    release_hysteresis_pct:
+      name: "Reserve Release Hysteresis"
+      description: "After discharge has been blocked, allow discharge again only when SOC rises above reserve plus this hysteresis."
+      default: 3
+      selector:
+        number:
+          min: 0
+          max: 20
+          step: 1
+          unit_of_measurement: "%"
+          mode: box
+
+    forecast_margin_kwh:
+      name: "Forecast Safety Margin"
+      description: >
+        Extra forecast energy required before allowing discharge below the
+        reserve. The calculation already assumes 78% charging efficiency to
+        account for conversion losses.
+      default: 0.5
+      selector:
+        number:
+          min: 0
+          max: 20
+          step: 0.1
+          unit_of_measurement: "kWh"
+          mode: box
+
+    dump_start_time:
+      name: "Forecast Dump Start Time"
+      description: "Earliest time of day when a high solar forecast may allow discharge below the reserve."
+      default: "06:00:00"
+      selector:
+        time:
+
+    dump_end_time:
+      name: "Forecast Dump End Time"
+      description: "Latest time of day when a high solar forecast may allow discharge below the reserve."
+      default: "16:00:00"
+      selector:
+        time:
+
+variables:
+  system_soc_sensor: !input system_soc_sensor
+  system_total_energy_sensor: !input system_total_energy_sensor
+  solar_forecast_energy_sensor: !input solar_forecast_energy_sensor
+  minimum_soc_numbers: !input minimum_soc_numbers
+  reserve_soc_pct: !input reserve_soc_pct
+  release_hysteresis_pct: !input release_hysteresis_pct
+  forecast_margin_kwh: !input forecast_margin_kwh
+  dump_start_time: !input dump_start_time
+  dump_end_time: !input dump_end_time
+  solar_charge_efficiency_pct: 78
+  soc_pct: "{{ states(system_soc_sensor) | float(0) }}"
+  capacity_kwh: "{{ states(system_total_energy_sensor) | float(0) }}"
+  forecast_kwh: "{{ states(solar_forecast_energy_sensor) | float(0) }}"
+  minimum_soc_pct: >
+    {% set ns = namespace(values=[]) %}
+    {% for entity in expand(minimum_soc_numbers) %}
+      {% if is_number(entity.state) %}
+        {% set ns.values = ns.values + [entity.state | float(0)] %}
+      {% endif %}
+    {% endfor %}
+    {{ ns.values | max if ns.values | count > 0 else 0 }}
+  reserve_gap_pct: "{{ [reserve_soc_pct | float(0) - minimum_soc_pct | float(0), 0] | max }}"
+  required_solar_kwh: >
+    {% set efficiency = solar_charge_efficiency_pct | float(78) %}
+    {{ (((reserve_gap_pct | float(0)) / 100) * (capacity_kwh | float(0)) / (efficiency / 100)
+       + (forecast_margin_kwh | float(0))) | round(2) }}
+  release_soc_pct: "{{ [reserve_soc_pct | float(0) + release_hysteresis_pct | float(0), 100] | min }}"
+
+trigger:
+  - platform: homeassistant
+    event: start
+    id: homeassistant_start
+  - platform: time_pattern
+    minutes: "/15"
+    id: periodic_check
+  - platform: state
+    entity_id: !input system_soc_sensor
+    id: soc_changed
+  - platform: state
+    entity_id: !input system_total_energy_sensor
+    id: capacity_changed
+  - platform: state
+    entity_id: !input solar_forecast_energy_sensor
+    id: forecast_changed
+  - platform: state
+    entity_id: !input minimum_soc_numbers
+    id: minimum_soc_changed
+
+condition: []
+
+mode: restart
+
+action:
+  - choose:
+      - alias: "Allow discharge below reserve when remaining solar can refill it"
+        conditions:
+          - condition: template
+            value_template: >
+              {% set start = today_at(dump_start_time) %}
+              {% set end = today_at(dump_end_time) %}
+              {% set in_dump_window = (start <= now() <= end) if start <= end else (now() >= start or now() <= end) %}
+              {{ is_number(states(system_soc_sensor))
+                 and is_number(states(system_total_energy_sensor))
+                 and is_number(states(solar_forecast_energy_sensor))
+                 and (capacity_kwh | float(0)) > 0
+                 and (minimum_soc_numbers | count) > 0
+                 and in_dump_window
+                 and (forecast_kwh | float(0)) >= (required_solar_kwh | float(0)) }}
+        sequence:
+          - service: switch.turn_on
+            target:
+              entity_id: !input allow_discharge_switches
+
+      - alias: "Allow normal discharge after SOC recovers above the reserve hysteresis"
+        conditions:
+          - condition: template
+            value_template: >
+              {{ is_number(states(system_soc_sensor))
+                 and (soc_pct | float(0)) >= (release_soc_pct | float(0)) }}
+        sequence:
+          - service: switch.turn_on
+            target:
+              entity_id: !input allow_discharge_switches
+
+      - alias: "Block discharge at reserve or when required sensor data is invalid"
+        conditions:
+          - condition: template
+            value_template: >
+              {{ not is_number(states(system_soc_sensor))
+                 or not is_number(states(system_total_energy_sensor))
+                 or not is_number(states(solar_forecast_energy_sensor))
+                 or (capacity_kwh | float(0)) <= 0
+                 or (minimum_soc_numbers | count) == 0
+                 or (soc_pct | float(0)) <= (reserve_soc_pct | float(0)) }}
+        sequence:
+          - service: switch.turn_off
+            target:
+              entity_id: !input allow_discharge_switches
+
+    default: []

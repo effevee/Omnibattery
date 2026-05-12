@@ -335,6 +335,10 @@ class ChargeDischargeController:
         self._predictive_safety_margin_kwh: float = config_entry.data.get(CONF_PREDICTIVE_SAFETY_MARGIN_KWH, DEFAULT_PREDICTIVE_SAFETY_MARGIN_KWH)
         self._charge_delay_unlocked = False       # True when delay has been unlocked today
         self._delay_setpoint_reached = False      # True once SOC first reached the setpoint
+        self._charge_delay_store: Store = Store(
+            hass, 1, f"{DOMAIN}.{config_entry.entry_id}.charge_delay_state"
+        )
+        self._charge_delay_save_task: asyncio.Task | None = None
         self._balance_monitor = None  # Set from async_setup_entry after monitor is created
 
         # Hourly Net Balance
@@ -407,6 +411,62 @@ class ChargeDischargeController:
 
         _LOGGER.info("Hourly Net Balance: %s",
                      "ENABLED" if self.hourly_balance_enabled else "DISABLED")
+
+    async def load_charge_delay_state(self) -> None:
+        """Restore same-day charge delay latch state from storage."""
+        if not self.charge_delay_enabled:
+            return
+
+        try:
+            data = await self._charge_delay_store.async_load()
+            if not data:
+                return
+
+            today_iso = dt_util.now().date().isoformat()
+            if data.get("date") != today_iso:
+                return
+
+            self._charge_delay_unlocked = data.get("delay_unlocked", False)
+            self._delay_setpoint_reached = data.get("delay_setpoint_reached", False)
+            if data.get("solar_t_start") is not None:
+                self._solar_t_start = data.get("solar_t_start")
+
+            _LOGGER.info(
+                "Charge Delay: restored state - unlocked=%s, setpoint_reached=%s",
+                self._charge_delay_unlocked,
+                self._delay_setpoint_reached,
+            )
+        except Exception as exc:
+            _LOGGER.error("Charge Delay: failed to load persisted state: %s", exc)
+
+    def _schedule_charge_delay_state_save(self) -> None:
+        """Persist charge delay latch state without blocking the control loop."""
+        if not self.charge_delay_enabled:
+            return
+
+        if self._charge_delay_save_task and not self._charge_delay_save_task.done():
+            self._charge_delay_save_task.cancel()
+        self._charge_delay_save_task = asyncio.create_task(
+            self._deferred_save_charge_delay_state()
+        )
+
+    async def _deferred_save_charge_delay_state(self) -> None:
+        """Let the current control-cycle state settle before saving."""
+        await asyncio.sleep(0)
+        await self._save_charge_delay_state()
+
+    async def _save_charge_delay_state(self) -> None:
+        """Save charge delay latch state to persistent storage."""
+        try:
+            await self._charge_delay_store.async_save({
+                "date": dt_util.now().date().isoformat(),
+                "delay_unlocked": self._charge_delay_unlocked,
+                "delay_setpoint_reached": self._delay_setpoint_reached,
+                "solar_t_start": self._solar_t_start,
+                "timestamp": dt_util.now().isoformat(),
+            })
+        except Exception as exc:
+            _LOGGER.error("Charge Delay: failed to save persisted state: %s", exc)
 
     def _configured_system_limit(self, is_charging: bool) -> int:
         """Return the optional system-wide power limit for the direction.
@@ -1212,6 +1272,18 @@ class ChargeDischargeController:
             return value
         return sum(self._setpoint_offsets.values())
 
+    def compute_active_target_excluding(self, excluded_source: str) -> float:
+        """Compute the active target while ignoring one override source."""
+        overrides = {
+            source: override
+            for source, override in self._setpoint_overrides.items()
+            if source != excluded_source
+        }
+        if overrides:
+            source, (_, value) = max(overrides.items(), key=lambda x: x[1][0])
+            return value
+        return sum(self._setpoint_offsets.values())
+
     def set_setpoint_offset(self, source: str, offset_w: float) -> None:
         """Register or update an additive offset (summed with others)."""
         old = self._setpoint_offsets.get(source)
@@ -1275,6 +1347,11 @@ class ChargeDischargeController:
         else:
             avg_soc = 100  # Assume full if no data, don't activate protection
 
+        # Use the non-capacity-protection target for decisions. The previous
+        # cycle's capacity_protection override may still be registered here; if
+        # we compare against it, normal below-limit import can be mistaken for
+        # solar surplus and the controller starts a short discharge/stop loop.
+        active_target = self.compute_active_target_excluding("capacity_protection")
         original_target = active_target
 
         if avg_soc < self.capacity_protection_soc_threshold:
@@ -1417,10 +1494,12 @@ class ChargeDischargeController:
                     self._charge_delay_status["state"] = "Charging to setpoint"
                     return False
                 self._delay_setpoint_reached = True
+                self._schedule_charge_delay_state_save()
             else:
                 low_threshold = self._delay_soc_setpoint - DELAY_SOC_SETPOINT_HYSTERESIS
                 if min_soc < low_threshold:
                     self._delay_setpoint_reached = False
+                    self._schedule_charge_delay_state_save()
                     self._charge_delay_status["state"] = "Charging to setpoint"
                     return False
 
@@ -1430,6 +1509,7 @@ class ChargeDischargeController:
 
         # Delay conditions no longer met - unlock permanently for today
         self._charge_delay_unlocked = True
+        self._schedule_charge_delay_state_save()
         _LOGGER.info("Charge Delay: Unlocked (target_soc=%d%%) - charging now allowed", target_soc)
         # Persist unlock state if on weekly charge day
         if self._weekly_charge_mgr.is_active():
@@ -4174,23 +4254,26 @@ class ChargeDischargeController:
             self.remove_discharge_block("price_discharge")
             return
 
-        # Reactive per-cycle price check. DP uses the daily slot average when
-        # available; RT uses only the configured threshold/average sensor.
+        # Reactive per-cycle price check. DP uses the configured fixed threshold
+        # when present, otherwise the daily slot average. RT keeps its explicit
+        # average-sensor vs fixed-threshold behaviour.
         # DP no longer relies on selected_slots membership for the
         # discharge decision — the slot list governs grid-charging only.
         # This eliminates the post-restart and post-midnight blind windows
         # where _dynamic_pricing_schedule is None.
         threshold = None
-        if self.average_price_sensor:
+        if mode == PREDICTIVE_MODE_DYNAMIC_PRICING:
+            threshold = self.max_price_threshold
+            if threshold is None:
+                threshold = self._dp_daily_avg_price
+        elif self.average_price_sensor:
             avg_state = self.hass.states.get(self.average_price_sensor)
             if avg_state is not None:
                 try:
                     threshold = float(avg_state.state)
                 except (ValueError, TypeError):
                     pass
-        if threshold is None and mode == PREDICTIVE_MODE_DYNAMIC_PRICING:
-            threshold = self._dp_daily_avg_price
-        if threshold is None:
+        if threshold is None and mode == PREDICTIVE_MODE_REALTIME_PRICE:
             threshold = self.max_price_threshold
 
         if threshold is None:
@@ -4305,6 +4388,7 @@ class ChargeDischargeController:
                     self._charge_delay_status["safety_margin_min"] = saved_margin
                 self._charge_delay_forecast_cache = None
                 self._charge_delay_balance_needs_charge = True
+                self._schedule_charge_delay_state_save()
                 _LOGGER.info("Charge Delay: New day - state reset")
             # Detect solar production start (shared with weekly charge)
             self._consumption_tracker.detect_solar_t_start()
@@ -5169,6 +5253,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     # Restore weekly charge completion state from previous session
     await controller._weekly_charge_mgr.load_state()
+    await controller.load_charge_delay_state()
     # Restore solar T_start if not already restored by weekly charge state (date-based check)
     if controller._solar_t_start is None:
         await consumption_tracker.load_solar_t_start()

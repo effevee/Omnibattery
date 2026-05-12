@@ -8,7 +8,9 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from homeassistant.util import dt as dt_util
 
 from .const import (
     DOMAIN,
@@ -463,7 +465,7 @@ class WeeklyFullChargeSensor(SensorEntity):
         }
 
 
-class ChargeDelaySensor(SensorEntity):
+class ChargeDelaySensor(RestoreEntity, SensorEntity):
     """Sensor showing estimated charge start time for the unified charge delay.
 
     Shows the estimated unlock time as HH:MM or current delay status.
@@ -481,6 +483,32 @@ class ChargeDelaySensor(SensorEntity):
         self._attr_icon = "mdi:clock-alert-outline"
         self._attr_entity_category = EntityCategory.DIAGNOSTIC
         self._attr_should_poll = True
+
+    async def async_added_to_hass(self) -> None:
+        """Restore same-day charge-delay latch state after integration reload."""
+        await super().async_added_to_hass()
+
+        last_state = await self.async_get_last_state()
+        if last_state is None:
+            return
+
+        same_day = (
+            dt_util.as_local(last_state.last_updated).date()
+            == dt_util.now().date()
+        )
+        if not same_day:
+            return
+
+        if (
+            self._controller._delay_soc_setpoint_enabled
+            and last_state.state in ("delayed", "waiting_for_solar", "charging_allowed")
+        ):
+            self._controller._delay_setpoint_reached = True
+            _LOGGER.info("Charge Delay: restored SOC setpoint latch from previous state %s", last_state.state)
+
+        if last_state.state == "charging_allowed":
+            self._controller._charge_delay_unlocked = True
+            _LOGGER.info("Charge Delay: restored same-day unlock state after reload")
 
     @property
     def native_value(self) -> str:
@@ -936,7 +964,11 @@ class IntegrationStatusSensor(SensorEntity):
             # Skip "charging_to_setpoint" if the controller is actively
             # discharging: _is_charge_delayed() is not called during discharge
             # so this state can be stale.
-            if delay_state == "Charging to setpoint" and c.previous_power >= 0:
+            if (
+                delay_state == "Charging to setpoint"
+                and c.previous_power >= 0
+                and not getattr(c, "_capacity_protection_active", False)
+            ):
                 return "charging_to_setpoint"
 
         # Priority 5: Operational restrictions and feature overrides

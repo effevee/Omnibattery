@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.8.1] - 2026-05-12
+
+### ⚠️ Breaking Change — Dynamic Pricing discharge threshold priority
+When price-based discharge control is enabled, a configured `max_price_threshold` now acts as the discharge threshold. If it is empty, Dynamic Pricing falls back to the automatically calculated daily average. The setup/options help text and documentation were updated to describe this priority clearly.
+
+### Added
+- **Solar forecast reserve discharge blueprint**: Added an optional blueprint that controls the per-battery Allow Discharge switches so the system keeps a configurable night reserve (for example 50 % SOC) unless the remaining solar forecast is high enough to recharge from minimum SOC back to that reserve. This lets users dump energy in the morning when solar production is expected while preserving backup capacity and a healthier overnight SOC when the forecast is weak.
+
+### Fixed
+- **Peak shaving conserving-mode discharge loop**: Peak shaving now evaluates conserving decisions against the base PD target without reusing its previous capacity-protection override. This prevents below-limit household load from being misclassified as solar surplus and causing short discharge/stop cycles.
+- **Charge delay SOC setpoint latch survives integration reloads**: The charge-delay setpoint hysteresis state is now persisted and restored for the same day. Reloading the integration no longer resets `_delay_setpoint_reached` to `False` and re-enters "Charging to setpoint" when SOC is still above the hysteresis resume threshold. The Charge Delay diagnostic sensor also restores its same-day latch/unlock state as a fallback.
+
 ## [1.8.0] - 2026-05-11
 
 ### Added
@@ -16,7 +28,7 @@
 ### Fixed
 - **Peak shaving conserving mode no longer sends discharge commands below the peak limit**: When SOC is below the peak-shaving threshold but the estimated house load is still below the configured peak limit, the controller now targets the current grid level and immediately stops any existing discharge command. This prevents the battery from trying to discharge during normal consumption and being incorrectly marked as non-responsive.
 - **Dynamic-price unit guidance and CKW parser compatibility**: Setup/options help text now asks for thresholds in the real sensor scale (`€/kWh` for Nordpool/PVPC, `CHF/kWh` for CKW), avoiding the old cent/Rappen guidance. The CKW slot parser also accepts CKW-derived entries that expose the total price as `value` or `integrated` in addition to `price`, without converting from Rappen.
-- **CKW price-based discharge block in Dynamic Pricing**: The discharge blocker no longer reads CKW's all-prices sensor state as the current price. That sensor may expose the number of slots (for example `96`) as its state and the real 15-minute prices in the `prices` attribute, so the blocker now derives the active slot price from `prices`. Dynamic Pricing also uses the daily slot average as the discharge threshold when no explicit average-price sensor is configured.
+- **CKW price-based discharge block in Dynamic Pricing**: The discharge blocker no longer reads CKW's all-prices sensor state as the current price. That sensor may expose the number of slots (for example `96`) as its state and the real 15-minute prices in the `prices` attribute, so the blocker now derives the active slot price from `prices`. Dynamic Pricing uses the configured max price threshold for discharge blocking when present, otherwise it uses the daily slot average.
 
 ## [1.7.6] - 2026-05-09
 
