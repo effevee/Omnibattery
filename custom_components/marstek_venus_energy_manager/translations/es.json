@@ -62,7 +62,7 @@
           "enable_charge_hysteresis": "Evita que la batería cargue cuando está cerca del SOC máximo",
           "charge_hysteresis_percent": "La batería no cargará hasta que el SOC baje a (max_soc - histéresis). Ej: SOC max 100% con 5% histéresis = no carga hasta 95%",
           "backup_offgrid_threshold": "Una carga offgrid superior a este valor se considera un evento de backup activo, excluyendo la batería del control PD. Auméntalo si tienes cargas permanentes (router, cámaras) en el puerto offgrid.",
-          "full_charge_voltage_taper_enabled": "Cuando el objetivo es 100%, limita la carga a 100 W desde 3.45 V de celda maxima y para en 3.55 V para la medicion/descarga final.",
+          "full_charge_voltage_taper_enabled": "Cuando el objetivo es 100%, limita la carga a 95 W desde 3.48 V de celda maxima y para en 3.58 V para medir el desbalanceo tras 60 segundos.",
           "active_balance_mode_enabled": "Activa el modo de balanceo activo en esta batería. Mientras esté ON la batería queda excluida del control PD normal al llegar a la tensión de balanceo. El switch se apaga automáticamente cuando el delta de celdas es igual o menor a 0.03 V tras la descarga final."
         }
       },
@@ -422,7 +422,7 @@
           "enable_charge_hysteresis": "Evita que la batería cargue cuando está cerca del SOC máximo",
           "charge_hysteresis_percent": "La batería no cargará hasta que el SOC baje a (max_soc - histéresis). Ej: SOC max 100% con 5% histéresis = no carga hasta 95%",
           "backup_offgrid_threshold": "Una carga offgrid superior a este valor se considera un evento de backup activo, excluyendo la batería del control PD. Auméntalo si tienes cargas permanentes (router, cámaras) en el puerto offgrid.",
-          "full_charge_voltage_taper_enabled": "Cuando el objetivo es 100%, limita la carga a 100 W desde 3.45 V de celda maxima y para en 3.55 V para la medicion/descarga final.",
+          "full_charge_voltage_taper_enabled": "Cuando el objetivo es 100%, limita la carga a 95 W desde 3.48 V de celda maxima y para en 3.58 V para medir el desbalanceo tras 60 segundos.",
           "active_balance_mode_enabled": "Activa el modo de balanceo activo en esta batería. Mientras esté ON la batería queda excluida del control PD normal al llegar a la tensión de balanceo. El switch se apaga automáticamente cuando el delta de celdas es igual o menor a 0.03 V tras la descarga final."
         }
       },

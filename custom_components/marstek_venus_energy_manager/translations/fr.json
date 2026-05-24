@@ -50,7 +50,9 @@
           "min_soc": "SOC minimum (%)",
           "enable_charge_hysteresis": "Activer l'hystérésis de charge",
           "charge_hysteresis_percent": "Pourcentage d'hystérésis (%)",
-          "backup_offgrid_threshold": "Seuil de charge hors réseau de secours (W)"
+          "backup_offgrid_threshold": "Seuil de charge hors réseau de secours (W)",
+          "full_charge_voltage_taper_enabled": "Activer la réduction de charge à 100% par tension",
+          "active_balance_mode_enabled": "Activer le mode d'équilibrage actif"
         },
         "data_description": {
           "max_charge_power": "Puissance maximale autorisée pour charger la batterie",
@@ -59,7 +61,9 @@
           "min_soc": "État de charge minimum - la batterie ne se déchargera pas en dessous de cette valeur",
           "enable_charge_hysteresis": "Empêche la batterie de se charger lorsque le SOC est proche du maximum",
           "charge_hysteresis_percent": "La batterie ne se chargera pas tant que le SOC ne descend pas à (max_soc - hystérésis). Ex : SOC max 100% avec 5% d'hystérésis = pas de charge avant 95%",
-          "backup_offgrid_threshold": "Une charge hors réseau supérieure à cette valeur est traitée comme un événement de secours actif, excluant la batterie du contrôle PD. Augmenter si des charges permanentes (routeur, caméras) sont connectées au port hors réseau."
+          "backup_offgrid_threshold": "Une charge hors réseau supérieure à cette valeur est traitée comme un événement de secours actif, excluant la batterie du contrôle PD. Augmenter si des charges permanentes (routeur, caméras) sont connectées au port hors réseau.",
+          "full_charge_voltage_taper_enabled": "Lorsque la cible est 100%, limite la charge à 95 W à partir de 3.48 V de tension maximale de cellule et s'arrête à 3.58 V pour mesurer le déséquilibre après 60 secondes.",
+          "active_balance_mode_enabled": "Active l'équilibrage actif des cellules pour cette batterie. Tant qu'il est activé, la batterie est exclue du contrôle PD normal après avoir atteint la tension d'équilibrage. L'interrupteur s'éteint automatiquement lorsque le delta des cellules est inférieur ou égal à 0.03 V après la décharge finale."
         }
       },
       "time_slots": {
@@ -406,7 +410,9 @@
           "min_soc": "SOC minimum (%)",
           "enable_charge_hysteresis": "Activer l'hystérésis de charge",
           "charge_hysteresis_percent": "Pourcentage d'hystérésis (%)",
-          "backup_offgrid_threshold": "Seuil de charge hors réseau de secours (W)"
+          "backup_offgrid_threshold": "Seuil de charge hors réseau de secours (W)",
+          "full_charge_voltage_taper_enabled": "Activer la réduction de charge à 100% par tension",
+          "active_balance_mode_enabled": "Activer le mode d'équilibrage actif"
         },
         "data_description": {
           "max_charge_power": "Puissance maximale autorisée pour charger la batterie",
@@ -415,7 +421,9 @@
           "min_soc": "État de charge minimum",
           "enable_charge_hysteresis": "Empêche la batterie de se charger lorsque le SOC est proche du maximum",
           "charge_hysteresis_percent": "La batterie ne se chargera pas tant que le SOC ne descend pas à (max_soc - hystérésis). Ex : SOC max 100% avec 5% d'hystérésis = pas de charge avant 95%",
-          "backup_offgrid_threshold": "Une charge hors réseau supérieure à cette valeur est traitée comme un événement de secours actif, excluant la batterie du contrôle PD. Augmenter si des charges permanentes (routeur, caméras) sont connectées au port hors réseau."
+          "backup_offgrid_threshold": "Une charge hors réseau supérieure à cette valeur est traitée comme un événement de secours actif, excluant la batterie du contrôle PD. Augmenter si des charges permanentes (routeur, caméras) sont connectées au port hors réseau.",
+          "full_charge_voltage_taper_enabled": "Lorsque la cible est 100%, limite la charge à 95 W à partir de 3.48 V de tension maximale de cellule et s'arrête à 3.58 V pour mesurer le déséquilibre après 60 secondes.",
+          "active_balance_mode_enabled": "Active l'équilibrage actif des cellules pour cette batterie. Tant qu'il est activé, la batterie est exclue du contrôle PD normal après avoir atteint la tension d'équilibrage. L'interrupteur s'éteint automatiquement lorsque le delta des cellules est inférieur ou égal à 0.03 V après la décharge finale."
         }
       },
       "time_slots": {
@@ -746,6 +754,12 @@
       "battery_allow_discharge": {
         "name": "Autoriser la Decharge"
       },
+      "full_charge_voltage_taper": {
+        "name": "Réduction Charge 100% par Tension"
+      },
+      "active_balance_mode": {
+        "name": "Mode d'Équilibrage Actif"
+      },
       "automation_charging_active": {
         "name": "Charge par Prix Externe"
       },
@@ -792,6 +806,7 @@
           "manual": "Mode Manuel",
           "grid_charging": "Charge depuis le Réseau",
           "weekly_full_charge": "Charge Complète Hebdomadaire",
+          "active_balance_mode": "Mode d'Équilibrage Actif",
           "charge_delayed": "Charge Retardée",
           "waiting_for_solar": "En Attente du Solaire",
           "charging_to_setpoint": "Charge jusqu'au Seuil",

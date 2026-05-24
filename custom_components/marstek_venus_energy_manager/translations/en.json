@@ -62,7 +62,7 @@
           "enable_charge_hysteresis": "Prevents battery from charging when SOC is near maximum",
           "charge_hysteresis_percent": "Battery will not charge until SOC drops to (max_soc - hysteresis). Ex: Max SOC 100% with 5% hysteresis = no charge until 95%",
           "backup_offgrid_threshold": "Offgrid load above this value is treated as an active backup event, excluding the battery from PD control. Set higher if you have permanent loads (router, cameras) on the offgrid port.",
-          "full_charge_voltage_taper_enabled": "When the target is 100%, limit charge to 100 W from 3.45 V max cell voltage and stop at 3.55 V for the final balance measurement/discharge.",
+          "full_charge_voltage_taper_enabled": "When the target is 100%, limit charge to 95 W from 3.48 V max cell voltage and stop at 3.58 V to measure imbalance after 60 seconds.",
           "active_balance_mode_enabled": "Enables active cell balancing for this battery. While ON the battery is excluded from normal PD control after it reaches the balancing voltage. The switch turns off automatically when cell delta is 0.03 V or lower after the final discharge."
         }
       },
@@ -422,7 +422,7 @@
           "enable_charge_hysteresis": "Prevents battery from charging when SOC is near maximum",
           "charge_hysteresis_percent": "Battery will not charge until SOC drops to (max_soc - hysteresis). Ex: Max SOC 100% with 5% hysteresis = no charge until 95%",
           "backup_offgrid_threshold": "Offgrid load above this value is treated as an active backup event, excluding the battery from PD control. Set higher if you have permanent loads (router, cameras) on the offgrid port.",
-          "full_charge_voltage_taper_enabled": "When the target is 100%, limit charge to 100 W from 3.45 V max cell voltage and stop at 3.55 V for the final balance measurement/discharge.",
+          "full_charge_voltage_taper_enabled": "When the target is 100%, limit charge to 95 W from 3.48 V max cell voltage and stop at 3.58 V to measure imbalance after 60 seconds.",
           "active_balance_mode_enabled": "Enables active cell balancing for this battery. While ON the battery is excluded from normal PD control after it reaches the balancing voltage. The switch turns off automatically when cell delta is 0.03 V or lower after the final discharge."
         }
       },

@@ -412,13 +412,10 @@ class ActiveBalanceModeManager:
     def _is_active_balance_mode_running(self, coordinator) -> bool:
         """Return True when active balance mode owns this battery's power control.
 
-        Only the post-top phase (50 W/25 W cycle) is "owning" â€” the pre-top run-up
-        is driven by the normal PD loop. Returning False during the pre-top phase
-        lets PD include this battery in its allocation while still benefiting from
-        the delay/SOC overrides applied by the active-balance handler.
+        The active-balance handler owns the pre-top run-up too, because it sends
+        an explicit max-charge command to this battery while PD keeps managing
+        the rest of the system.
         """
-        if not bool(getattr(coordinator, "active_balance_mode_top_reached", False)):
-            return False
         return bool(
             getattr(coordinator, "active_balance_mode_started_ts", None)
             or coordinator in self._active_balance_mode_phases
@@ -565,14 +562,7 @@ class ActiveBalanceModeManager:
             )
         else:
             await self._dismiss_legacy_active_balance_notifications(coordinator)
-            if started_ts:
-                await self._dismiss_persistent_notification(
-                    self._active_balance_notification_id(
-                        coordinator,
-                        "start",
-                        started_ts,
-                    )
-                )
+
         self._active_balance_mode_phases.pop(coordinator, None)
         self._reset_active_balance_charge_resume_target(coordinator)
         await self._restore_active_balance_mode_cutoff(coordinator)
@@ -747,6 +737,21 @@ class ActiveBalanceModeManager:
                     )
 
             if not top_reached:
+                charge_power = int(getattr(coordinator, "max_charge_power", 0) or 0)
+                await self._controller._set_battery_power(
+                    coordinator,
+                    charge_power,
+                    0,
+                    ignore_charge_blockers={
+                        "charge_delay",
+                        "time_slot_charge",
+                        "max_soc",
+                        "charge_hysteresis",
+                        "normal_balance_pause",
+                        "user_battery_charge_disabled",
+                        "ev_pause",
+                    },
+                )
                 statuses[coordinator.name] = {
                     "enabled": True,
                     "state": "pre_top_charge",
@@ -756,6 +761,7 @@ class ActiveBalanceModeManager:
                     "soc": soc_now,
                     "delta_V": round(delta_v, 4) if delta_v is not None else None,
                     "trigger_vmax": ACTIVE_BALANCE_CHARGE_RESUME_CELL_VOLTAGE,
+                    "charge_w": charge_power,
                 }
                 continue
 
@@ -934,11 +940,8 @@ class ActiveBalanceModeManager:
     def _active_balance_overrides_delay(self) -> bool:
         """Return True when any battery has the scheduled active balance mode enabled.
 
-        While active balance is enabled, the per-battery run-up to the balancing
-        window is driven by the normal PD loop. The charge-delay block would
-        otherwise stop PD from charging at all during the delay window, leaving
-        the active-balance battery stuck mid-SOC. Bypassing the delay system-wide
-        is acceptable because the user explicitly triggered an override-style run.
+        Active balance sends direct battery commands in both pre-top and top
+        phases, so charge delay must not block those explicit commands.
         """
         return any(
             bool(getattr(c, "active_balance_mode_enabled", False))

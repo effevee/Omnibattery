@@ -1824,13 +1824,6 @@ BALANCE_STORAGE_VERSION = 1
 BALANCE_THRESHOLD_YELLOW = 50    # mV — above this: yellow
 BALANCE_THRESHOLD_ORANGE = 100   # mV — above this: orange
 BALANCE_THRESHOLD_RED = 150      # mV — above this: red
-BALANCE_OCV_WAIT_SECONDS = 900   # 15 min rest before reading
-BALANCE_ORANGE_HOLD_SECONDS = 9000  # 2.5 h passive balancing hold
-BALANCE_COOLDOWN_HOURS = 12      # min hours between formal readings
-BALANCE_OPPORTUNISTIC_COOLDOWN_HOURS = 24
-BALANCE_POWER_STABLE_POLLS = 5   # consecutive polls < 50 W to confirm rest
-BALANCE_POWER_REST_THRESHOLD_W = 50
-BALANCE_VOLTAGE_SETTLING_THRESHOLD_V = 0.005  # vmax must be falling < 5 mV/poll
 BALANCE_HISTORY_MAX = 52         # ~1 year of weekly readings
 BALANCE_RED_CONSECUTIVE_ALERT = 2
 BALANCE_TREND_ALERT_AVG_MV = 75.0   # avg must exceed this to fire a rising-trend alert
@@ -1839,21 +1832,18 @@ BALANCE_TREND_ALERT_AVG_MV = 75.0   # avg must exceed this to fire a rising-tren
 # When enabled per battery, slow charging only while the target is 100% and
 # cells enter the top voltage range. This is voltage-only; SOC is intentionally
 # ignored because some batteries report it unreliably near the top.
-NORMAL_BALANCE_TAPER_CELL_VOLTAGE = 3.45
-NORMAL_BALANCE_PAUSE_CELL_VOLTAGE = 3.55
-NORMAL_BALANCE_RESUME_CELL_VOLTAGE = 3.45
-NORMAL_BALANCE_CHARGE_POWER_W = 100
+NORMAL_BALANCE_TAPER_CELL_VOLTAGE = 3.48
+NORMAL_BALANCE_PAUSE_CELL_VOLTAGE = 3.58
+NORMAL_BALANCE_CHARGE_POWER_W = 95
 NORMAL_BALANCE_MEASURE_WAIT_SECONDS = 60
-NORMAL_BALANCE_FINAL_DISCHARGE_POWER_W = 25
-NORMAL_BALANCE_FINAL_DISCHARGE_STOP_CELL_VOLTAGE = 3.45
 
-# Weekly full-charge active top-balancing.
+# Active balance mode.
 # Once the battery has reached the top, keep the cells in the balancing window
 # with gentle charge/discharge micro-cycles instead of only resting at 100% SOC.
 ACTIVE_BALANCE_CHARGE_RESUME_CELL_VOLTAGE = 3.49
 ACTIVE_BALANCE_CHARGE_STOP_CELL_VOLTAGE = 3.58
-ACTIVE_BALANCE_DISCHARGE_STOP_CELL_VOLTAGE = 3.48
-ACTIVE_BALANCE_FINAL_DISCHARGE_STOP_CELL_VOLTAGE = 3.45
+ACTIVE_BALANCE_DISCHARGE_STOP_CELL_VOLTAGE = 3.49
+ACTIVE_BALANCE_FINAL_DISCHARGE_STOP_CELL_VOLTAGE = 3.48
 ACTIVE_BALANCE_MEASURE_WAIT_SECONDS = 60
 ACTIVE_BALANCE_ADAPTIVE_RESUME_STEP_V = 0.01
 ACTIVE_BALANCE_ADAPTIVE_MIN_RESUME_CELL_VOLTAGE = 3.40

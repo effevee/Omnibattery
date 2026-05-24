@@ -50,7 +50,9 @@
           "min_soc": "Minimaler SOC (%)",
           "enable_charge_hysteresis": "Ladehysterese aktivieren",
           "charge_hysteresis_percent": "Hysterese-Prozentsatz (%)",
-          "backup_offgrid_threshold": "Schwellenwert für Backup-Offgrid-Last (W)"
+          "backup_offgrid_threshold": "Schwellenwert für Backup-Offgrid-Last (W)",
+          "full_charge_voltage_taper_enabled": "100%-Ladung per Zellspannung reduzieren",
+          "active_balance_mode_enabled": "Aktiven Zellabgleich aktivieren"
         },
         "data_description": {
           "max_charge_power": "Maximal zulässige Leistung zum Laden der Batterie",
@@ -59,7 +61,9 @@
           "min_soc": "Minimaler Ladezustand - Batterie entlädt nicht unter diesen Wert",
           "enable_charge_hysteresis": "Verhindert das Laden der Batterie, wenn der SOC nahe am Maximum ist",
           "charge_hysteresis_percent": "Batterie lädt nicht, bis der SOC auf (max_soc - Hysterese) fällt. Bsp.: Max SOC 100% mit 5% Hysterese = kein Laden bis 95%",
-          "backup_offgrid_threshold": "Eine Offgrid-Last über diesem Wert wird als aktives Backup-Ereignis behandelt und schließt die Batterie aus der PD-Regelung aus. Erhöhen, wenn dauerhafte Lasten (Router, Kameras) am Offgrid-Port angeschlossen sind."
+          "backup_offgrid_threshold": "Eine Offgrid-Last über diesem Wert wird als aktives Backup-Ereignis behandelt und schließt die Batterie aus der PD-Regelung aus. Erhöhen, wenn dauerhafte Lasten (Router, Kameras) am Offgrid-Port angeschlossen sind.",
+          "full_charge_voltage_taper_enabled": "Wenn das Ziel 100% ist, wird die Ladung ab 3.48 V maximaler Zellspannung auf 95 W begrenzt und bei 3.58 V gestoppt, um den Zellversatz nach 60 Sekunden zu messen.",
+          "active_balance_mode_enabled": "Aktiviert den aktiven Zellabgleich für diese Batterie. Während EIN ist die Batterie nach Erreichen der Abgleichspannung von der normalen PD-Regelung ausgeschlossen. Der Schalter wird automatisch ausgeschaltet, wenn der Zellversatz nach der finalen Entladung höchstens 0.03 V beträgt."
         }
       },
       "time_slots": {
@@ -406,7 +410,9 @@
           "min_soc": "Minimaler SOC (%)",
           "enable_charge_hysteresis": "Ladehysterese aktivieren",
           "charge_hysteresis_percent": "Hysterese-Prozentsatz (%)",
-          "backup_offgrid_threshold": "Schwellenwert für Backup-Offgrid-Last (W)"
+          "backup_offgrid_threshold": "Schwellenwert für Backup-Offgrid-Last (W)",
+          "full_charge_voltage_taper_enabled": "100%-Ladung per Zellspannung reduzieren",
+          "active_balance_mode_enabled": "Aktiven Zellabgleich aktivieren"
         },
         "data_description": {
           "max_charge_power": "Maximal zulässige Leistung zum Laden der Batterie",
@@ -415,7 +421,9 @@
           "min_soc": "Minimaler Ladezustand",
           "enable_charge_hysteresis": "Verhindert das Laden der Batterie, wenn der SOC nahe am Maximum ist",
           "charge_hysteresis_percent": "Batterie lädt nicht, bis der SOC auf (max_soc - Hysterese) fällt. Bsp.: Max SOC 100% mit 5% Hysterese = kein Laden bis 95%",
-          "backup_offgrid_threshold": "Eine Offgrid-Last über diesem Wert wird als aktives Backup-Ereignis behandelt und schließt die Batterie aus der PD-Regelung aus. Erhöhen, wenn dauerhafte Lasten (Router, Kameras) am Offgrid-Port angeschlossen sind."
+          "backup_offgrid_threshold": "Eine Offgrid-Last über diesem Wert wird als aktives Backup-Ereignis behandelt und schließt die Batterie aus der PD-Regelung aus. Erhöhen, wenn dauerhafte Lasten (Router, Kameras) am Offgrid-Port angeschlossen sind.",
+          "full_charge_voltage_taper_enabled": "Wenn das Ziel 100% ist, wird die Ladung ab 3.48 V maximaler Zellspannung auf 95 W begrenzt und bei 3.58 V gestoppt, um den Zellversatz nach 60 Sekunden zu messen.",
+          "active_balance_mode_enabled": "Aktiviert den aktiven Zellabgleich für diese Batterie. Während EIN ist die Batterie nach Erreichen der Abgleichspannung von der normalen PD-Regelung ausgeschlossen. Der Schalter wird automatisch ausgeschaltet, wenn der Zellversatz nach der finalen Entladung höchstens 0.03 V beträgt."
         }
       },
       "time_slots": {
@@ -746,6 +754,12 @@
       "battery_allow_discharge": {
         "name": "Entladen Erlauben"
       },
+      "full_charge_voltage_taper": {
+        "name": "100%-Ladungsreduktion per Spannung"
+      },
+      "active_balance_mode": {
+        "name": "Aktiver Zellabgleich"
+      },
       "automation_charging_active": {
         "name": "Laden nach externem Preis"
       },
@@ -792,6 +806,7 @@
           "manual": "Manueller Modus",
           "grid_charging": "Laden aus dem Netz",
           "weekly_full_charge": "Wöchentliche Volladung",
+          "active_balance_mode": "Aktiver Zellabgleich",
           "charge_delayed": "Ladung verzögert",
           "waiting_for_solar": "Warten auf Solar",
           "charging_to_setpoint": "Laden bis Sollwert",

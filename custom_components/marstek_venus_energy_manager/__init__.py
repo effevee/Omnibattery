@@ -107,11 +107,8 @@ from .const import (
     DEFAULT_HOURLY_BALANCE_MAX_OFFSET_W,
     NORMAL_BALANCE_TAPER_CELL_VOLTAGE,
     NORMAL_BALANCE_PAUSE_CELL_VOLTAGE,
-    NORMAL_BALANCE_RESUME_CELL_VOLTAGE,
     NORMAL_BALANCE_CHARGE_POWER_W,
     NORMAL_BALANCE_MEASURE_WAIT_SECONDS,
-    NORMAL_BALANCE_FINAL_DISCHARGE_POWER_W,
-    NORMAL_BALANCE_FINAL_DISCHARGE_STOP_CELL_VOLTAGE,
     CONF_ACTIVE_BALANCE_MODE_ENABLED,
     CONF_FULL_CHARGE_VOLTAGE_TAPER_ENABLED,
     DEFAULT_FULL_CHARGE_VOLTAGE_TAPER_ENABLED,
@@ -614,9 +611,9 @@ class ChargeDischargeController:
     def _refresh_normal_balance_blocks(self) -> None:
         """Update normal high-SOC charge protection blockers.
 
-        The normal mode does not force charging. It only pauses charge if a
-        high cell runs away during a 100% charge target, and resumes once the
-        cell relaxes below the resume threshold.
+        The normal mode does not force charging. It only stops charge while the
+        max cell is at the 100% top voltage; SOC hysteresis decides when future
+        charging is allowed.
         """
         self._normal_balance_reset_if_new_day()
 
@@ -639,7 +636,7 @@ class ChargeDischargeController:
                 self._normal_balance_voltage_tapered.pop(coordinator, None)
 
             vmax = data.get("max_cell_voltage")
-            paused = self._normal_balance_charge_paused.get(coordinator, False)
+            paused = False
             if vmax is None:
                 paused = False
             else:
@@ -652,8 +649,6 @@ class ChargeDischargeController:
                         self._normal_balance_voltage_tapered[coordinator] = True
                     if vmax_f >= NORMAL_BALANCE_PAUSE_CELL_VOLTAGE:
                         paused = True
-                    elif paused and vmax_f <= NORMAL_BALANCE_RESUME_CELL_VOLTAGE:
-                        paused = False
 
             if paused:
                 self._normal_balance_charge_paused[coordinator] = True
@@ -663,7 +658,6 @@ class ChargeDischargeController:
                     {
                         "battery": coordinator.name,
                         "max_cell_voltage": vmax,
-                        "resume_voltage": NORMAL_BALANCE_RESUME_CELL_VOLTAGE,
                         "delta_V": self._cell_delta_v(data),
                     },
                     coordinator=coordinator,
@@ -718,20 +712,13 @@ class ChargeDischargeController:
         return sensor_raw > active_target + self.deadband
 
     async def _handle_normal_max_soc_active_balancing(self) -> bool:
-        """Finish normal 100% charging with a voltage-only rest and discharge."""
-        if self._weekly_charge_mgr.is_active():
-            for coordinator in list(self._normal_active_balance_phases):
-                self._reset_active_balance_charge_resume_target(coordinator)
-            self._normal_active_balance_phases.clear()
-            self._normal_balance_measure_started.clear()
-            return False
-
+        """Measure cell delta after any 100% target reaches top voltage."""
         active_details = {}
         took_over = False
         active_coordinators: set[MarstekVenusDataUpdateCoordinator] = set()
 
         for coordinator in self.coordinators:
-            if coordinator.data is None or coordinator.max_soc < 100:
+            if coordinator.data is None or not self._full_charge_voltage_taper_applies(coordinator):
                 continue
             if self._is_active_balance_mode_running(coordinator):
                 continue
@@ -775,23 +762,28 @@ class ChargeDischargeController:
                 )
                 if (dt_util.utcnow() - started).total_seconds() >= NORMAL_BALANCE_MEASURE_WAIT_SECONDS:
                     self._normal_balance_last_delta_v[coordinator] = delta_v
-                    phase = "FINAL_DISCHARGE_25W"
+                    phase = "MEASURED"
                     self._normal_active_balance_phases[coordinator] = phase
+                    if self._balance_monitor is not None:
+                        await self._balance_monitor.async_record_top_balance_measurement(
+                            coordinator,
+                            vmax,
+                            vmin,
+                            data.get("battery_soc"),
+                            phase="top_charge_3_55v",
+                        )
                     _LOGGER.info(
                         "%s: normal 100%% balance measurement delta=%.4f V at vmax=%.3f V",
                         coordinator.name,
                         delta_v,
                         vmax,
                     )
-            if phase == "FINAL_DISCHARGE_25W":
-                if vmax > NORMAL_BALANCE_FINAL_DISCHARGE_STOP_CELL_VOLTAGE:
-                    discharge_power = NORMAL_BALANCE_FINAL_DISCHARGE_POWER_W
-                else:
-                    self._normal_active_balance_phases.pop(coordinator, None)
-                    self._normal_balance_measure_started.pop(coordinator, None)
-                    self._reset_active_balance_charge_resume_target(coordinator)
-                    await self._set_battery_power(coordinator, 0, 0)
-                    continue
+            if phase == "MEASURED" and vmax < NORMAL_BALANCE_PAUSE_CELL_VOLTAGE:
+                self._normal_active_balance_phases.pop(coordinator, None)
+                self._normal_balance_measure_started.pop(coordinator, None)
+                self._reset_active_balance_charge_resume_target(coordinator)
+                await self._set_battery_power(coordinator, 0, 0)
+                continue
 
             details = {
                 "phase": phase.lower(),
@@ -3415,9 +3407,9 @@ class ChargeDischargeController:
             )
             discharge_power = 0
 
-        # Hold discharge while balance monitor waits for OCV stabilisation
+        # Clear any legacy balance hold that may have been restored from storage.
         if coordinator.balance_hold and discharge_power > 0:
-            _LOGGER.debug("[%s] Balance hold active â€” discharge suppressed", coordinator.name)
+            _LOGGER.debug("[%s] Legacy balance hold active - discharge suppressed", coordinator.name)
             discharge_power = 0
 
         # Determine expected force mode

@@ -120,7 +120,7 @@ class MarstekVenusDataUpdateCoordinator(DataUpdateCoordinator):
         self._entity_registry = None
         self.rs485_user_disabled = False  # Set by RS485 switch when user explicitly disables
         self._config_entry = None  # Set after creation to allow persisting rs485_user_disabled
-        self.balance_hold = False  # Set by BalanceMonitor to prevent discharge during OCV rest
+        self.balance_hold = False  # Legacy BalanceMonitor hold flag; kept for persisted-state cleanup
 
         # Load version-specific definitions
         if self.battery_version == "v3":

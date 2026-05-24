@@ -50,7 +50,9 @@
           "min_soc": "Minimale SOC (%)",
           "enable_charge_hysteresis": "Laadhysterese inschakelen",
           "charge_hysteresis_percent": "Hysterese percentage (%)",
-          "backup_offgrid_threshold": "Drempelwaarde backup offgrid-belasting (W)"
+          "backup_offgrid_threshold": "Drempelwaarde backup offgrid-belasting (W)",
+          "full_charge_voltage_taper_enabled": "100%-lading op spanning begrenzen",
+          "active_balance_mode_enabled": "Actieve celbalansmodus inschakelen"
         },
         "data_description": {
           "max_charge_power": "Maximaal toegestaan vermogen om de batterij op te laden",
@@ -59,7 +61,9 @@
           "min_soc": "Minimale laadtoestand - batterij ontlaadt niet onder deze waarde",
           "enable_charge_hysteresis": "Voorkomt dat de batterij laadt wanneer SOC dicht bij het maximum is",
           "charge_hysteresis_percent": "Batterij laadt niet tot SOC daalt naar (max_soc - hysterese). Bijv.: Max SOC 100% met 5% hysterese = geen laden tot 95%",
-          "backup_offgrid_threshold": "Een offgrid-belasting boven deze waarde wordt behandeld als een actieve back-upgebeurtenis en sluit de batterij uit van PD-regeling. Verhoog dit als er permanente lasten (router, camera's) op de offgrid-poort zijn aangesloten."
+          "backup_offgrid_threshold": "Een offgrid-belasting boven deze waarde wordt behandeld als een actieve back-upgebeurtenis en sluit de batterij uit van PD-regeling. Verhoog dit als er permanente lasten (router, camera's) op de offgrid-poort zijn aangesloten.",
+          "full_charge_voltage_taper_enabled": "Wanneer het doel 100% is, wordt laden vanaf 3.48 V maximale celspanning beperkt tot 95 W en gestopt bij 3.58 V om de onbalans na 60 seconden te meten.",
+          "active_balance_mode_enabled": "Schakelt actieve celbalancering in voor deze batterij. Zolang dit AAN is, wordt de batterij uitgesloten van normale PD-regeling nadat de balanceerspanning is bereikt. De schakelaar gaat automatisch uit wanneer het celverschil 0.03 V of lager is na de laatste ontlading."
         }
       },
       "time_slots": {
@@ -406,7 +410,9 @@
           "min_soc": "Minimale SOC (%)",
           "enable_charge_hysteresis": "Laadhysterese inschakelen",
           "charge_hysteresis_percent": "Hysterese percentage (%)",
-          "backup_offgrid_threshold": "Drempelwaarde backup offgrid-belasting (W)"
+          "backup_offgrid_threshold": "Drempelwaarde backup offgrid-belasting (W)",
+          "full_charge_voltage_taper_enabled": "100%-lading op spanning begrenzen",
+          "active_balance_mode_enabled": "Actieve celbalansmodus inschakelen"
         },
         "data_description": {
           "max_charge_power": "Maximaal toegestaan vermogen om de batterij op te laden",
@@ -415,7 +421,9 @@
           "min_soc": "Minimale laadtoestand",
           "enable_charge_hysteresis": "Voorkomt dat de batterij laadt wanneer SOC dicht bij het maximum is",
           "charge_hysteresis_percent": "Batterij laadt niet tot SOC daalt naar (max_soc - hysterese). Bijv.: Max SOC 100% met 5% hysterese = geen laden tot 95%",
-          "backup_offgrid_threshold": "Een offgrid-belasting boven deze waarde wordt behandeld als een actieve back-upgebeurtenis en sluit de batterij uit van PD-regeling. Verhoog dit als er permanente lasten (router, camera's) op de offgrid-poort zijn aangesloten."
+          "backup_offgrid_threshold": "Een offgrid-belasting boven deze waarde wordt behandeld als een actieve back-upgebeurtenis en sluit de batterij uit van PD-regeling. Verhoog dit als er permanente lasten (router, camera's) op de offgrid-poort zijn aangesloten.",
+          "full_charge_voltage_taper_enabled": "Wanneer het doel 100% is, wordt laden vanaf 3.48 V maximale celspanning beperkt tot 95 W en gestopt bij 3.58 V om de onbalans na 60 seconden te meten.",
+          "active_balance_mode_enabled": "Schakelt actieve celbalancering in voor deze batterij. Zolang dit AAN is, wordt de batterij uitgesloten van normale PD-regeling nadat de balanceerspanning is bereikt. De schakelaar gaat automatisch uit wanneer het celverschil 0.03 V of lager is na de laatste ontlading."
         }
       },
       "time_slots": {
@@ -746,6 +754,12 @@
       "battery_allow_discharge": {
         "name": "Ontladen Toestaan"
       },
+      "full_charge_voltage_taper": {
+        "name": "100%-Laadbegrenzing op Spanning"
+      },
+      "active_balance_mode": {
+        "name": "Actieve Celbalansmodus"
+      },
       "automation_charging_active": {
         "name": "Laden op Externe Prijs"
       },
@@ -792,6 +806,7 @@
           "manual": "Handmatige Modus",
           "grid_charging": "Laden vanuit Net",
           "weekly_full_charge": "Wekelijkse Volledige Lading",
+          "active_balance_mode": "Actieve Celbalansmodus",
           "charge_delayed": "Lading Vertraagd",
           "waiting_for_solar": "Wachten op Zon",
           "charging_to_setpoint": "Laden naar Instelpunt",

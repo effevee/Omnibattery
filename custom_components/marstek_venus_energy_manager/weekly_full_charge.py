@@ -4,14 +4,13 @@ Owns:
 - Day-based activation logic (is_active)
 - Persistence of completion / registers-written across HA restarts
 - Hardware register (44000) writes to allow charging to 100% on v2 batteries
-- Completion detection (all batteries at 100% or BMS cutoff at 99%)
+- Completion detection (top-voltage measurement, 100% SOC, or BMS cutoff at 99%)
 - Register restore and hysteresis re-enable on completion
 - Mid-charge abort handling when day or feature flag changes
 
-Active cell balancing on weekly day is intentionally NOT handled here — that
-is the job of the per-battery Active Balance Mode. Weekly only charges to
-100%; the user enables Active Balance Mode separately when they want a full
-balance cycle.
+Weekly uses the same 100% top-voltage taper/measurement flow as a user-selected
+max_soc=100. Active cell balancing remains the job of the per-battery Active
+Balance Mode.
 """
 from __future__ import annotations
 
@@ -362,20 +361,24 @@ class WeeklyFullChargeManager:
             # and the status field immediately.
             asyncio.create_task(self.save_state())
 
-        # Completion: when every battery is full, restore registers and mark done.
-        # Cell-level balancing on this day is the responsibility of Active Balance
-        # Mode (per-battery switch), not weekly.
+        if hasattr(ctrl, "_normal_balance_reset_if_new_day"):
+            ctrl._normal_balance_reset_if_new_day()
+
+        # Completion: when every battery has completed the shared top-voltage
+        # measurement, or has reached a hardware/BMS full condition, restore
+        # registers and mark done.
         batteries_with_data = [
             c
             for c in ctrl.coordinators
             if c.data and not ctrl._is_active_balance_mode_running(c)
         ]
+        measured = getattr(ctrl, "_normal_balance_last_delta_v", {})
         all_batteries_full = bool(batteries_with_data) and all(
-            self.is_battery_full(c) for c in batteries_with_data
+            c in measured or self.is_battery_full(c) for c in batteries_with_data
         )
 
         if all_batteries_full and not ctrl.weekly_full_charge_complete:
-            await self._complete_weekly_charge("full_charge_complete")
+            await self._complete_weekly_charge("top_voltage_measurement_complete")
 
     async def _complete_weekly_charge(self, reason: str) -> None:
         """Mark weekly full charge complete and restore configured limits."""
