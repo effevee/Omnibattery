@@ -335,7 +335,7 @@
       "invalid_unit": "Zonnevoorspellingssensor moet 'kWh' of 'Wh' als eenheid hebben.",
       "overlapping_slots": "Dit tijdslot overlapt met een bestaand tijdslot. Pas de tijden of dagen aan.",
       "midnight_crossing": "De starttijd moet vóór de eindtijd liggen. Maak voor nachtperiodes twee aparte tijdslots aan (bijv. 22:00-23:59 en 00:00-06:00).",
-      "no_price_data": "De geselecteerde sensor heeft niet de verwachte prijsattributen. Nordpool: heeft `raw_today` nodig. PVPC: heeft `price_00h` … `price_23h` nodig. CKW: heeft het attribuut `prices` met een lijst van slots nodig."
+      "no_price_data": "De geselecteerde sensor heeft niet de verwachte prijsattributen. Nordpool: heeft `raw_today` nodig. PVPC: heeft `price_00h` … `price_23h` nodig. CKW: heeft het attribuut `prices` met een lijst van slots nodig. EPEX: heeft het attribuut `data` met een lijst van slots nodig. ENTSO-e: heeft het attribuut `prices_today` met een lijst van slots nodig."
     },
     "abort": {
       "already_configured": "Deze integratie is al geconfigureerd."
@@ -693,7 +693,7 @@
       "invalid_unit": "Zonnevoorspellingssensor moet 'kWh' of 'Wh' als eenheid hebben.",
       "overlapping_slots": "Dit tijdslot overlapt met een bestaand tijdslot. Pas de tijden of dagen aan.",
       "midnight_crossing": "De starttijd moet vóór de eindtijd liggen. Maak voor nachtperiodes twee aparte tijdslots aan (bijv. 22:00-23:59 en 00:00-06:00).",
-      "no_price_data": "De geselecteerde sensor heeft niet de verwachte prijsattributen. Nordpool: heeft `raw_today` nodig. PVPC: heeft `price_00h` … `price_23h` nodig. CKW: heeft het attribuut `prices` met een lijst van slots nodig."
+      "no_price_data": "De geselecteerde sensor heeft niet de verwachte prijsattributen. Nordpool: heeft `raw_today` nodig. PVPC: heeft `price_00h` … `price_23h` nodig. CKW: heeft het attribuut `prices` met een lijst van slots nodig. EPEX: heeft het attribuut `data` met een lijst van slots nodig. ENTSO-e: heeft het attribuut `prices_today` met een lijst van slots nodig."
     }
   },
   "selector": {
@@ -720,7 +720,8 @@
         "nordpool": "Nordpool",
         "pvpc": "PVPC (Spanje – ESIOS REE)",
         "ckw": "CKW (Zwitserland)",
-        "epex": "EPEX Spot (bijv. aWATTar)"
+        "epex": "EPEX Spot (bijv. aWATTar)",
+        "entsoe": "ENTSO-e (Transparency Platform)"
       }
     }
   },

@@ -333,7 +333,7 @@
       "invalid_unit": "Solar forecast sensor must have 'kWh' or 'Wh' as unit.",
       "overlapping_slots": "This time slot overlaps with an existing one. Adjust the times or days.",
       "midnight_crossing": "Start time must be before end time. For overnight periods, create two separate slots (e.g., 22:00-23:59 and 00:00-06:00).",
-      "no_price_data": "Selected sensor does not have the expected price attributes. Nordpool: needs `raw_today` attribute. PVPC: needs `price_00h` … `price_23h` attributes. CKW: needs `prices` attribute with a list of slots."
+      "no_price_data": "Selected sensor does not have the expected price attributes. Nordpool: needs `raw_today` attribute. PVPC: needs `price_00h` … `price_23h` attributes. CKW: needs `prices` attribute with a list of slots. EPEX: needs `data` attribute with a list of slots. ENTSO-e: needs `prices_today` attribute with a list of slots."
     },
     "abort": {
       "already_configured": "This integration is already configured."
@@ -715,7 +715,8 @@
         "nordpool": "Nordpool",
         "pvpc": "PVPC (Spain – ESIOS REE)",
         "ckw": "CKW (Switzerland)",
-        "epex": "EPEX Spot (e.g. aWATTar)"
+        "epex": "EPEX Spot (e.g. aWATTar)",
+        "entsoe": "ENTSO-e (Transparency Platform)"
       }
     }
   },

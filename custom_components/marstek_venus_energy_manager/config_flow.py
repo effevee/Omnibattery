@@ -90,6 +90,7 @@ from .const import (
     PRICE_INTEGRATION_PVPC,
     PRICE_INTEGRATION_CKW,
     PRICE_INTEGRATION_EPEX,
+    PRICE_INTEGRATION_ENTSOE,
     CONF_METER_INVERTED,
     CONF_PREDICTIVE_SAFETY_MARGIN_KWH,
     DEFAULT_PREDICTIVE_SAFETY_MARGIN_KWH,
@@ -718,6 +719,10 @@ class MarstekVenusConfigFlow(ConfigFlow, domain=DOMAIN):
                         data = attrs.get("data")
                         if not data or not isinstance(data, (list, tuple)) or len(data) == 0:
                             errors[CONF_PRICE_SENSOR] = "no_price_data"
+                    elif integration_type == PRICE_INTEGRATION_ENTSOE:
+                        prices = attrs.get("prices_today")
+                        if not prices or not isinstance(prices, (list, tuple)) or len(prices) == 0:
+                            errors[CONF_PRICE_SENSOR] = "no_price_data"
                     else:  # Nordpool
                         if "raw_today" not in attrs:
                             errors[CONF_PRICE_SENSOR] = "no_price_data"
@@ -765,6 +770,7 @@ class MarstekVenusConfigFlow(ConfigFlow, domain=DOMAIN):
                             PRICE_INTEGRATION_PVPC,
                             PRICE_INTEGRATION_CKW,
                             PRICE_INTEGRATION_EPEX,
+                            PRICE_INTEGRATION_ENTSOE,
                         ],
                         translation_key="price_integration_type",
                         mode=SelectSelectorMode.DROPDOWN,
@@ -2096,6 +2102,10 @@ class OptionsFlowHandler(OptionsFlow):
                         data = attrs.get("data")
                         if not data or not isinstance(data, (list, tuple)) or len(data) == 0:
                             errors[CONF_PRICE_SENSOR] = "no_price_data"
+                    elif integration_type == PRICE_INTEGRATION_ENTSOE:
+                        prices = attrs.get("prices_today")
+                        if not prices or not isinstance(prices, (list, tuple)) or len(prices) == 0:
+                            errors[CONF_PRICE_SENSOR] = "no_price_data"
                     else:  # Nordpool
                         if "raw_today" not in attrs:
                             errors[CONF_PRICE_SENSOR] = "no_price_data"
@@ -2149,6 +2159,7 @@ class OptionsFlowHandler(OptionsFlow):
                             PRICE_INTEGRATION_PVPC,
                             PRICE_INTEGRATION_CKW,
                             PRICE_INTEGRATION_EPEX,
+                            PRICE_INTEGRATION_ENTSOE,
                         ],
                         translation_key="price_integration_type",
                         mode=SelectSelectorMode.DROPDOWN,

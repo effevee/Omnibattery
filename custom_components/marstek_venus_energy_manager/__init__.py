@@ -89,6 +89,7 @@ from .const import (
     PRICE_INTEGRATION_PVPC,
     PRICE_INTEGRATION_CKW,
     PRICE_INTEGRATION_EPEX,
+    PRICE_INTEGRATION_ENTSOE,
     CONF_METER_INVERTED,
     CONF_PREDICTIVE_SAFETY_MARGIN_KWH,
     DEFAULT_PREDICTIVE_SAFETY_MARGIN_KWH,
@@ -3801,6 +3802,52 @@ class ChargeDischargeController:
                 _LOGGER.debug("Dynamic pricing: failed to parse EPEX entry %s: %s", entry, exc)
         return slots
 
+    def _parse_entsoe_prices(self, attrs: dict) -> list:
+        """Parse ENTSO-e Transparency Platform prices (HA jaapp integration).
+
+        Expected attributes:
+            prices_today / prices_tomorrow:
+                [{"time": "2026-05-13 00:00:00+02:00", "price": 0.26027}, ...]
+        Slots may be hourly or 15-minute. Each slot's end is inferred from the
+        next slot's start time; the last slot inherits the previous delta and
+        falls back to 60 minutes when only one entry exists.
+        Returns list[PriceSlot] in local naive time, in chronological order.
+        """
+        from homeassistant.util import dt as dt_util
+        from datetime import datetime as _dt, timedelta as _td
+
+        raw = []
+        for key in ("prices_today", "prices_tomorrow"):
+            entries = attrs.get(key) or []
+            for entry in entries:
+                try:
+                    start = entry.get("time")
+                    price_val = entry.get("price")
+                    if start is None or price_val is None:
+                        continue
+                    if isinstance(start, str):
+                        start = _dt.fromisoformat(start)
+                    if hasattr(start, "tzinfo") and start.tzinfo is not None:
+                        start = dt_util.as_local(start).replace(tzinfo=None)
+                    raw.append((start, float(price_val)))
+                except Exception as exc:
+                    _LOGGER.debug("Dynamic pricing: failed to parse ENTSO-e entry %s: %s", entry, exc)
+
+        if not raw:
+            return []
+
+        raw.sort(key=lambda x: x[0])
+        slots = []
+        for i, (start, price) in enumerate(raw):
+            if i + 1 < len(raw):
+                end = raw[i + 1][0]
+            elif i > 0:
+                end = start + (raw[i][0] - raw[i - 1][0])
+            else:
+                end = start + _td(hours=1)
+            slots.append(PriceSlot(start=start, end=end, price=price))
+        return slots
+
     def _get_price_unit(self) -> str:
         """Return the price unit label for the configured integration."""
         if self.price_integration_type == PRICE_INTEGRATION_CKW:
@@ -3825,6 +3872,12 @@ class ChargeDischargeController:
         if self.price_integration_type == PRICE_INTEGRATION_EPEX:
             now = datetime.now()
             for slot in self._parse_epex_prices(price_state.attributes):
+                if slot.start <= now < slot.end:
+                    return slot.price
+
+        if self.price_integration_type == PRICE_INTEGRATION_ENTSOE:
+            now = datetime.now()
+            for slot in self._parse_entsoe_prices(price_state.attributes):
                 if slot.start <= now < slot.end:
                     return slot.price
 
@@ -3857,6 +3910,8 @@ class ChargeDischargeController:
             raw_slots = self._parse_ckw_prices(attrs)
         elif self.price_integration_type == PRICE_INTEGRATION_EPEX:
             raw_slots = self._parse_epex_prices(attrs)
+        elif self.price_integration_type == PRICE_INTEGRATION_ENTSOE:
+            raw_slots = self._parse_entsoe_prices(attrs)
         else:
             # Nordpool
             raw_slots = self._parse_nordpool_prices(attrs)

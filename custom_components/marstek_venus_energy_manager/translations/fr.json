@@ -335,7 +335,7 @@
       "invalid_unit": "Le capteur de prévision solaire doit avoir 'kWh' ou 'Wh' comme unité.",
       "overlapping_slots": "Ce créneau horaire chevauche un créneau existant. Ajustez les horaires ou les jours.",
       "midnight_crossing": "L'heure de début doit être antérieure à l'heure de fin. Pour les périodes nocturnes, créez deux créneaux séparés (ex: 22:00-23:59 et 00:00-06:00).",
-      "no_price_data": "Le capteur sélectionné ne possède pas les attributs de prix attendus. Nordpool : nécessite `raw_today`. PVPC : nécessite `price_00h` … `price_23h`. CKW : nécessite l'attribut `prices` avec une liste de créneaux."
+      "no_price_data": "Le capteur sélectionné ne possède pas les attributs de prix attendus. Nordpool : nécessite `raw_today`. PVPC : nécessite `price_00h` … `price_23h`. CKW : nécessite l'attribut `prices` avec une liste de créneaux. EPEX : nécessite l'attribut `data` avec une liste de créneaux. ENTSO-e : nécessite l'attribut `prices_today` avec une liste de créneaux."
     },
     "abort": {
       "already_configured": "Cette intégration est déjà configurée."
@@ -693,7 +693,7 @@
       "invalid_unit": "Le capteur de prévision solaire doit avoir 'kWh' ou 'Wh' comme unité.",
       "overlapping_slots": "Ce créneau horaire chevauche un créneau existant. Ajustez les horaires ou les jours.",
       "midnight_crossing": "L'heure de début doit être antérieure à l'heure de fin. Pour les périodes nocturnes, créez deux créneaux séparés (ex: 22:00-23:59 et 00:00-06:00).",
-      "no_price_data": "Le capteur sélectionné ne possède pas les attributs de prix attendus. Nordpool : nécessite `raw_today`. PVPC : nécessite `price_00h` … `price_23h`. CKW : nécessite l'attribut `prices` avec une liste de créneaux."
+      "no_price_data": "Le capteur sélectionné ne possède pas les attributs de prix attendus. Nordpool : nécessite `raw_today`. PVPC : nécessite `price_00h` … `price_23h`. CKW : nécessite l'attribut `prices` avec une liste de créneaux. EPEX : nécessite l'attribut `data` avec une liste de créneaux. ENTSO-e : nécessite l'attribut `prices_today` avec une liste de créneaux."
     }
   },
   "selector": {
@@ -720,7 +720,8 @@
         "nordpool": "Nordpool",
         "pvpc": "PVPC (Espagne – ESIOS REE)",
         "ckw": "CKW (Suisse)",
-        "epex": "EPEX Spot (p. ex. aWATTar)"
+        "epex": "EPEX Spot (p. ex. aWATTar)",
+        "entsoe": "ENTSO-e (Plateforme de Transparence)"
       }
     }
   },

@@ -335,7 +335,7 @@
       "invalid_unit": "Solarprognose-Sensor muss 'kWh' oder 'Wh' als Einheit haben.",
       "overlapping_slots": "Dieses Zeitfenster überschneidet sich mit einem bestehenden. Passen Sie die Zeiten oder Tage an.",
       "midnight_crossing": "Die Startzeit muss vor der Endzeit liegen. Für Nachtperioden erstellen Sie zwei separate Zeitfenster (z.B. 22:00-23:59 und 00:00-06:00).",
-      "no_price_data": "Keine Preisdaten vom Sensor verfügbar. Nordpool: benötigt `raw_today`. PVPC: benötigt `price_00h` … `price_23h`. CKW: benötigt das Attribut `prices` mit einer Slot-Liste."
+      "no_price_data": "Keine Preisdaten vom Sensor verfügbar. Nordpool: benötigt `raw_today`. PVPC: benötigt `price_00h` … `price_23h`. CKW: benötigt das Attribut `prices` mit einer Slot-Liste. EPEX: benötigt das Attribut `data` mit einer Slot-Liste. ENTSO-e: benötigt das Attribut `prices_today` mit einer Slot-Liste."
     },
     "abort": {
       "already_configured": "Diese Integration ist bereits konfiguriert."
@@ -693,7 +693,7 @@
       "invalid_unit": "Solarprognose-Sensor muss 'kWh' oder 'Wh' als Einheit haben.",
       "overlapping_slots": "Dieses Zeitfenster überschneidet sich mit einem bestehenden. Passen Sie die Zeiten oder Tage an.",
       "midnight_crossing": "Die Startzeit muss vor der Endzeit liegen. Für Nachtperioden erstellen Sie zwei separate Zeitfenster (z.B. 22:00-23:59 und 00:00-06:00).",
-      "no_price_data": "Keine Preisdaten vom Sensor verfügbar. Nordpool: benötigt `raw_today`. PVPC: benötigt `price_00h` … `price_23h`. CKW: benötigt das Attribut `prices` mit einer Slot-Liste."
+      "no_price_data": "Keine Preisdaten vom Sensor verfügbar. Nordpool: benötigt `raw_today`. PVPC: benötigt `price_00h` … `price_23h`. CKW: benötigt das Attribut `prices` mit einer Slot-Liste. EPEX: benötigt das Attribut `data` mit einer Slot-Liste. ENTSO-e: benötigt das Attribut `prices_today` mit einer Slot-Liste."
     }
   },
   "selector": {
@@ -720,7 +720,8 @@
         "nordpool": "Nordpool",
         "pvpc": "PVPC (Spanien – ESIOS REE)",
         "ckw": "CKW (Schweiz)",
-        "epex": "EPEX Spot (z. B. aWATTar)"
+        "epex": "EPEX Spot (z. B. aWATTar)",
+        "entsoe": "ENTSO-e (Transparency-Plattform)"
       }
     }
   },

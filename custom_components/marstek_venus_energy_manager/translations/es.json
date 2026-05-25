@@ -335,7 +335,7 @@
       "invalid_unit": "El sensor de predicción solar debe tener como unidad 'kWh' o 'Wh'.",
       "overlapping_slots": "Esta franja se solapa con una existente. Ajuste los horarios o los días.",
       "midnight_crossing": "La hora de inicio debe ser anterior a la hora de fin. Para períodos nocturnos, cree dos franjas separadas (ej: 22:00-23:59 y 00:00-06:00).",
-      "no_price_data": "El sensor seleccionado no tiene los atributos de precio esperados. Nordpool: necesita `raw_today`. PVPC: necesita `price_00h` … `price_23h`. CKW: necesita el atributo `prices` con una lista de franjas."
+      "no_price_data": "El sensor seleccionado no tiene los atributos de precio esperados. Nordpool: necesita `raw_today`. PVPC: necesita `price_00h` … `price_23h`. CKW: necesita el atributo `prices` con una lista de franjas. EPEX: necesita el atributo `data` con una lista de franjas. ENTSO-e: necesita el atributo `prices_today` con una lista de franjas."
     },
     "abort": {
       "already_configured": "Esta integración ya está configurada."
@@ -693,7 +693,7 @@
       "invalid_unit": "El sensor de predicción solar debe tener como unidad 'kWh' o 'Wh'.",
       "overlapping_slots": "Esta franja se solapa con una existente. Ajuste los horarios o los días.",
       "midnight_crossing": "La hora de inicio debe ser anterior a la hora de fin. Para períodos nocturnos, cree dos franjas separadas (ej: 22:00-23:59 y 00:00-06:00).",
-      "no_price_data": "El sensor seleccionado no tiene los atributos de precio esperados. Nordpool: necesita `raw_today`. PVPC: necesita `price_00h` … `price_23h`. CKW: necesita el atributo `prices` con una lista de franjas."
+      "no_price_data": "El sensor seleccionado no tiene los atributos de precio esperados. Nordpool: necesita `raw_today`. PVPC: necesita `price_00h` … `price_23h`. CKW: necesita el atributo `prices` con una lista de franjas. EPEX: necesita el atributo `data` con una lista de franjas. ENTSO-e: necesita el atributo `prices_today` con una lista de franjas."
     }
   },
   "selector": {
@@ -720,7 +720,8 @@
         "nordpool": "Nordpool",
         "pvpc": "PVPC (España – ESIOS REE)",
         "ckw": "CKW (Suiza)",
-        "epex": "EPEX Spot (p. ej. aWATTar)"
+        "epex": "EPEX Spot (p. ej. aWATTar)",
+        "entsoe": "ENTSO-e (Plataforma de Transparencia)"
       }
     }
   },
