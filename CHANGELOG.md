@@ -1,9 +1,9 @@
 # Changelog
 
-## Unreleased
+## [1.8.3] - 2026-05-26
 
 ### Added
-- **Active balance mode**: Added a per-battery active balancing mode that charges at 50 W to 3.58 V, waits 60 s to measure `delta_V`, cycles with 25 W discharge until `delta_V <= 0.03 V`, persists its phase across restarts, and performs a final 25 W discharge to 3.42 V before completing.
+- **Active balance mode**: Added a per-battery active balancing mode that charges at 95 W to 3.58 V, waits 60 s to measure `delta_V`, cycles with 25 W discharge to 3.48 V, repeats until `delta_V <= 0.03 V`, persists its phase across restarts, and performs a final 25 W discharge to 3.42 V before completing.
 - **Dynamic Pricing: EPEX Spot support (e.g. aWATTar)**: New price integration option for sensors that expose hourly prices under a `data` attribute as a list of `{start_time, end_time, price_per_kwh}` entries (€/kWh). Reuses the same cheap-hour scheduling and price-based discharge gating as the existing Nordpool/PVPC/CKW integrations.
 - **Dynamic Pricing: ENTSO-e Transparency Platform support**: New price integration option for sensors that expose prices under `prices_today` / `prices_tomorrow` attributes as a list of `{time, price}` entries (€/kWh, ISO 8601 timestamps with timezone). Supports both hourly and 15-minute slots — slot end times are inferred from the next entry's start. Reuses the same cheap-hour scheduling and price-based discharge gating as the other price integrations.
 
