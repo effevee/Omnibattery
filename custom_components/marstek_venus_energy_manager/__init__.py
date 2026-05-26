@@ -1,4 +1,4 @@
-﻿"""The Marstek Venus Energy Manager integration."""
+"""The Marstek Venus Energy Manager integration."""
 from __future__ import annotations
 
 import asyncio
