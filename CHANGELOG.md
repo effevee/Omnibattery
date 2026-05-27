@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.8.4] - 2026-05-27
+
+### Changed
+- **Weekly full charge completion decoupled from delta-V measurement**: Weekly full charge now declares completion as soon as every battery has reached the pause voltage (`max_cell_voltage ≥ 3.58 V`), restoring registers and arming hysteresis immediately. Previously, completion required the 60-second diagnostic delta-V measurement to finish first, which could fail if voltage sagged below 3.58 V under the reduced 95 W taper load before the timer elapsed. The 60-second measurement still runs as a best-effort diagnostic; if it did not finish before completion, a one-shot snapshot is captured at completion time under phase `top_charge_taper_complete`.
+
+### Fixed
+- **Charge hysteresis not activating when max SOC = 100% with voltage taper**: When the charge tapper blocked charging at 3.58 V, the BMS never reported 100% SOC, so the hysteresis activation condition (`current_soc ≥ max_soc`) was never met and the tapper cycled indefinitely without engaging hysteresis. Hysteresis now also activates when the tapper is paused at top voltage and the charge target is 100% (either configured `max_soc = 100%` or weekly full charge active). Active cell balance mode is explicitly excluded.
+
 ## [1.8.3] - 2026-05-26
 
 ### Added

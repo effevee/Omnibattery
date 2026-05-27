@@ -364,21 +364,23 @@ class WeeklyFullChargeManager:
         if hasattr(ctrl, "_normal_balance_reset_if_new_day"):
             ctrl._normal_balance_reset_if_new_day()
 
-        # Completion: when every battery has completed the shared top-voltage
-        # measurement, or has reached a hardware/BMS full condition, restore
-        # registers and mark done.
+        # Completion: when every battery has reached the taper zone (top voltage
+        # seen latch) or has a hardware/BMS full signal.  The 60-second delta-V
+        # measurement in _handle_normal_max_soc_active_balancing continues as a
+        # diagnostic but no longer gates completion.
         batteries_with_data = [
             c
             for c in ctrl.coordinators
             if c.data and not ctrl._is_active_balance_mode_running(c)
         ]
-        measured = getattr(ctrl, "_normal_balance_last_delta_v", {})
+        top_voltage_seen = getattr(ctrl, "_normal_balance_top_voltage_seen", {})
         all_batteries_full = bool(batteries_with_data) and all(
-            c in measured or self.is_battery_full(c) for c in batteries_with_data
+            top_voltage_seen.get(c, False) or self.is_battery_full(c)
+            for c in batteries_with_data
         )
 
         if all_batteries_full and not ctrl.weekly_full_charge_complete:
-            await self._complete_weekly_charge("top_voltage_measurement_complete")
+            await self._complete_weekly_charge("top_voltage_reached")
 
     async def _complete_weekly_charge(self, reason: str) -> None:
         """Mark weekly full charge complete and restore configured limits."""
@@ -416,6 +418,40 @@ class WeeklyFullChargeManager:
                 _LOGGER.error("%s: Failed to restore charging cutoff register: %s", coordinator.name, e)
 
         ctrl._weekly_charge_saved_max_soc.clear()
+
+        # Clear the top-voltage latch so next week starts fresh.
+        if hasattr(ctrl, "_normal_balance_top_voltage_seen"):
+            ctrl._normal_balance_top_voltage_seen.clear()
+
+        # Fire a one-shot delta-V capture for batteries that did not complete
+        # the 60-second diagnostic measurement (measurement is best-effort).
+        measured = getattr(ctrl, "_normal_balance_last_delta_v", {})
+        for coordinator in ctrl.coordinators:
+            if ctrl._is_active_balance_mode_running(coordinator):
+                continue
+            if coordinator in measured:
+                continue
+            if not coordinator.data:
+                continue
+            try:
+                vmax = float(coordinator.data.get("max_cell_voltage"))
+                vmin = float(coordinator.data.get("min_cell_voltage"))
+            except (TypeError, ValueError):
+                continue
+            soc = coordinator.data.get("battery_soc")
+            _LOGGER.info(
+                "%s: Recording top-balance snapshot at completion: vmax=%.3f vmin=%.3f delta=%.4f V",
+                coordinator.name, vmax, vmin, round(vmax - vmin, 4),
+            )
+            ctrl._normal_balance_last_delta_v[coordinator] = round(vmax - vmin, 4)
+            if ctrl._balance_monitor is not None:
+                await ctrl._balance_monitor.async_record_top_balance_measurement(
+                    coordinator,
+                    vmax,
+                    vmin,
+                    soc,
+                    phase="top_charge_taper_complete",
+                )
 
         # Re-enable hysteresis for batteries that have it configured.
         for coordinator in ctrl.coordinators:

@@ -221,6 +221,7 @@ class ChargeDischargeController:
         self._normal_active_balance_phases: dict[MarstekVenusDataUpdateCoordinator, str] = {}
         self._normal_balance_measure_started: dict[MarstekVenusDataUpdateCoordinator, datetime] = {}
         self._normal_balance_last_delta_v: dict[MarstekVenusDataUpdateCoordinator, float] = {}
+        self._normal_balance_top_voltage_seen: dict[MarstekVenusDataUpdateCoordinator, bool] = {}
         self._active_balance_mgr = ActiveBalanceModeManager(hass, self)
         
         # Calculate dynamic anti-windup limits based on total system capacity
@@ -553,6 +554,7 @@ class ChargeDischargeController:
         self._normal_active_balance_phases.clear()
         self._normal_balance_measure_started.clear()
         self._normal_balance_last_delta_v.clear()
+        self._normal_balance_top_voltage_seen.clear()
         for coordinator in self.coordinators:
             self.remove_charge_block("normal_balance_pause", coordinator=coordinator)
 
@@ -646,6 +648,8 @@ class ChargeDischargeController:
                 else:
                     if in_zone and vmax_f >= NORMAL_BALANCE_TAPER_CELL_VOLTAGE:
                         self._normal_balance_voltage_tapered[coordinator] = True
+                    if in_zone and vmax_f >= NORMAL_BALANCE_PAUSE_CELL_VOLTAGE:
+                        self._normal_balance_top_voltage_seen[coordinator] = True
                     if vmax_f >= NORMAL_BALANCE_PAUSE_CELL_VOLTAGE:
                         paused = True
 
@@ -1337,7 +1341,11 @@ class ChargeDischargeController:
             bms_cutoff = self._weekly_charge_mgr.is_battery_full(coordinator)
 
             if coordinator.enable_charge_hysteresis:
-                if current_soc >= coordinator.max_soc or bms_cutoff:
+                taper_at_top_voltage = (
+                    self._normal_balance_charge_paused.get(coordinator, False)
+                    and self._full_charge_voltage_taper_applies(coordinator)
+                )
+                if current_soc >= coordinator.max_soc or bms_cutoff or taper_at_top_voltage:
                     coordinator._hysteresis_active = True
                     if coordinator._hysteresis_base_soc is None:
                         coordinator._hysteresis_base_soc = current_soc
