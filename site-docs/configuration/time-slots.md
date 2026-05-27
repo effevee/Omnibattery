@@ -16,7 +16,7 @@ Time slots define windows during which the battery is **allowed to discharge**. 
 |---|---|
 | **Start / end time** | Slot window (e.g. `14:00` – `18:00`) |
 | **Days** | Days of the week the slot applies to |
-| **Apply to charging** | If enabled, the slot also restricts charging |
+| **Apply to charging** | If enabled, the *charging* and *discharging* is restricted to the slot (outside the slot the battery will remain idle) |
 | **Target grid power** | Grid level the controller regulates toward during the slot |
 
 ### Target grid power
