@@ -11,6 +11,7 @@ from homeassistant.core import callback
 from homeassistant.config_entries import ConfigFlow, OptionsFlow, ConfigEntry
 from homeassistant.const import CONF_HOST, CONF_NAME, CONF_PORT
 from homeassistant.data_entry_flow import FlowResult
+from homeassistant.helpers import device_registry as dr, entity_registry as er
 from homeassistant.helpers.selector import (
     NumberSelector,
     NumberSelectorConfig,
@@ -1599,6 +1600,140 @@ class MarstekVenusConfigFlow(ConfigFlow, domain=DOMAIN):
                         ),
                 }
             ),
+        )
+
+    def _migrate_battery_registry_ids(
+        self,
+        entry: ConfigEntry,
+        old_host: str,
+        old_port: int,
+        new_host: str,
+        new_port: int,
+    ) -> None:
+        """Rename entity unique_ids and device identifiers when a battery's host/port changes.
+
+        Preserves long-term statistics and history by keeping the same entity_id.
+        Battery-level entities use unique_id `{host}_{port}_{key}`; the device identifier
+        is `(DOMAIN, "{host}_{port}")`. Both are rewritten in place.
+        """
+        old_prefix = f"{old_host}_{old_port}_"
+        new_prefix = f"{new_host}_{new_port}_"
+        old_device_id = f"{old_host}_{old_port}"
+        new_device_id = f"{new_host}_{new_port}"
+
+        ent_reg = er.async_get(self.hass)
+        for ent in list(ent_reg.entities.values()):
+            if (
+                ent.config_entry_id == entry.entry_id
+                and ent.unique_id.startswith(old_prefix)
+            ):
+                new_uid = new_prefix + ent.unique_id[len(old_prefix):]
+                ent_reg.async_update_entity(ent.entity_id, new_unique_id=new_uid)
+
+        dev_reg = dr.async_get(self.hass)
+        old_dev = dev_reg.async_get_device(identifiers={(DOMAIN, old_device_id)})
+        if old_dev is not None:
+            new_identifiers = set(old_dev.identifiers)
+            new_identifiers.discard((DOMAIN, old_device_id))
+            new_identifiers.add((DOMAIN, new_device_id))
+            dev_reg.async_update_device(
+                old_dev.id, new_identifiers=new_identifiers
+            )
+
+    async def async_step_reconfigure(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Handle reconfiguration — update battery connection settings (IP/port)."""
+        self.battery_index = 0
+        self._reconfigure_batteries: list[dict] = []
+        return await self.async_step_reconfigure_battery()
+
+    async def async_step_reconfigure_battery(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Update connection settings for each battery during reconfiguration."""
+        entry = self._get_reconfigure_entry()
+        current_batteries = entry.data.get("batteries", [])
+        battery_num = self.battery_index + 1
+        errors = {}
+
+        if user_input is not None:
+            battery_version = user_input.get(CONF_BATTERY_VERSION, DEFAULT_VERSION)
+            if not await self._test_connection(
+                user_input[CONF_HOST], user_input[CONF_PORT], battery_version
+            ):
+                errors["base"] = "cannot_connect"
+            else:
+                original = (
+                    current_batteries[self.battery_index]
+                    if self.battery_index < len(current_batteries)
+                    else {}
+                )
+                old_host = original.get(CONF_HOST)
+                old_port = original.get(CONF_PORT)
+                new_host = user_input[CONF_HOST]
+                new_port = user_input[CONF_PORT]
+
+                if (
+                    old_host
+                    and old_port
+                    and (old_host != new_host or old_port != new_port)
+                ):
+                    self._migrate_battery_registry_ids(
+                        entry, old_host, old_port, new_host, new_port
+                    )
+
+                updated = dict(original)
+                updated[CONF_NAME] = user_input[CONF_NAME]
+                updated[CONF_HOST] = new_host
+                updated[CONF_PORT] = new_port
+                updated[CONF_BATTERY_VERSION] = battery_version
+                self._reconfigure_batteries.append(updated)
+                self.battery_index += 1
+
+                if self.battery_index >= len(current_batteries):
+                    return self.async_update_reload_and_abort(
+                        entry,
+                        data_updates={"batteries": self._reconfigure_batteries},
+                    )
+                return await self.async_step_reconfigure_battery()
+
+        current = (
+            current_batteries[self.battery_index]
+            if self.battery_index < len(current_batteries)
+            else {}
+        )
+        defaults = {
+            CONF_NAME: current.get(CONF_NAME, f"Marstek Venus {battery_num}"),
+            CONF_HOST: current.get(CONF_HOST, ""),
+            CONF_PORT: current.get(CONF_PORT, 502),
+            CONF_BATTERY_VERSION: current.get(CONF_BATTERY_VERSION, DEFAULT_VERSION),
+        }
+
+        return self.async_show_form(
+            step_id="reconfigure_battery",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(CONF_NAME, default=defaults[CONF_NAME]): str,
+                    vol.Required(CONF_HOST, default=defaults[CONF_HOST]): str,
+                    vol.Required(CONF_PORT, default=defaults[CONF_PORT]): int,
+                    vol.Required(
+                        CONF_BATTERY_VERSION, default=defaults[CONF_BATTERY_VERSION]
+                    ): SelectSelector(
+                        SelectSelectorConfig(
+                            options=[
+                                {"value": "v2", "label": "Ev2"},
+                                {"value": "v3", "label": "Ev3"},
+                                {"value": "vA", "label": "A"},
+                                {"value": "vD", "label": "D"},
+                            ],
+                            mode=SelectSelectorMode.DROPDOWN,
+                        )
+                    ),
+                }
+            ),
+            errors=errors,
+            description_placeholders={"battery_num": str(battery_num)},
         )
 
     @staticmethod

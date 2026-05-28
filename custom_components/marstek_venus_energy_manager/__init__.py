@@ -14,6 +14,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform, CONF_HOST, CONF_NAME, CONF_PORT
 from homeassistant.core import CoreState, HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryNotReady
+from homeassistant.helpers.device_registry import DeviceEntry
 from homeassistant.helpers.event import async_track_time_interval, async_track_time_change
 from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
@@ -6593,6 +6594,15 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         _LOGGER.info("Shutting down integration - stopping all battery operations")
         for coordinator in coordinators:
             try:
+                # Skip shutdown writes if device was unreachable to avoid blocking
+                # on TCP connection timeout (~10s per register write attempt)
+                if not coordinator._is_connected:
+                    _LOGGER.info(
+                        "Skipping shutdown writes for %s - device was not connected",
+                        coordinator.name,
+                    )
+                    continue
+
                 # Skip batteries that are actively providing offgrid backup power
                 # (backup switch ON and ac_offgrid_power exceeds threshold, or sensor unavailable)
                 if coordinator.data and coordinator.data.get("backup_function") == 0:
@@ -6641,3 +6651,25 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             hass.data[DOMAIN].pop(entry.entry_id, None)
 
     return unload_ok
+
+
+async def async_remove_config_entry_device(
+    hass: HomeAssistant,
+    config_entry: ConfigEntry,
+    device_entry: DeviceEntry,
+) -> bool:
+    """Allow removal of stale battery devices via the HA UI.
+
+    Returns True when the device is not associated with any currently
+    configured battery, letting the user delete orphaned devices left
+    behind after the battery count was reduced or a battery's host/port
+    changed.
+    """
+    active_identifiers: set[tuple[str, str]] = {(DOMAIN, "marstek_venus_system")}
+    for battery in config_entry.data.get("batteries", []):
+        host = battery.get(CONF_HOST)
+        port = battery.get(CONF_PORT)
+        if host and port:
+            active_identifiers.add((DOMAIN, f"{host}_{port}"))
+
+    return not (device_entry.identifiers & active_identifiers)

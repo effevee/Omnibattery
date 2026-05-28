@@ -349,6 +349,22 @@
           "hourly_balance_deadband_wh": "Tolerancia alrededor del objetivo. No se aplica corrección si el balance neto está dentro de ±N kWh del objetivo. 0 = corrección exacta.",
           "hourly_balance_hysteresis_w": "Cambio mínimo en el desplazamiento necesario para aplicar una nueva corrección. Evita micro-ajustes cada ciclo. 0 = aplicar siempre. Por defecto: 15 W."
         }
+      },
+      "reconfigure_battery": {
+        "title": "Reconfigurar batería {battery_num} — Conexión",
+        "description": "Actualiza los datos de conexión de la batería {battery_num}. Los límites de potencia, SOC y el resto de configuración se conservan.",
+        "data": {
+          "name": "Nombre",
+          "host": "Dirección IP",
+          "port": "Puerto Modbus",
+          "battery_version": "Modelo de batería"
+        },
+        "data_description": {
+          "name": "Nombre descriptivo para identificar esta batería",
+          "host": "Nueva dirección IP de la batería en la red local",
+          "port": "Puerto Modbus (normalmente 502)",
+          "battery_version": "Selecciona la versión de tu modelo de batería"
+        }
       }
     },
     "error": {
@@ -362,7 +378,8 @@
       "no_price_data": "El sensor seleccionado no tiene los atributos de precio esperados. Nordpool: necesita `raw_today`. PVPC: necesita `price_00h` … `price_23h`. CKW: necesita el atributo `prices` con una lista de franjas. EPEX: necesita el atributo `data` con una lista de franjas. ENTSO-e: necesita el atributo `prices_today` con una lista de franjas."
     },
     "abort": {
-      "already_configured": "Esta integración ya está configurada."
+      "already_configured": "Esta integración ya está configurada.",
+      "reconfigure_successful": "Configuración de conexión de batería actualizada correctamente."
     }
   },
   "options": {

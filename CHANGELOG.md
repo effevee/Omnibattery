@@ -25,6 +25,20 @@ Time slots ([`no_discharge_time_slots`](custom_components/marstek_venus_energy_m
 - SOC override is enforced by software (no hardware register sync on v3/vA/vD; v2 cutoff registers `44000`/`44001` are not re-written per slot). Expect 1–3 control cycles of latency (~3–9 s) before charge or discharge stops at the slot's SOC limit.
 - Slots that target a `battery_N` no longer present (e.g. battery count reduced after configuration) become inert. Remove or edit them via the options flow.
 
+### Fixed
+- **Unavailable device blocks config entry deletion**: When a battery was unreachable (IP changed or device offline), `async_unload_entry` attempted to write shutdown registers to each battery. With `timeout=10 s` per Modbus connection attempt and 4 registers per battery, the unload could block for ~40 s per unreachable battery, causing the HA UI to report the entry as undeletable. Shutdown writes are now skipped for coordinators whose `_is_connected` flag is `False`; the disconnect call still runs to clean up any partially open socket.
+- **No reconfigure path when device IP changes**: Adding a new config entry after an IP change left the old entry stranded with no way to update it in place. `async_step_reconfigure` and `async_step_reconfigure_battery` are now implemented: the **Reconfigure** button in HA UI prompts for new IP/port/model for each battery (pre-filled with current values), tests the connection, preserves all power and SOC limits, and reloads the entry on success. Battery-level entity unique IDs (`{host}_{port}_{key}`) and the device identifier (`(DOMAIN, "{host}_{port}")`) are rewritten in place via the entity and device registries before reload, so long-term statistics, history, energy dashboard data, and customizations survive the IP change with no data loss.
+- **Stale battery devices could not be removed from HA UI**: When the battery count was reduced or a battery's host/port changed, the device registry retained the old entry with no way to remove it (HA showed no "Delete" option because the integration did not implement `async_remove_config_entry_device`). The handler now allows removal when the device's identifiers no longer match any currently configured battery (`(DOMAIN, "{host}_{port}")`); the system-level device (`(DOMAIN, "marstek_venus_system")`) is always protected from accidental removal.
+- **PD control starved by polling on slow batteries (v3)**: The Modbus poll loop acquired and released the coordinator lock for each register but never yielded the event loop between iterations. On v3 batteries where a full poll cycle takes ~3 s, the PD control writer waiting on the lock was repeatedly bypassed as the tight for loop re-acquired the lock before asyncio could schedule the writer. Added `await asyncio.sleep(0)` after each register read so the event loop gets a tick to hand the lock to the PD control coroutine between reads.
+
+## [1.8.4] - 2026-05-27
+
+### Changed
+- **Weekly full charge completion decoupled from delta-V measurement**: Weekly full charge now declares completion as soon as every battery has reached the pause voltage (`max_cell_voltage ≥ 3.58 V`), restoring registers and arming hysteresis immediately. Previously, completion required the 60-second diagnostic delta-V measurement to finish first, which could fail if voltage sagged below 3.58 V under the reduced 95 W taper load before the timer elapsed. The 60-second measurement still runs as a best-effort diagnostic; if it did not finish before completion, a one-shot snapshot is captured at completion time under phase `top_charge_taper_complete`.
+
+### Fixed
+- **Charge hysteresis not activating when max SOC = 100% with voltage taper**: When the charge tapper blocked charging at 3.58 V, the BMS never reported 100% SOC, so the hysteresis activation condition (`current_soc ≥ max_soc`) was never met and the tapper cycled indefinitely without engaging hysteresis. Hysteresis now also activates when the tapper is paused at top voltage and the charge target is 100% (either configured `max_soc = 100%` or weekly full charge active). Active cell balance mode is explicitly excluded.
+
 ## [1.8.3] - 2026-05-26
 
 ### Added
