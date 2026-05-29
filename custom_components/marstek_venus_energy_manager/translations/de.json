@@ -936,7 +936,9 @@
           "ev_charger_pause": "EV-Ladepause",
           "ev_discharge_blocked": "EV-Entladung Blockiert",
           "backup_mode": "Backup-Modus",
+          "time_slot_manual": "Manuelles Zeitfenster",
           "no_discharge_slot": "Entlade-Sperrzeit",
+          "no_charge_slot": "Lade-Sperrzeit",
           "charging": "Laden",
           "discharging": "Entladen",
           "balanced": "Standby"

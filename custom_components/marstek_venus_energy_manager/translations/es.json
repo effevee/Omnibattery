@@ -936,7 +936,9 @@
           "ev_charger_pause": "Pausa por Cargador EV",
           "ev_discharge_blocked": "Descarga EV Bloqueada",
           "backup_mode": "Modo Backup",
+          "time_slot_manual": "Franja Manual",
           "no_discharge_slot": "Franja sin Descarga",
+          "no_charge_slot": "Franja sin Carga",
           "charging": "Cargando",
           "discharging": "Descargando",
           "balanced": "En standby"
