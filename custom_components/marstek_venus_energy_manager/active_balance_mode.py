@@ -263,6 +263,15 @@ class ActiveBalanceModeManager:
         except (TypeError, ValueError):
             return "n/a"
 
+    def _format_delta_mv(self, value_v) -> str:
+        """Format a delta stored in volts as mV, matching the Cell Delta sensor."""
+        if value_v is None:
+            return "n/a"
+        try:
+            return f"{float(value_v) * 1000:.0f} mV"
+        except (TypeError, ValueError):
+            return "n/a"
+
     def _active_balance_notification_id(
         self,
         coordinator,
@@ -322,8 +331,8 @@ class ActiveBalanceModeManager:
         start_delta = getattr(coordinator, "active_balance_mode_start_delta_mv", None)
         message = "\n".join(
             [
-                f"📊 Initial delta: {self._format_active_balance_value(start_delta, 'V', 4)} "
-                f"(target ≤ {ACTIVE_BALANCE_MODE_TARGET_DELTA_V:.3f} V)",
+                f"📊 Initial delta: {self._format_delta_mv(start_delta)} "
+                f"(target ≤ {ACTIVE_BALANCE_MODE_TARGET_DELTA_V * 1000:.0f} mV)",
                 "🚫 Battery paused from normal control while balancing.",
             ]
         )
@@ -386,9 +395,9 @@ class ActiveBalanceModeManager:
         message = "\n".join(
             [
                 f"✅ {reason_text}",
-                f"📊 Delta: {self._format_active_balance_value(start_delta, 'V', 4)} → "
-                f"{self._format_active_balance_value(final_delta, 'V', 4)} "
-                f"(improvement {self._format_active_balance_value(improvement, 'V', 4)})",
+                f"📊 Delta: {self._format_delta_mv(start_delta)} → "
+                f"{self._format_delta_mv(final_delta)} "
+                f"(improvement {self._format_delta_mv(improvement)})",
                 f"⏱️ Duration: {self._format_active_balance_value(elapsed_h, 'h', 2)}",
             ]
         )
