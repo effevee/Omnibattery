@@ -331,8 +331,9 @@ class ActiveBalanceModeManager:
         start_delta = getattr(coordinator, "active_balance_mode_start_delta_mv", None)
         message = "\n".join(
             [
-                f"📊 Initial delta: {self._format_delta_mv(start_delta)} "
-                f"(target ≤ {ACTIVE_BALANCE_MODE_TARGET_DELTA_V * 1000:.0f} mV)",
+                f"📊 Initial delta: {self._format_delta_mv(start_delta)}",
+                f"🎯 Runs until delta ≤ {ACTIVE_BALANCE_MODE_TARGET_DELTA_V * 1000:.0f} mV "
+                f"or you stop it.",
                 "🚫 Battery paused from normal control while balancing.",
             ]
         )
