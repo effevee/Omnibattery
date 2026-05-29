@@ -1785,6 +1785,12 @@ class ChargeDischargeController:
                 # Check if weekly full charge is active AND 100% is actually unlocked
                 weekly_100_unlocked = self._weekly_full_charge_unlocked()
 
+                # Determine effective max SOC (respects slot/predictive overrides)
+                effective_max_soc, max_soc_source = self._effective_charge_max_soc(
+                    coordinator,
+                    weekly_100_unlocked,
+                )
+
                 # Update hysteresis state if enabled
                 if coordinator.enable_charge_hysteresis:
                     # Only override hysteresis when an explicit full/top-balance
@@ -1810,7 +1816,7 @@ class ChargeDischargeController:
                         # Normal hysteresis logic
                         _vmax_hysteresis = coordinator.data.get("max_cell_voltage") if coordinator.data else None
                         _taper_at_top = False
-                        if coordinator.max_soc >= 100 and _vmax_hysteresis is not None:
+                        if effective_max_soc >= 100 and _vmax_hysteresis is not None:
                             try:
                                 _taper_at_top = float(_vmax_hysteresis) >= NORMAL_BALANCE_PAUSE_CELL_VOLTAGE
                             except (TypeError, ValueError):
@@ -1833,11 +1839,6 @@ class ChargeDischargeController:
                                          coordinator.name, current_soc, charge_threshold, hysteresis_base)
                             continue
 
-                # Determine effective max SOC
-                effective_max_soc, max_soc_source = self._effective_charge_max_soc(
-                    coordinator,
-                    weekly_100_unlocked,
-                )
                 if max_soc_source == "weekly_full_charge":
                     _LOGGER.debug("%s: Weekly Full Charge active - effective_max_soc=100%% (configured: %d%%)",
                                  coordinator.name, coordinator.max_soc)
