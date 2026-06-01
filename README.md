@@ -12,12 +12,14 @@ The **Marstek Venus Energy Manager** is a comprehensive Home Assistant integrati
 >
 > **If you do not agree to these terms, DO NOT install or use this integration.**
 
+
+![Dashboard](assets/MVEM%20-%20Dashboard.gif)
+
 ## Support
 
 If you find this integration useful, you can support my work:
 
 <a href="https://buymeacoffee.com/ffunes" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" height="40" width="145" ></a>
-
 ## Documentation
 
 Full documentation (configuration, features, entities, troubleshooting) is available at:
