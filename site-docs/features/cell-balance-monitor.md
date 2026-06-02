@@ -107,12 +107,12 @@ flowchart TD
     H --> I(Wait 60s)
     I --> J("Measure cell_delta = (cell_Vmax - cell_Vmin) * 1000")
     J --> K{cell_delta > 0.03 V}
-    K -->|Yes| L(Discharge with 25 W)
+    K -->|Yes| L(Discharge with 200 W)
     L --> M{max_cell_voltage <= 3.49 V}
     M --> |Yes| D
     M --> |No| L
     K --> |No| N([Final discharge])
-    N --> O(Discharge with 25 W)
+    N --> O(Discharge with 200 W)
     O --> P{max_cell_voltage <= 3.48 V}
     P --> |No| N
     P --> |Yes| Q([Active balance stop]) 
@@ -124,8 +124,8 @@ flowchart TD
 | Before the top window | Charge from the grid at the battery's configured maximum charge power until `max_cell_voltage >= 3.49 V` |
 | Regulated top charge | Charge at 95 W until `max_cell_voltage >= 3.58 V` |
 | Measurement wait | Stop charge/discharge, wait 60 s, then measure cell delta |
-| If `delta_V > 0.03 V` | Discharge at 25 W until `max_cell_voltage <= 3.49 V`, then charge again |
-| If `delta_V <= 0.03 V` | Final discharge at 25 W until `max_cell_voltage <= 3.48 V`, then finish and turn the switch off |
+| If `delta_V > 0.03 V` | Discharge at 200 W until `max_cell_voltage <= 3.49 V`, then charge again |
+| If `delta_V <= 0.03 V` | Final discharge at 200 W until `max_cell_voltage <= 3.48 V`, then finish and turn the switch off |
 
 If the BMS accepts the charge command but does not actually charge before reaching 3.58 V, the integration treats that as charge rejection. It discharges first and lowers the retry voltage by 0.01 V, down to a minimum of 3.40 V, so the next cycle can restart from a point where the BMS is more likely to accept charge.
 
