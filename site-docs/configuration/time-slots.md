@@ -56,3 +56,5 @@ The `binary_sensor.predictive_charging_active` entity exposes two attributes tha
 - Maximum 8 slots per integration.
 - SOC override is enforced by software; expect 1–3 control cycles of latency (~3–9 s) before charge or discharge stops at the new limit.
 - Slots that target a `battery_N` that no longer exists (e.g. the user reduced the battery count) become inert; remove or edit them from the options flow.
+
+![Time slot configuration](../assets/screenshots/configuration/time-slot-form.png){ width="600"  style="display: block; margin: 0 auto;"}
