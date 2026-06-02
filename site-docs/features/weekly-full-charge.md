@@ -4,18 +4,17 @@ Charges batteries to **100% once a week** so the pack reaches the LFP top-balanc
 
 ## Charge profiles
 
-| Profile | Description | Default |
-| --- | --- | --- |
-| **100% charge voltage taper** | Slows charge near top voltage window to allow some minor cell balancing | On |
-| **Active cell balancing** | Full cell balancing - repeated slow charge/discharge near top voltage window until `cell_delta_V` drops below 0.03 V or switched off | Off |
-
-!!! note These profiles can be switched on/off for each battery
+| Profile | Description | Switch | Default |
+| --- | --- | --- | --- | 
+| **100% charge voltage taper** | Slows charging near top voltage window to allow some minor cell balancing | `full_charge_voltage_taper` | On |
+| **Active cell balancing** | Full cell balancing - repeated slow charge/discharge near top voltage window until `cell_delta_V` drops below 0.03 V or switched off | `active_balance_mode` | Off |
 
 The 100% charge voltage taper uses the same voltage profile as a normal battery configured with `max_soc = 100`. The weekly feature only raises the target to 100%; it does not use a separate balancing algorithm.
 
 Active cell balancing repeatedly cycles slow charge or discharge near the top voltage window until the measured top-voltage delta is at or below 0.03 V, or until the user turns the switch off.
 
-!!! warning Active cell balancing is **very slow**. Reducing the top-of-charge cell delta by roughly 5 mV typically takes around 24 hours of cumulative time at the top of the balance window.
+!!! warning "Cell balancing"
+    Active cell balancing is **very slow**. Reducing the top-of-charge cell delta by roughly 5 mV typically takes around 24 hours of cumulative time at the top of the balance window.
 
 See [Cell balancing](cell-balance-monitor.md) for full details.
 
@@ -23,7 +22,7 @@ See [Cell balancing](cell-balance-monitor.md) for full details.
 
 The **cell balance monitor** is only active when checked in the Weekly Full Charge Configuration. It records the voltage spread between the highest and lowest cell after each top-voltage measurement and keeps the sensor history, trend and alerts updated.
 
-See [Advanced options](configuration/advanced.md) for full details.
+See [Advanced options](/configuration/advanced.md) for full details.
 
 ## Interaction with solar charge delay
 
