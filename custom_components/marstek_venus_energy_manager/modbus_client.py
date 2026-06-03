@@ -7,6 +7,7 @@ a Marstek Venus battery system asynchronously.
 from pymodbus.client import AsyncModbusTcpClient
 from pymodbus.exceptions import ConnectionException, ModbusIOException
 import asyncio
+import inspect
 import socket
 from typing import Optional
 
@@ -33,13 +34,29 @@ def _marstek_v3_packet_correction(sending: bool, data: bytes) -> bytes:
     return data
 
 
+def _detect_slave_kwarg(client) -> str:
+    """Return the keyword pymodbus uses to address the slave/unit id.
+
+    pymodbus renamed this parameter from ``slave`` to ``device_id`` across 3.x
+    releases. Inspect the live method signature so we pass the right one
+    regardless of the version Home Assistant bundles.
+    """
+    try:
+        params = inspect.signature(client.read_holding_registers).parameters
+        if "device_id" in params:
+            return "device_id"
+    except (ValueError, TypeError):
+        pass
+    return "slave"
+
+
 class MarstekModbusClient:
     """
     Wrapper for pymodbus AsyncModbusTcpClient with helper methods
     for async reading/writing and interpreting common data types.
     """
 
-    def __init__(self, host: str, port: int = 502, message_wait_ms: int = 50, timeout: int = 10, is_v3: bool = False):
+    def __init__(self, host: str, port: int = 502, message_wait_ms: int = 50, timeout: int = 10, is_v3: bool = False, slave_id: int = 1):
         """
         Initialize Modbus client with host, port, message wait time, and timeout.
 
@@ -49,6 +66,7 @@ class MarstekModbusClient:
             message_wait_ms (int): Delay in ms between Modbus messages.
             timeout (int): Connection timeout in seconds.
             is_v3 (bool): If True, enable v3 firmware packet correction.
+            slave_id (int): Modbus slave/unit id to address (default 1).
         """
         self.host = host
         self.port = port
@@ -76,7 +94,8 @@ class MarstekModbusClient:
             self.client.trace_packet = _marstek_v3_packet_correction
 
         self.client.message_wait_milliseconds = message_wait_ms
-        self.unit_id = 1  # Default Unit ID
+        self.unit_id = slave_id  # Modbus slave/unit id for this battery
+        self._slave_kwarg = _detect_slave_kwarg(self.client)  # "slave" or "device_id"
         self._is_shutting_down = False  # Flag to suppress errors during shutdown
 
     def set_shutting_down(self, value: bool) -> None:
@@ -258,7 +277,7 @@ class MarstekModbusClient:
 
             try:
                 result = await asyncio.wait_for(
-                    self.client.read_holding_registers(address=register, count=count),
+                    self.client.read_holding_registers(address=register, count=count, **{self._slave_kwarg: self.unit_id}),
                     timeout=self._timeout,
                 )
                 if result.isError():
@@ -420,7 +439,7 @@ class MarstekModbusClient:
                 if DEBUG_RAW_MODBUS_READS:
                     _LOGGER.debug("Modbus write: register=%d/0x%04X value=%s", register, register, value)
                 result = await asyncio.wait_for(
-                    self.client.write_register(address=register, value=value),
+                    self.client.write_register(address=register, value=value, **{self._slave_kwarg: self.unit_id}),
                     timeout=self._timeout,
                 )
                 return not result.isError()

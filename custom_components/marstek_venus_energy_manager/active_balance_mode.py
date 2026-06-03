@@ -254,7 +254,7 @@ class ActiveBalanceModeManager:
         """
         monitor = getattr(self._controller, "_balance_monitor", None)
         if monitor is not None:
-            readings = monitor.get_recent_readings(coordinator.host, limit=1)
+            readings = monitor.get_recent_readings(coordinator.device_key, limit=1)
             if readings:
                 last = readings[-1]
                 try:
@@ -307,8 +307,7 @@ class ActiveBalanceModeManager:
         parts = [
             "marstek_active_balance_mode",
             kind,
-            coordinator.host,
-            coordinator.port,
+            coordinator.device_key,
         ]
         if started_ts:
             parts.append(started_ts)
@@ -334,10 +333,10 @@ class ActiveBalanceModeManager:
     async def _dismiss_legacy_active_balance_notifications(self, coordinator) -> None:
         """Dismiss pre per-run active-balance notification IDs."""
         await self._dismiss_persistent_notification(
-            f"marstek_active_balance_mode_start_{coordinator.host}_{coordinator.port}"
+            f"marstek_active_balance_mode_start_{coordinator.device_key}"
         )
         await self._dismiss_persistent_notification(
-            f"marstek_active_balance_mode_result_{coordinator.host}_{coordinator.port}"
+            f"marstek_active_balance_mode_result_{coordinator.device_key}"
         )
 
     async def _notify_active_balance_mode_started(
@@ -397,7 +396,7 @@ class ActiveBalanceModeManager:
         if final_delta is None:
             monitor = getattr(self._controller, "_balance_monitor", None)
             if monitor is not None:
-                readings = monitor.get_recent_readings(coordinator.host, limit=1)
+                readings = monitor.get_recent_readings(coordinator.device_key, limit=1)
                 if readings:
                     try:
                         final_delta = float(readings[-1].get("delta_mV")) / 1000.0

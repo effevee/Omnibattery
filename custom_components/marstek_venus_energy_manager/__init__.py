@@ -969,7 +969,8 @@ class ChargeDischargeController:
         new_data = dict(coordinator._config_entry.data)
         batteries = [dict(b) for b in new_data.get("batteries", [])]
         for battery in batteries:
-            if battery.get("host") == coordinator.host and battery.get("port") == coordinator.port:
+            if (battery.get("host") == coordinator.host and battery.get("port") == coordinator.port
+                    and battery.get("slave_id", 1) == coordinator.slave_id):
                 battery.update(updates)
                 break
         new_data["batteries"] = batteries
@@ -6514,7 +6515,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await _async_register_frontend_panel(hass, entry)
 
     # Migration: Add default version for existing installations
-    from .const import CONF_BATTERY_VERSION, DEFAULT_VERSION
+    from .const import CONF_BATTERY_VERSION, DEFAULT_VERSION, CONF_SLAVE_ID, DEFAULT_SLAVE_ID
 
     for battery_config in entry.data["batteries"]:
         if CONF_BATTERY_VERSION not in battery_config:
@@ -6529,6 +6530,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             name=battery_config[CONF_NAME],
             host=battery_config[CONF_HOST],
             port=battery_config[CONF_PORT],
+            slave_id=battery_config.get(CONF_SLAVE_ID, DEFAULT_SLAVE_ID),
             consumption_sensor=entry.data["consumption_sensor"],
             battery_version=battery_config.get(CONF_BATTERY_VERSION, DEFAULT_VERSION),
             max_charge_power=battery_config["max_charge_power"],
@@ -6923,11 +6925,17 @@ async def async_remove_config_entry_device(
     behind after the battery count was reduced or a battery's host/port
     changed.
     """
+    from .const import CONF_SLAVE_ID, DEFAULT_SLAVE_ID
+
     active_identifiers: set[tuple[str, str]] = {(DOMAIN, "marstek_venus_system")}
     for battery in config_entry.data.get("batteries", []):
         host = battery.get(CONF_HOST)
         port = battery.get(CONF_PORT)
         if host and port:
-            active_identifiers.add((DOMAIN, f"{host}_{port}"))
+            # Must match MarstekVenusDataUpdateCoordinator.device_key: slave id 1
+            # keeps the historical {host}_{port} form, others get a suffix.
+            slave_id = battery.get(CONF_SLAVE_ID, DEFAULT_SLAVE_ID)
+            device_key = f"{host}_{port}" if slave_id == 1 else f"{host}_{port}_{slave_id}"
+            active_identifiers.add((DOMAIN, device_key))
 
     return not (device_entry.identifiers & active_identifiers)

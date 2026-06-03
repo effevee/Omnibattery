@@ -33,7 +33,7 @@ class MarstekVenusDataUpdateCoordinator(DataUpdateCoordinator):
     """Manages polling for data from a single Marstek Venus battery."""
 
     def __init__(self, hass: HomeAssistant, name: str, host: str, port: int, consumption_sensor: str,
-                 battery_version: str = "v2",
+                 battery_version: str = "v2", slave_id: int = 1,
                  max_charge_power: int = 2500, max_discharge_power: int = 2500,
                  max_soc: int = 100, min_soc: int = 12,
                  enable_charge_hysteresis: bool = False, charge_hysteresis_percent: int = 5,
@@ -51,6 +51,7 @@ class MarstekVenusDataUpdateCoordinator(DataUpdateCoordinator):
         self.name = name
         self.host = host
         self.port = port
+        self.slave_id = slave_id
         self.consumption_sensor = consumption_sensor
 
         # Validate and store battery version
@@ -66,7 +67,7 @@ class MarstekVenusDataUpdateCoordinator(DataUpdateCoordinator):
         # Create Modbus client with version-specific timing and packet correction
         wait_ms = MESSAGE_WAIT_MS.get(self.battery_version, 50)
         is_v3 = self.battery_version in ("v3", "vA", "vD")
-        self.client = MarstekModbusClient(host, port, message_wait_ms=wait_ms, is_v3=is_v3)
+        self.client = MarstekModbusClient(host, port, message_wait_ms=wait_ms, is_v3=is_v3, slave_id=slave_id)
 
         self.max_charge_power = max_charge_power
         self.max_discharge_power = max_discharge_power
@@ -195,6 +196,18 @@ class MarstekVenusDataUpdateCoordinator(DataUpdateCoordinator):
         """Return whether the battery is currently reachable."""
         return self._is_connected and not self._is_shutting_down
 
+    @property
+    def device_key(self) -> str:
+        """Stable per-battery key for entity unique_ids and device identifiers.
+
+        Backward compatible: slave id 1 keeps the historical ``{host}_{port}``
+        form so existing installs are untouched. Only non-default slave ids
+        (Modbus proxy setups sharing one host:port) get the ``_{slave}`` suffix.
+        """
+        if self.slave_id == 1:
+            return f"{self.host}_{self.port}"
+        return f"{self.host}_{self.port}_{self.slave_id}"
+
     async def connect(self) -> bool:
         """Connect to the Modbus client."""
         connected = await self.client.async_connect()
@@ -240,7 +253,7 @@ class MarstekVenusDataUpdateCoordinator(DataUpdateCoordinator):
                 if not self.rs485_user_disabled:
                     rs485_reg = self.get_register("rs485_control")
                     if rs485_reg:
-                        self.client.unit_id = 1
+                        self.client.unit_id = self.slave_id
                         ok = await self.client.async_write_register(rs485_reg, 21930)  # 0x55AA
                         if ok:
                             _LOGGER.info("[%s] RS485 control mode re-enabled after reconnection", self.name)
@@ -271,7 +284,8 @@ class MarstekVenusDataUpdateCoordinator(DataUpdateCoordinator):
         new_data = dict(self._config_entry.data)
         batteries = [dict(b) for b in new_data.get("batteries", [])]
         for battery in batteries:
-            if battery.get("host") == self.host and battery.get("port") == self.port:
+            if (battery.get("host") == self.host and battery.get("port") == self.port
+                    and battery.get("slave_id", 1) == self.slave_id):
                 battery["rs485_user_disabled"] = value
                 break
         new_data["batteries"] = batteries
@@ -284,7 +298,8 @@ class MarstekVenusDataUpdateCoordinator(DataUpdateCoordinator):
         new_data = dict(self._config_entry.data)
         batteries = [dict(b) for b in new_data.get("batteries", [])]
         for battery in batteries:
-            if battery.get("host") == self.host and battery.get("port") == self.port:
+            if (battery.get("host") == self.host and battery.get("port") == self.port
+                    and battery.get("slave_id", 1) == self.slave_id):
                 battery[key] = value
                 break
         new_data["batteries"] = batteries
@@ -366,7 +381,7 @@ class MarstekVenusDataUpdateCoordinator(DataUpdateCoordinator):
         dependency_keys_set.update({"max_cell_voltage", "min_cell_voltage"})
 
         # Set client unit ID for this battery
-        self.client.unit_id = 1
+        self.client.unit_id = self.slave_id
 
         # Track read attempts vs successes for connection health monitoring
         sensors_attempted = 0
@@ -382,7 +397,7 @@ class MarstekVenusDataUpdateCoordinator(DataUpdateCoordinator):
             # Determine entity type for registry lookup
             entity_type = self._get_entity_type(sensor)
             unique_id_formats = [
-                f"{self.host}_{self.port}_{sensor['key']}",  # current format (post-migration)
+                f"{self.device_key}_{sensor['key']}",  # current format (post-migration)
                 f"{self.host}_{sensor['key']}",               # legacy format (pre-migration)
                 f"{self.name}_{sensor['key']}",               # historical legacy
             ]
@@ -616,7 +631,7 @@ class MarstekVenusDataUpdateCoordinator(DataUpdateCoordinator):
         """Write a value to a register and optionally do an immediate refresh."""
         success = False
         async with self.lock:
-            self.client.unit_id = 1
+            self.client.unit_id = self.slave_id
 
             try:
                 success = await self.client.async_write_register(register, value)
@@ -645,7 +660,7 @@ class MarstekVenusDataUpdateCoordinator(DataUpdateCoordinator):
         Or None if read fails.
         """
         async with self.lock:
-            self.client.unit_id = 1
+            self.client.unit_id = self.slave_id
             try:
                 # Get version-specific registers
                 force_mode_reg = self.get_register("force_mode")
@@ -701,7 +716,7 @@ class MarstekVenusDataUpdateCoordinator(DataUpdateCoordinator):
         Returns feedback dict or None if any operation fails.
         """
         async with self.lock:
-            self.client.unit_id = 1
+            self.client.unit_id = self.slave_id
 
             discharge_reg = self.get_register("set_discharge_power")
             charge_reg = self.get_register("set_charge_power")

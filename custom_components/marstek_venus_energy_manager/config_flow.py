@@ -48,6 +48,8 @@ from .const import (
     CONF_DELAY_SOC_SETPOINT,
     DEFAULT_DELAY_SOC_SETPOINT,
     CONF_BATTERY_VERSION,
+    CONF_SLAVE_ID,
+    DEFAULT_SLAVE_ID,
     DEFAULT_VERSION,
     REGISTER_MAP,
     MAX_POWER_BY_VERSION,
@@ -423,10 +425,10 @@ class MarstekVenusConfigFlow(ConfigFlow, domain=DOMAIN):
         self._current_battery_data = {}  # Stores connection data between battery steps
         self._pending_slot_step_a: dict | None = None  # Buffer between slot step A and step B
 
-    async def _test_connection(self, host: str, port: int, version: str = "v2") -> bool:
+    async def _test_connection(self, host: str, port: int, version: str = "v2", slave_id: int = DEFAULT_SLAVE_ID) -> bool:
         """Test connection to a Marstek Venus battery using version-specific register."""
-        _LOGGER.info("Testing connection to %s:%s (%s)", host, port, version)
-        client = MarstekModbusClient(host, port)
+        _LOGGER.info("Testing connection to %s:%s (%s) slave %s", host, port, version, slave_id)
+        client = MarstekModbusClient(host, port, slave_id=slave_id)
         try:
             connected = await client.async_connect()
             if not connected:
@@ -556,10 +558,12 @@ class MarstekVenusConfigFlow(ConfigFlow, domain=DOMAIN):
 
         if user_input is not None:
             battery_version = user_input.get(CONF_BATTERY_VERSION, DEFAULT_VERSION)
+            slave_id = user_input.get(CONF_SLAVE_ID, DEFAULT_SLAVE_ID)
             connection_result = await self._test_connection(
                 user_input[CONF_HOST],
                 user_input[CONF_PORT],
                 battery_version,
+                slave_id,
             )
             if not connection_result:
                 errors["base"] = "cannot_connect"
@@ -568,6 +572,7 @@ class MarstekVenusConfigFlow(ConfigFlow, domain=DOMAIN):
                     CONF_NAME: user_input[CONF_NAME],
                     CONF_HOST: user_input[CONF_HOST],
                     CONF_PORT: user_input[CONF_PORT],
+                    CONF_SLAVE_ID: slave_id,
                     CONF_BATTERY_VERSION: battery_version,
                 }
                 return await self.async_step_battery_limits()
@@ -579,6 +584,7 @@ class MarstekVenusConfigFlow(ConfigFlow, domain=DOMAIN):
                     vol.Required(CONF_NAME, default=f"Marstek Venus {battery_num}"): str,
                     vol.Required(CONF_HOST): str,
                     vol.Required(CONF_PORT, default=502): int,
+                    vol.Required(CONF_SLAVE_ID, default=DEFAULT_SLAVE_ID): vol.All(int, vol.Range(min=1, max=247)),
                     vol.Required(CONF_BATTERY_VERSION, default=DEFAULT_VERSION):
                         SelectSelector(SelectSelectorConfig(
                             options=[
@@ -1624,17 +1630,23 @@ class MarstekVenusConfigFlow(ConfigFlow, domain=DOMAIN):
         old_port: int,
         new_host: str,
         new_port: int,
+        old_slave: int = DEFAULT_SLAVE_ID,
+        new_slave: int = DEFAULT_SLAVE_ID,
     ) -> None:
-        """Rename entity unique_ids and device identifiers when a battery's host/port changes.
+        """Rename entity unique_ids and device identifiers when a battery's host/port/slave changes.
 
         Preserves long-term statistics and history by keeping the same entity_id.
-        Battery-level entities use unique_id `{host}_{port}_{key}`; the device identifier
-        is `(DOMAIN, "{host}_{port}")`. Both are rewritten in place.
+        Battery-level keys follow `coordinator.device_key` (`{host}_{port}` for
+        slave 1, `{host}_{port}_{slave}` otherwise); the device identifier is
+        `(DOMAIN, device_key)`. Both are rewritten in place.
         """
-        old_prefix = f"{old_host}_{old_port}_"
-        new_prefix = f"{new_host}_{new_port}_"
-        old_device_id = f"{old_host}_{old_port}"
-        new_device_id = f"{new_host}_{new_port}"
+        def _device_key(host: str, port: int, slave: int) -> str:
+            return f"{host}_{port}" if slave == 1 else f"{host}_{port}_{slave}"
+
+        old_device_id = _device_key(old_host, old_port, old_slave)
+        new_device_id = _device_key(new_host, new_port, new_slave)
+        old_prefix = f"{old_device_id}_"
+        new_prefix = f"{new_device_id}_"
 
         ent_reg = er.async_get(self.hass)
         for ent in list(ent_reg.entities.values()):
@@ -1674,8 +1686,9 @@ class MarstekVenusConfigFlow(ConfigFlow, domain=DOMAIN):
 
         if user_input is not None:
             battery_version = user_input.get(CONF_BATTERY_VERSION, DEFAULT_VERSION)
+            slave_id = user_input.get(CONF_SLAVE_ID, DEFAULT_SLAVE_ID)
             if not await self._test_connection(
-                user_input[CONF_HOST], user_input[CONF_PORT], battery_version
+                user_input[CONF_HOST], user_input[CONF_PORT], battery_version, slave_id
             ):
                 errors["base"] = "cannot_connect"
             else:
@@ -1686,22 +1699,24 @@ class MarstekVenusConfigFlow(ConfigFlow, domain=DOMAIN):
                 )
                 old_host = original.get(CONF_HOST)
                 old_port = original.get(CONF_PORT)
+                old_slave = original.get(CONF_SLAVE_ID, DEFAULT_SLAVE_ID)
                 new_host = user_input[CONF_HOST]
                 new_port = user_input[CONF_PORT]
 
                 if (
                     old_host
                     and old_port
-                    and (old_host != new_host or old_port != new_port)
+                    and (old_host != new_host or old_port != new_port or old_slave != slave_id)
                 ):
                     self._migrate_battery_registry_ids(
-                        entry, old_host, old_port, new_host, new_port
+                        entry, old_host, old_port, new_host, new_port, old_slave, slave_id
                     )
 
                 updated = dict(original)
                 updated[CONF_NAME] = user_input[CONF_NAME]
                 updated[CONF_HOST] = new_host
                 updated[CONF_PORT] = new_port
+                updated[CONF_SLAVE_ID] = slave_id
                 updated[CONF_BATTERY_VERSION] = battery_version
                 self._reconfigure_batteries.append(updated)
                 self.battery_index += 1
@@ -1722,6 +1737,7 @@ class MarstekVenusConfigFlow(ConfigFlow, domain=DOMAIN):
             CONF_NAME: current.get(CONF_NAME, f"Marstek Venus {battery_num}"),
             CONF_HOST: current.get(CONF_HOST, ""),
             CONF_PORT: current.get(CONF_PORT, 502),
+            CONF_SLAVE_ID: current.get(CONF_SLAVE_ID, DEFAULT_SLAVE_ID),
             CONF_BATTERY_VERSION: current.get(CONF_BATTERY_VERSION, DEFAULT_VERSION),
         }
 
@@ -1732,6 +1748,7 @@ class MarstekVenusConfigFlow(ConfigFlow, domain=DOMAIN):
                     vol.Required(CONF_NAME, default=defaults[CONF_NAME]): str,
                     vol.Required(CONF_HOST, default=defaults[CONF_HOST]): str,
                     vol.Required(CONF_PORT, default=defaults[CONF_PORT]): int,
+                    vol.Required(CONF_SLAVE_ID, default=defaults[CONF_SLAVE_ID]): vol.All(int, vol.Range(min=1, max=247)),
                     vol.Required(
                         CONF_BATTERY_VERSION, default=defaults[CONF_BATTERY_VERSION]
                     ): SelectSelector(
@@ -1771,7 +1788,7 @@ class OptionsFlowHandler(OptionsFlow):
         self._pending_slot_step_a: dict | None = None  # Buffer between slot step A and step B
         _LOGGER.info("OptionsFlowHandler initialized successfully for entry: %s", config_entry.entry_id)
 
-    async def _test_connection(self, host: str, port: int, version: str = "v2") -> bool:
+    async def _test_connection(self, host: str, port: int, version: str = "v2", slave_id: int = DEFAULT_SLAVE_ID) -> bool:
         """Test connection to a Marstek Venus battery.
 
         If a coordinator already holds a connection to this host, temporarily
@@ -1782,12 +1799,12 @@ class OptionsFlowHandler(OptionsFlow):
         if soc_register is None:
             return False
 
-        # Check if there's an active coordinator for this host
+        # Check if there's an active coordinator for this host + slave id
         entry_data = self.hass.data.get(DOMAIN, {}).get(self.config_entry.entry_id, {})
         coordinators = entry_data.get("coordinators", [])
         existing_coordinator = None
         for coordinator in coordinators:
-            if coordinator.host == host:
+            if coordinator.host == host and coordinator.slave_id == slave_id:
                 existing_coordinator = coordinator
                 break
 
@@ -1804,7 +1821,7 @@ class OptionsFlowHandler(OptionsFlow):
                 await asyncio.sleep(0.5)
 
                 # Test with a fresh connection
-                test_client = MarstekModbusClient(host, port)
+                test_client = MarstekModbusClient(host, port, slave_id=slave_id)
                 try:
                     connected = await test_client.async_connect()
                     if not connected:
@@ -1836,7 +1853,7 @@ class OptionsFlowHandler(OptionsFlow):
         else:
             _LOGGER.info("No existing coordinator for %s - opening new connection", host)
             # No existing coordinator for this host - open new connection directly
-            client = MarstekModbusClient(host, port)
+            client = MarstekModbusClient(host, port, slave_id=slave_id)
             try:
                 connected = await client.async_connect()
                 if not connected:
@@ -1994,10 +2011,12 @@ class OptionsFlowHandler(OptionsFlow):
 
             if user_input is not None:
                 battery_version = user_input.get(CONF_BATTERY_VERSION, DEFAULT_VERSION)
+                slave_id = user_input.get(CONF_SLAVE_ID, DEFAULT_SLAVE_ID)
                 connection_result = await self._test_connection(
                     user_input[CONF_HOST],
                     user_input[CONF_PORT],
                     battery_version,
+                    slave_id,
                 )
                 if not connection_result:
                     errors["base"] = "cannot_connect"
@@ -2006,6 +2025,7 @@ class OptionsFlowHandler(OptionsFlow):
                         CONF_NAME: user_input[CONF_NAME],
                         CONF_HOST: user_input[CONF_HOST],
                         CONF_PORT: user_input[CONF_PORT],
+                        CONF_SLAVE_ID: slave_id,
                         CONF_BATTERY_VERSION: battery_version,
                     }
                     return await self.async_step_battery_limits()
@@ -2016,6 +2036,7 @@ class OptionsFlowHandler(OptionsFlow):
                     CONF_NAME: current_battery.get(CONF_NAME, f"Marstek Venus {battery_num}"),
                     CONF_HOST: current_battery.get(CONF_HOST, ""),
                     CONF_PORT: current_battery.get(CONF_PORT, 502),
+                    CONF_SLAVE_ID: current_battery.get(CONF_SLAVE_ID, DEFAULT_SLAVE_ID),
                     CONF_BATTERY_VERSION: current_battery.get(CONF_BATTERY_VERSION, DEFAULT_VERSION),
                 }
             else:
@@ -2023,6 +2044,7 @@ class OptionsFlowHandler(OptionsFlow):
                     CONF_NAME: f"Marstek Venus {battery_num}",
                     CONF_HOST: "",
                     CONF_PORT: 502,
+                    CONF_SLAVE_ID: DEFAULT_SLAVE_ID,
                     CONF_BATTERY_VERSION: DEFAULT_VERSION,
                 }
         except Exception as e:
@@ -2036,6 +2058,7 @@ class OptionsFlowHandler(OptionsFlow):
                     vol.Required(CONF_NAME, default=defaults[CONF_NAME]): str,
                     vol.Required(CONF_HOST, default=defaults[CONF_HOST]): str,
                     vol.Required(CONF_PORT, default=defaults[CONF_PORT]): int,
+                    vol.Required(CONF_SLAVE_ID, default=defaults[CONF_SLAVE_ID]): vol.All(int, vol.Range(min=1, max=247)),
                     vol.Required(CONF_BATTERY_VERSION, default=defaults[CONF_BATTERY_VERSION]):
                         SelectSelector(SelectSelectorConfig(
                             options=[

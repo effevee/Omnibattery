@@ -31,12 +31,14 @@
           "name": "Name",
           "host": "IP Address",
           "port": "Modbus Port",
+          "slave_id": "Modbus Slave ID",
           "battery_version": "Battery Model"
         },
         "data_description": {
           "name": "Descriptive name to identify this battery",
           "host": "IP address of the battery on your local network",
           "port": "Modbus port (usually 502)",
+          "slave_id": "Modbus slave/unit id (default 1). Change only when a Modbus proxy maps several batteries to one IP:port using distinct slave ids.",
           "battery_version": "Select your battery model version. Ev2 for older models, Ev3 for newer models with updated register map, A (Venus A) or D (Venus D) for hybrid inverter models"
         }
       },
@@ -423,12 +425,14 @@
           "name": "Name",
           "host": "IP Address",
           "port": "Modbus Port",
+          "slave_id": "Modbus Slave ID",
           "battery_version": "Battery Model"
         },
         "data_description": {
           "name": "Descriptive name to identify this battery",
           "host": "IP address of the battery on your local network",
           "port": "Modbus port (usually 502)",
+          "slave_id": "Modbus slave/unit id (default 1). Change only when a Modbus proxy maps several batteries to one IP:port using distinct slave ids.",
           "battery_version": "Select your battery model version. Ev2 for older models, Ev3 for newer models with updated register map, A (Venus A) or D (Venus D) for hybrid inverter models"
         }
       },

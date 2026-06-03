@@ -21,6 +21,12 @@ SCAN_INTERVAL = {
 CONF_BATTERY_VERSION = "battery_version"
 SUPPORTED_VERSIONS = ["v2", "v3", "vA", "vD"]
 
+# Modbus slave/unit id. Default 1 (Marstek factory default for a direct
+# connection). A Modbus TCP proxy that fans out to several batteries on one
+# host:port distinguishes them by slave id, so this must be configurable.
+CONF_SLAVE_ID = "slave_id"
+DEFAULT_SLAVE_ID = 1
+
 # Maximum power (W) per battery version — used by config_flow to set slider limits
 MAX_POWER_BY_VERSION = {
     "v2": 2500,

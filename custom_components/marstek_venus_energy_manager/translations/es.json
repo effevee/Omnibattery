@@ -33,12 +33,14 @@
           "name": "Nombre",
           "host": "Dirección IP",
           "port": "Puerto Modbus",
+          "slave_id": "ID de esclavo Modbus",
           "battery_version": "Modelo de batería"
         },
         "data_description": {
           "name": "Nombre descriptivo para identificar esta batería",
           "host": "Dirección IP de la batería en tu red local",
           "port": "Puerto Modbus (normalmente 502)",
+          "slave_id": "ID de esclavo/unidad Modbus (por defecto 1). Cámbialo solo si un proxy Modbus expone varias baterías en una misma IP:puerto con ids de esclavo distintos.",
           "battery_version": "Selecciona la versión del modelo de tu batería. Ev2 para modelos antiguos, Ev3 para modelos nuevos con mapa de registros actualizado, A (Venus A) o D (Venus D) para modelos de inversor híbrido"
         }
       },
@@ -379,12 +381,14 @@
           "name": "Nombre",
           "host": "Dirección IP",
           "port": "Puerto Modbus",
+          "slave_id": "ID de esclavo Modbus",
           "battery_version": "Modelo de batería"
         },
         "data_description": {
           "name": "Nombre descriptivo para identificar esta batería",
           "host": "Nueva dirección IP de la batería en la red local",
           "port": "Puerto Modbus (normalmente 502)",
+          "slave_id": "ID de esclavo/unidad Modbus (por defecto 1). Cámbialo solo si un proxy Modbus expone varias baterías en una misma IP:puerto con ids de esclavo distintos.",
           "battery_version": "Selecciona la versión de tu modelo de batería"
         }
       }
@@ -454,12 +458,14 @@
           "name": "Nombre",
           "host": "Dirección IP",
           "port": "Puerto Modbus",
+          "slave_id": "ID de esclavo Modbus",
           "battery_version": "Modelo de batería"
         },
         "data_description": {
           "name": "Nombre descriptivo para identificar esta batería",
           "host": "Dirección IP de la batería en tu red local",
           "port": "Puerto Modbus (normalmente 502)",
+          "slave_id": "ID de esclavo/unidad Modbus (por defecto 1). Cámbialo solo si un proxy Modbus expone varias baterías en una misma IP:puerto con ids de esclavo distintos.",
           "battery_version": "Selecciona la versión del modelo de tu batería. Ev2 para modelos antiguos, Ev3 para modelos nuevos con mapa de registros actualizado, A (Venus A) o D (Venus D) para modelos de inversor híbrido"
         }
       },
