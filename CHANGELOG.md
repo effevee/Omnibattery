@@ -25,6 +25,7 @@
 
 ### Changed
 - **PD control is now event-driven (hybrid)**: The control cycle triggers on each new grid-sensor value (native cadence) instead of only the 2.0 s timer, which stays as a watchdog; overlapping triggers are serialized by a lock. **Note:** `pd_max_power_change` is per-cycle, so faster cadence raises the effective ramp rate — lower it if the response feels abrupt. [`__init__.py`](custom_components/marstek_venus_energy_manager/__init__.py).
+- **Removed the per-battery Work mode dropdown from the dashboard**: It was confusing and the integration manages the work mode itself — users should never set it. The `user_work_mode` select entity still exists, only the panel control is gone. [`marstek-panel.js`](custom_components/marstek_venus_energy_manager/frontend/marstek-panel.js).
 - **PD made cadence-independent and noise-robust**: The P term and rate limiter now scale with real elapsed time (so tuning no longer drifts with the variable event-driven cadence), the grid sensor and derivative are smoothed with time-constant EMAs instead of fixed-sample averages (less PWM/meter-noise injection), and a back-calculation anti-windup re-anchors the control base to measured AC power when batteries can't deliver the commanded power (prevents overshoot/export spikes on recovery). Also fixes a derivative kick when leaving the deadband. The predictive grid-charge loop received the same cadence-scaling and derivative filtering. [`__init__.py`](custom_components/marstek_venus_energy_manager/__init__.py).
 
 ## [2.0.0] - 2026-05-29
