@@ -344,6 +344,10 @@ class ChargeDischargeController:
         self._pd_quality_step_grace_s = 10.0  # skip the metric this long after a step
         self._pd_quality_settle_until = 0.0   # monotonic deadline; skip while now < this
         self._pd_quality_prev_target = None   # previous active_target for step detection
+        # True when the PD has no headroom to reduce the error (battery full while it
+        # would charge, empty while it would discharge, or output pinned at the power
+        # rail). Surfaced as the "battery_limited" quality state; not a tuning fault.
+        self._pd_limited = False
 
         # Measured-power anti-windup (back-calculation): re-anchor the incremental
         # base to the battery's real AC output when commanded power is not being
@@ -1285,7 +1289,7 @@ class ChargeDischargeController:
             self.system_max_charge_power, self.system_max_discharge_power,
         )
 
-    def _update_pd_quality_metrics(self, error: float, sign_changed: bool, active_target: float) -> None:
+    def _update_pd_quality_metrics(self, error: float, sign_changed: bool, active_target: float, pd_limited: bool) -> None:
         """Update control-quality EMAs (grid-error RMS and oscillation rate).
 
         Called once per active PD cycle (skipped when the controller is paused by
@@ -1296,6 +1300,10 @@ class ChargeDischargeController:
         change, ...) makes the error spike while the battery ramps to the new target;
         that transient is skipped through a short grace window so it doesn't inflate
         the metric. Detection is source-agnostic: it keys on active_target moving.
+
+        While the PD is battery-limited (no headroom to reduce the error) the residual
+        error is not a tuning fault, so the metric is skipped too — the sensor reports
+        the "battery_limited" state instead.
         """
         now = time.monotonic()
         if (
@@ -1305,7 +1313,7 @@ class ChargeDischargeController:
             self._pd_quality_settle_until = now + self._pd_quality_step_grace_s
         self._pd_quality_prev_target = active_target
 
-        if now < self._pd_quality_settle_until:
+        if pd_limited or now < self._pd_quality_settle_until:
             # Keep the timestamp fresh so the EMA resumes smoothly (small dt) instead
             # of seeing one huge gap that would snap it to the post-step value.
             self._pd_quality_last_ts = now
@@ -6472,6 +6480,9 @@ class ChargeDischargeController:
             self.previous_sensor = sensor_actual
             self._active_discharge_batteries = []
             self._active_charge_batteries = []
+            # No battery can act: demand outside the deadband is battery-limited, not
+            # a tuning fault (surfaced as "battery_limited", keeps the metric clean).
+            self._pd_limited = abs(error) > self.deadband
             return
         
         # Select batteries via load sharing, then distribute power
@@ -6559,7 +6570,16 @@ class ChargeDischargeController:
                     self.sign_changes = 0
                 # Note: last_error_sign is NOT updated when inside deadband
                 # This ensures we only track sign changes that matter (outside deadband)
-            self._update_pd_quality_metrics(error, sign_changed, active_target)
+            # Battery-limited: the PD commanded the most it can in the needed
+            # direction but the error persists (battery full/empty, or surplus beyond
+            # the charge/discharge rate). Not a tuning fault — flag it so the metric
+            # skips it and the sensor reports "battery_limited".
+            pd_limited = abs(error) > self.deadband and (
+                (error < 0 and new_power >= max_total_charge - 1)
+                or (error > 0 and new_power <= -max_total_discharge + 1)
+            )
+            self._pd_limited = pd_limited
+            self._update_pd_quality_metrics(error, sign_changed, active_target, pd_limited)
             self.previous_error = error
             self.last_output_sign = current_output_sign
             if DEBUG_CONTROL_LOOP_DETAIL:

@@ -2039,11 +2039,15 @@ DEFAULT_SYSTEM_MAX_DISCHARGE_POWER = 0    # 0 = disabled
 DEFAULT_SLOT_TARGET_GRID_POWER = DEFAULT_TARGET_GRID_POWER
 
 # PD Tuning Profiles
-# One-click presets for the four user-facing PD parameters (Kp, Kd, deadband,
-# max power change). Selecting a profile writes all four at once; the "custom"
-# profile leaves the sliders to the user for manual fine-tuning. Profiles are
-# ordered smoothest → fastest. "balanced" equals the shipping defaults, so an
-# untouched install maps onto it automatically.
+# One-click presets for the PD response-shape parameters (Kp, Kd, max power
+# change). Selecting a profile writes those at once; the "custom" profile leaves
+# the sliders to the user. Profiles are ordered smoothest → fastest. "balanced"
+# equals the shipping defaults, so an untouched install maps onto it.
+#
+# Deadband is deliberately NOT part of the profiles: it is both the user's
+# precision/meter-noise preference and the reference the control-quality sensor
+# measures against (oscillation is counted only outside the deadband). Bundling it
+# into a profile would clobber that preference and bias the sensor's own yardstick.
 CONF_PD_TUNING_PROFILE = "pd_tuning_profile"
 PD_PROFILE_CUSTOM = "custom"
 DEFAULT_PD_TUNING_PROFILE = PD_PROFILE_CUSTOM
@@ -2052,25 +2056,21 @@ PD_TUNING_PROFILES = {
     "very_smooth": {
         CONF_PD_KP: 0.22,
         CONF_PD_KD: 0.15,
-        CONF_PD_DEADBAND: 100,
         CONF_PD_MAX_POWER_CHANGE: 400,
     },
     "smooth": {
         CONF_PD_KP: 0.30,
         CONF_PD_KD: 0.25,
-        CONF_PD_DEADBAND: 70,
         CONF_PD_MAX_POWER_CHANGE: 600,
     },
     "balanced": {
         CONF_PD_KP: DEFAULT_PD_KP,
         CONF_PD_KD: DEFAULT_PD_KD,
-        CONF_PD_DEADBAND: DEFAULT_PD_DEADBAND,
         CONF_PD_MAX_POWER_CHANGE: DEFAULT_PD_MAX_POWER_CHANGE,
     },
     "aggressive": {
         CONF_PD_KP: 0.55,
         CONF_PD_KD: 0.45,
-        CONF_PD_DEADBAND: 25,
         CONF_PD_MAX_POWER_CHANGE: 1200,
     },
 }
@@ -2078,21 +2078,20 @@ PD_TUNING_PROFILES = {
 # Option order shown in the select (custom last); 5 total incl. manual.
 PD_TUNING_PROFILE_OPTIONS = list(PD_TUNING_PROFILES.keys()) + [PD_PROFILE_CUSTOM]
 
-# Effective value of each PD param when absent from config_entry.data.
+# Effective value of each profiled PD param when absent from config_entry.data.
 _PD_PROFILE_PARAM_DEFAULTS = {
     CONF_PD_KP: DEFAULT_PD_KP,
     CONF_PD_KD: DEFAULT_PD_KD,
-    CONF_PD_DEADBAND: DEFAULT_PD_DEADBAND,
     CONF_PD_MAX_POWER_CHANGE: DEFAULT_PD_MAX_POWER_CHANGE,
 }
 
 
 def pd_profile_from_params(data) -> str:
-    """Return the preset name whose values match the four PD params in `data`.
+    """Return the preset name whose values match the PD gain params in `data`.
 
     Falls back to PD_PROFILE_CUSTOM when no preset matches (i.e. the user has
-    hand-tuned the sliders). Compared with a small epsilon to tolerate float
-    representation of Kp/Kd.
+    hand-tuned the sliders). Deadband is not considered — it is user-owned and not
+    part of the profiles. Compared with a small epsilon to tolerate float Kp/Kd.
     """
     for name, params in PD_TUNING_PROFILES.items():
         if all(

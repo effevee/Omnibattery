@@ -926,7 +926,14 @@
         "name": "Consumo de la Casa"
       },
       "system_pd_control_quality": {
-        "name": "Calidad de Control PD"
+        "name": "Calidad de Control PD",
+        "state": {
+          "stable": "Estable",
+          "oscillating": "Oscilando",
+          "sluggish": "Lento",
+          "battery_limited": "Limitado por batería",
+          "collecting_data": "Recopilando datos"
+        }
       },
       "system_daily_grid_import_energy": {
         "name": "Importación Diaria de Red"

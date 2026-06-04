@@ -904,7 +904,14 @@
         "name": "Daily Home Consumption"
       },
       "system_pd_control_quality": {
-        "name": "PD Control Quality"
+        "name": "PD Control Quality",
+        "state": {
+          "stable": "Stable",
+          "oscillating": "Oscillating",
+          "sluggish": "Sluggish",
+          "battery_limited": "Battery limited",
+          "collecting_data": "Collecting data"
+        }
       },
       "system_home_consumption": {
         "name": "Home Consumption"

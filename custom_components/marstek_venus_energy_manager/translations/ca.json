@@ -923,7 +923,14 @@
         "name": "Consum Diari de la Casa"
       },
       "system_pd_control_quality": {
-        "name": "Qualitat de Control PD"
+        "name": "Qualitat de Control PD",
+        "state": {
+          "stable": "Estable",
+          "oscillating": "Oscil·lant",
+          "sluggish": "Lent",
+          "battery_limited": "Limitat per bateria",
+          "collecting_data": "Recollint dades"
+        }
       },
       "system_home_consumption": {
         "name": "Consum de la Casa"

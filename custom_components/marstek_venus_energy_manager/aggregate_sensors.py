@@ -137,17 +137,20 @@ class PdControlQualitySensor(SensorEntity):
     """Diagnostic sensor exposing PD control-loop quality so users can see the
     effect of the tuning profile / sliders.
 
-    State = RMS of the grid-control error (W); lower means tighter regulation.
-    Attributes carry the oscillation rate, the active parameters/profile, and a
-    `recommendation` key (localized by the dashboard) that closes the tuning loop.
+    The state is a verdict (stable / oscillating / sluggish / battery_limited /
+    collecting_data) rather than a raw number, so it tells the user what to do
+    instead of showing a watt value that reads like a power flow. The underlying
+    grid-error RMS (W) and oscillation rate live in the attributes.
     """
 
-    # Thresholds for the recommendation. Oscillation is the dominant symptom of
+    # Thresholds for the verdict. Oscillation is the dominant symptom of
     # over-aggressive tuning (hunting); a high RMS with low oscillation is the
     # signature of sluggish tuning that never catches up.
     _OSC_HIGH_PER_MIN = 4.0
     _RMS_HIGH_W = 150.0
     _OSC_LOW_PER_MIN = 1.0
+
+    _STATES = ["stable", "oscillating", "sluggish", "battery_limited", "collecting_data"]
 
     def __init__(self, controller) -> None:
         """Initialize the sensor."""
@@ -156,40 +159,41 @@ class PdControlQualitySensor(SensorEntity):
         self._attr_has_entity_name = True
         self._attr_unique_id = "marstek_venus_system_pd_control_quality"
         self._attr_translation_key = "system_pd_control_quality"
-        self._attr_native_unit_of_measurement = "W"
-        self._attr_state_class = SensorStateClass.MEASUREMENT
+        self._attr_device_class = SensorDeviceClass.ENUM
+        self._attr_options = list(self._STATES)
         self._attr_entity_category = EntityCategory.DIAGNOSTIC
         self._attr_icon = "mdi:tune-vertical"
-        self._attr_suggested_display_precision = 0
         self._attr_should_poll = True  # metrics live on the controller; poll to refresh
 
     @property
     def native_value(self):
-        """Return the grid-error RMS (W), or None until metrics warm up."""
-        rms = self._controller.pd_quality_rms_error
-        return round(rms) if rms is not None else None
+        """Return the tuning verdict."""
+        c = self._controller
+        if getattr(c, "_pd_limited", False):
+            return "battery_limited"
+        rms = c.pd_quality_rms_error
+        if rms is None:
+            return "collecting_data"
+        return self._verdict(rms, c.pd_quality_oscillation_per_min)
 
     @property
     def extra_state_attributes(self) -> dict:
-        """Expose oscillation rate, active params/profile, and a tuning hint."""
+        """Expose the raw RMS error, oscillation rate, and active params/profile."""
         c = self._controller
         rms = c.pd_quality_rms_error
-        osc = round(c.pd_quality_oscillation_per_min, 2)
         return {
-            "oscillation_per_min": osc,
+            "rms_error_w": round(rms) if rms is not None else None,
+            "oscillation_per_min": round(c.pd_quality_oscillation_per_min, 2),
             "kp": c.kp,
             "kd": c.kd,
             "deadband_w": c.deadband,
             "max_power_change_w": c.max_power_change_per_cycle,
             "active_profile": pd_profile_from_params(c.config_entry.data),
-            "recommendation": self._recommendation(rms, osc),
         }
 
     @classmethod
-    def _recommendation(cls, rms: float | None, osc: float) -> str:
-        """Derive a tuning recommendation key from the live metrics."""
-        if rms is None:
-            return "collecting_data"
+    def _verdict(cls, rms: float, osc: float) -> str:
+        """Derive the tuning verdict from the live metrics."""
         if osc >= cls._OSC_HIGH_PER_MIN:
             return "oscillating"  # hunting: smoother profile / higher deadband
         if rms > cls._RMS_HIGH_W and osc < cls._OSC_LOW_PER_MIN:

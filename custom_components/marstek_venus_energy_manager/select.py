@@ -155,11 +155,12 @@ class WeeklyFullChargeDaySelect(SelectEntity):
 class PdTuningProfileSelect(SelectEntity):
     """One-click PD tuning presets (system-level).
 
-    Selecting a preset writes its four PD parameters into config_entry.data; the
-    integration's existing config-entry update listener then hot-reloads them.
-    The "custom" option leaves the sliders for manual fine-tuning. The displayed
-    option is derived from the live parameters, so moving any PD slider by hand
-    falls back to "custom" automatically.
+    Selecting a preset writes its PD gain parameters (Kp, Kd, max power change)
+    into config_entry.data; the integration's existing config-entry update listener
+    then hot-reloads them. Deadband is intentionally left to the user. The "custom"
+    option leaves the sliders for manual fine-tuning. The displayed option is derived
+    from the live parameters, so moving a profiled slider by hand falls back to
+    "custom" automatically.
     """
 
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
@@ -186,7 +187,7 @@ class PdTuningProfileSelect(SelectEntity):
         return pd_profile_from_params(self.entry.data)
 
     async def async_select_option(self, option: str) -> None:
-        """Apply a profile (writes its four params) or switch to manual mode."""
+        """Apply a profile (writes its gain params) or switch to manual mode."""
         new_data = dict(self.entry.data)
         new_data[CONF_PD_TUNING_PROFILE] = option
         if option != PD_PROFILE_CUSTOM:
