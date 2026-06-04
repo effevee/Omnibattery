@@ -1270,6 +1270,9 @@
       "pd_min_discharge_power": {
         "name": "PD Potencia Mínima Descarga"
       },
+      "pd_relay_cooldown": {
+        "name": "PD Tiempo Mínimo de Relé"
+      },
       "pd_target_grid_power": {
         "name": "PD Potencia Objetivo Red"
       },

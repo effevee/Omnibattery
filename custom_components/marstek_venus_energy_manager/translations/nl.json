@@ -1264,6 +1264,9 @@
       "pd_min_discharge_power": {
         "name": "PD Min. Ontlaadvermogen"
       },
+      "pd_relay_cooldown": {
+        "name": "PD Relais-Wachttijd"
+      },
       "pd_target_grid_power": {
         "name": "PD Doelnetvermogen"
       },

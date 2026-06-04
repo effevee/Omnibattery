@@ -1264,6 +1264,9 @@
       "pd_min_discharge_power": {
         "name": "PD Puissance Min. de Décharge"
       },
+      "pd_relay_cooldown": {
+        "name": "PD Temporisation Relais"
+      },
       "pd_target_grid_power": {
         "name": "PD Puissance Cible Réseau"
       },

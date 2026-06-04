@@ -1257,6 +1257,9 @@
       "pd_min_discharge_power": {
         "name": "PD Min Discharge Power"
       },
+      "pd_relay_cooldown": {
+        "name": "PD Relay Cooldown"
+      },
       "pd_target_grid_power": {
         "name": "PD Target Grid Power"
       },

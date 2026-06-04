@@ -2014,6 +2014,7 @@ CONF_PD_MAX_POWER_CHANGE = "pd_controller_max_power_change"
 CONF_PD_DIRECTION_HYSTERESIS = "pd_controller_direction_hysteresis"
 CONF_PD_MIN_CHARGE_POWER = "pd_min_charge_power"
 CONF_PD_MIN_DISCHARGE_POWER = "pd_min_discharge_power"
+CONF_PD_RELAY_COOLDOWN = "pd_relay_cooldown"
 CONF_TARGET_GRID_POWER = "pd_target_grid_power"
 CONF_ENABLE_SYSTEM_POWER_LIMITS = "enable_system_power_limits"
 CONF_SYSTEM_MAX_CHARGE_POWER = "system_max_charge_power"
@@ -2030,6 +2031,14 @@ DEFAULT_PD_MAX_POWER_CHANGE = 800
 DEFAULT_PD_DIRECTION_HYSTERESIS = 60
 DEFAULT_PD_MIN_CHARGE_POWER = 0       # Minimum charge power (0 = disabled)
 DEFAULT_PD_MIN_DISCHARGE_POWER = 0    # Minimum discharge power (0 = disabled)
+# Relay anti-chatter: minimum time (s) the battery stays engaged after leaving
+# idle before it may return to 0. Stops the relay toggling on/off when the grid
+# signal hovers at the deadband edge during solar ramp-up/down. 0 = disabled
+# (default: preserves the pre-feature behaviour; opt-in via the slider).
+DEFAULT_PD_RELAY_COOLDOWN = 0
+# Power held in the already-engaged direction while the cooldown is running, when
+# the user's min charge/discharge power is 0 (otherwise that min is used).
+RELAY_COOLDOWN_HOLD_POWER = 100
 DEFAULT_TARGET_GRID_POWER = 0
 DEFAULT_ENABLE_SYSTEM_POWER_LIMITS = False
 DEFAULT_SYSTEM_MAX_CHARGE_POWER = 0       # 0 = disabled
@@ -2193,6 +2202,16 @@ CONFIG_NUMBER_DEFINITIONS = [
         "unit": "W",
         "default": DEFAULT_PD_MIN_DISCHARGE_POWER,
         "icon": "mdi:battery-low",
+    },
+    {
+        "key": CONF_PD_RELAY_COOLDOWN,
+        "name": "PD Relay Cooldown",
+        "min": 0,
+        "max": 600,
+        "step": 5,
+        "unit": "s",
+        "default": DEFAULT_PD_RELAY_COOLDOWN,
+        "icon": "mdi:timer-cog-outline",
     },
     {
         "key": CONF_TARGET_GRID_POWER,

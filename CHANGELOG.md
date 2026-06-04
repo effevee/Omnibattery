@@ -5,6 +5,7 @@
 ### Added
 - **PD tuning profiles**: New `select.*_pd_tuning_profile` with one-click presets (Very Smooth/Smooth/Balanced/Aggressive) that set all four PD params at once, plus Custom for manual tuning; manual slider moves fall back to Custom automatically. [`const.py`](custom_components/marstek_venus_energy_manager/const.py), [`select.py`](custom_components/marstek_venus_energy_manager/select.py).
 - **PD Control Quality sensor**: New `sensor.marstek_venus_system_pd_control_quality` (W, grid-error RMS) with `oscillation_per_min`, active params/profile, and a `recommendation` attribute so the effect of tuning is visible. [`aggregate_sensors.py`](custom_components/marstek_venus_energy_manager/aggregate_sensors.py), [`__init__.py`](custom_components/marstek_venus_energy_manager/__init__.py).
+- **PD Relay Cooldown**: New `number.*_pd_relay_cooldown` (s, default `0` = disabled, opt-in). Once the battery engages it stays on at least this long before returning to idle, stopping relay on/off chatter when grid hovers at the deadband edge during solar ramp-up/down. While held it runs at the configured PD min charge/discharge power, or 100 W if that is 0. Large imbalances bypass it. [`const.py`](custom_components/marstek_venus_energy_manager/const.py), [`__init__.py`](custom_components/marstek_venus_energy_manager/__init__.py).
 
 ## [2.0.1b2] - 2026-06-04
 
