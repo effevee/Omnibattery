@@ -133,12 +133,12 @@ flowchart TD
     H --> I(Wait 60s)
     I --> J("Measure cell_delta = (cell_Vmax - cell_Vmin) * 1000")
     J --> K{cell_delta > 0.03 V}
-    K -->|Yes| L(Discharge with 25 W)
+    K -->|Yes| L(Discharge with 200 W)
     L --> M{max_cell_voltage <= 3.49 V}
     M --> |Yes| D
     M --> |No| L
     K --> |No| N([Final discharge])
-    N --> O(Discharge with 25 W)
+    N --> O(Discharge with 200 W)
     O --> P{max_cell_voltage <= 3.48 V}
     P --> |No| N
     P --> |Yes| Q([Active balance stop]) 

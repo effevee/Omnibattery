@@ -22,6 +22,16 @@
 
 </div>
 
+## Built-in control dashboard
+
+Auto-installs as a HA sidebar panel — no HACS, no YAML.
+Three tabs:
+- **Overview** with animated SOC ring, Grid↔Home↔Battery↔Solar energy-flow diagram, diagnostics, 2×2 chart grid
+- **Batteries** with per-battery SOC/power, health & cells, daily energy, optional MPPT, firmware info, controls
+- **Control** with system-wide settings grouped by feature, each with its switch + config parameters
+
+![Dashboard](/assets/MVEM%20-%20Dashboard.gif)
+
 ## Key features
 
 - **PD Controller (Zero Export/Import)**: adjusts battery power in real time to keep grid exchange close to zero.

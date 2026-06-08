@@ -3,7 +3,7 @@
 Referencia completa de los registros Modbus utilizados por la integración para cada versión de batería.
 
 !!! info "Documento de referencia completo"
-    La tabla completa de registros está disponible en [`docs/registers.md`](../../docs/registers.md) del repositorio.
+    La tabla completa de registros está disponible en [`registers.md`](registers.md) del repositorio.
 
 ## Versiones de firmware
 
@@ -36,5 +36,3 @@ Referencia completa de los registros Modbus utilizados por la integración para 
 | 32102 | `battery_power` | Potencia de la batería (W) — Venus E v3 |
 | 30001 | `battery_power` | Potencia de la batería (W) — Venus A/D/E v2 |
 | 44000 | — | Corte de carga (manipulado por carga semanal completa) |
-
-Para la tabla completa consulta el [documento de registros](../../docs/registers.md).

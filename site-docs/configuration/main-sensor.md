@@ -65,4 +65,10 @@ This is the value shown by the energy-flow diagram and the `sensor.marstek_venus
 !!! note "Legacy household sensor"
     Installs created before this field was removed may still have a `household_consumption_sensor` saved in their config. It is honoured **only when no solar production sensor is configured** — with a solar sensor the derived value is exact and preferred, so the saved sensor is ignored.
 
+---
+
+## Solar production sensor *(optional)*
+
+This is the real-time PV production power sensor (W or kW) from an external invertor not wired through the battery MPPT inputs. It is used to show the Solar node in the dashboard energy-flow diagram. Leave empty if your solar panels feed the battery MPPT directly.
+
 ![Main sensor configuration](../assets/screenshots/configuration/main-sensor.png){ width="600"  style="display: block; margin: 0 auto;"}

@@ -45,7 +45,7 @@ Limits discharge when SOC drops below a threshold, covering only consumption pea
 | Field | Description | Default | Range |
 |---|---|---|---|
 | **SOC threshold (%)** | Protection activates below this % | `30 %` | `20-100 %` |
-| **Peak limit (W)** | Maximum consumption the battery covers; the excess falls to the grid | `2500 W` | `500-10000 W` |
+| **Peak limit (W)** | Grid power threshold. The battery discharges the excess above this limit if capacity protection is active | `2500 W` | `500-10000 W` |
 
 See [Peak shaving](../features/peak-shaving.md) for how it works.
 

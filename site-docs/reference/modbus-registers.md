@@ -3,7 +3,7 @@
 Complete reference of the Modbus registers used by the integration for each battery version.
 
 !!! info "Full reference document"
-    The complete register table is available in [`docs/registers.md`](../../docs/registers.md) in the repository.
+    The complete modbus register table is available in [`registers.md`](registers.md).
 
 ## Firmware versions
 
@@ -36,5 +36,3 @@ Complete reference of the Modbus registers used by the integration for each batt
 | 32102 | `battery_power` | Battery power (W) — Venus E v3 |
 | 30001 | `battery_power` | Battery power (W) — Venus A/D/E v2 |
 | 44000 | — | Charging cutoff (manipulated by weekly full charge) |
-
-For the full table see the [register reference document](../../docs/registers.md).
