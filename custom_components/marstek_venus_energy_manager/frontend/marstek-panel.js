@@ -4202,22 +4202,31 @@ class MarstekVenusPanel extends HTMLElement {
       /* ===== Control tab ===== */
       /* feature-grouped cards; pack into columns on wide screens (align-items:start
          so a tall section, e.g. PD, doesn't stretch its neighbours) */
-      /* Control layout: a flex row of blocks. .sys-col is an independent
+      /* Control layout: a grid of blocks. .sys-col is an independent
          vertical stack (cards pack tight, no shared heights). .sys-pair is a
          2-col grid whose rows DO share a height (align-items: stretch), so the
          first two columns line up card-for-card row by row. */
-      .sys-stack { display: flex; gap: var(--gap); align-items: flex-start; }
-      .sys-col { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: var(--gap); }
-      .sys-pair { flex: 2 1 0; min-width: 0; display: grid; grid-template-columns: 1fr 1fr; gap: var(--gap); align-items: stretch; align-content: start; }
+      /* responsive grid of blocks: tracks size themselves (auto-fit), so columns
+         appear/collapse with width without magic breakpoints, and grid-auto-flow
+         dense backfills empty trailing cells. .sys-pair spans two tracks to keep
+         its 2-col card alignment; .sys-col is one track (cards stack vertically). */
+      .sys-stack { display: grid; gap: var(--gap); align-items: start;
+        grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+        grid-auto-flow: row dense; }
+      .sys-col { min-width: 0; display: flex; flex-direction: column; gap: var(--gap); }
+      .sys-pair { grid-column: span 2; min-width: 0; display: grid; grid-template-columns: 1fr 1fr; gap: var(--gap); align-items: stretch; align-content: start; }
       .sys-pair > .card { height: 100%; }
       .sys-pair-spacer { min-width: 0; }
-      .sys-stack > .placeholder { flex: 1 1 100%; }
+      .sys-stack > .placeholder { grid-column: 1 / -1; }
       .sys-stack .card-head { margin-bottom: 0; }
       /* options-flow help affordance pinned to the right of a section header */
       .card-info { margin-left: auto; padding: 0; border: 0; background: none; cursor: pointer;
         color: var(--ink-dim); display: grid; place-items: center; --mdc-icon-size: 16px; }
       .card-info:hover { color: var(--ink); }
-      .sys-grid { margin-top: 14px; }
+      /* narrow paired-column cards: let the label track shrink (max-content can't)
+         and wrap, so sliders/buttons never overflow the card box at ~1080p */
+      .sys-grid { margin-top: 14px; grid-template-columns: minmax(0, max-content) minmax(0, 1fr); }
+      .sys-grid .ctl-k { white-space: normal; overflow-wrap: anywhere; }
       /* label with a tap/hover detail popover (e.g. time-slot details) */
       .ctl-k-info { cursor: pointer; }
       .ctl-k-info > span { text-decoration: underline dotted var(--ink-dim); text-underline-offset: 3px; }
@@ -4225,8 +4234,10 @@ class MarstekVenusPanel extends HTMLElement {
         border-radius: var(--radius-sm); background: var(--bg-2); border: 1px solid var(--line-strong);
         color: var(--ink); font-family: var(--font-ui); font-size: 12px; line-height: 1.5; white-space: pre-line;
         box-shadow: 0 8px 24px oklch(0 0 0 / 0.4); }
-      @media (max-width: 1200px) { .sys-stack { flex-wrap: wrap; } .sys-col { flex: 1 1 340px; } .sys-pair { flex: 1 1 700px; } }
-      @media (max-width: 480px) { .sys-stack { flex-direction: column; } .sys-col { flex: none; } .sys-pair { flex: none; grid-template-columns: 1fr; } .sys-pair-spacer { display: none; } }
+      /* below ~2 usable tracks the pair can't keep its 2-up split: make it full
+         width and single column so its cards never overflow */
+      @media (max-width: 900px) { .sys-pair { grid-column: 1 / -1; grid-template-columns: 1fr; } }
+      @media (max-width: 480px) { .sys-pair-spacer { display: none; } }
 
       @media (max-width: 720px) {
         .appbar { padding: 0 14px; gap: 14px; height: 60px; }

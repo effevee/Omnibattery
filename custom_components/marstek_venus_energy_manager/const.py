@@ -2,6 +2,11 @@
 
 DOMAIN = "marstek_venus_energy_manager"
 
+# Prefix for every persistent_notification this integration creates/dismisses.
+# Lets automations (e.g. the Telegram-forwarding blueprint) reliably select only
+# our notifications by ID. All notification_id values MUST start with this.
+NOTIFICATION_ID_PREFIX = "marstek_venus_"
+
 # Internal debug switches for maintainer-level troubleshooting.
 # Keep these disabled for normal Home Assistant debug logging; enabling them can
 # generate very large logs on systems with fast polling or multiple batteries.
@@ -32,7 +37,7 @@ MAX_POWER_BY_VERSION = {
     "v2": 2500,
     "v3": 2500,
     "vA": 1500,
-    "vD": 2200,
+    "vD": 2500,
 }
 DEFAULT_VERSION = "v2"
 
@@ -1704,7 +1709,7 @@ NUMBER_DEFINITIONS_VD = [
         "enabled_by_default": False,
         "icon": "mdi:battery-arrow-up-outline",
         "min": 0,
-        "max": 2200,
+        "max": 2500,
         "step": 50,
         "unit": "W",
         "data_type": "uint16",
@@ -1717,7 +1722,7 @@ NUMBER_DEFINITIONS_VD = [
         "enabled_by_default": False,
         "icon": "mdi:battery-arrow-down-outline",
         "min": 0,
-        "max": 2200,
+        "max": 2500,
         "step": 50,
         "unit": "W",
         "data_type": "uint16",
@@ -1730,7 +1735,7 @@ NUMBER_DEFINITIONS_VD = [
         "enabled_by_default": False,
         "icon": "mdi:battery-arrow-up-outline",
         "min": 0,
-        "max": 2200,
+        "max": 2500,
         "step": 50,
         "unit": "W",
         "data_type": "uint16",
@@ -1743,7 +1748,7 @@ NUMBER_DEFINITIONS_VD = [
         "enabled_by_default": False,
         "icon": "mdi:battery-arrow-down-outline",
         "min": 0,
-        "max": 2200,
+        "max": 2500,
         "step": 50,
         "unit": "W",
         "data_type": "uint16",
@@ -1948,6 +1953,12 @@ NORMAL_BALANCE_TAPER_CELL_VOLTAGE = 3.48
 NORMAL_BALANCE_PAUSE_CELL_VOLTAGE = 3.58
 NORMAL_BALANCE_CHARGE_POWER_W = 95
 NORMAL_BALANCE_MEASURE_WAIT_SECONDS = 60
+# Once the top voltage is reached the taper stops charging and latches. It does
+# NOT re-trickle when the cell relaxes (that would pin the cell at the top
+# voltage and keep some v3 BMSs from leaving standby to discharge). The latch
+# releases — allowing a later top-up to taper again — only after the battery has
+# actually been discharged by this SOC margin from where it latched.
+NORMAL_BALANCE_RESUME_SOC_DROP = 3             # %: SOC must fall this far below the latch SOC before charging may resume
 
 # SOC recalibration on a stuck top voltage.
 # Some packs hit the top cell voltage (pause point) while the BMS still reports a
@@ -1977,6 +1988,13 @@ ACTIVE_BALANCE_FINAL_DISCHARGE_STOP_CELL_VOLTAGE = 3.48
 ACTIVE_BALANCE_MEASURE_WAIT_SECONDS = 60
 ACTIVE_BALANCE_ADAPTIVE_RESUME_STEP_V = 0.01
 ACTIVE_BALANCE_ADAPTIVE_MIN_RESUME_CELL_VOLTAGE = 3.40
+# Consecutive ~0 W charge-rejection detections required before treating a charge
+# below the stop voltage as a real BMS cut. The control loop runs every ~2 s, so
+# a single transient (charge ramp-up after escape discharge, or natural current
+# taper approaching the stop voltage) clears within 1-2 cycles and must not be
+# logged as a real cutoff measurement. 3 cycles (~6 s) means the cells are truly
+# at rest before recording a delta and ratcheting the retry voltage down.
+ACTIVE_BALANCE_CHARGE_REJECT_DEBOUNCE_CYCLES = 3
 ACTIVE_BALANCE_CHARGE_POWER_W = 95
 ACTIVE_BALANCE_DISCHARGE_POWER_W = 200
 ACTIVE_BALANCE_MODE_TARGET_DELTA_V = 0.03

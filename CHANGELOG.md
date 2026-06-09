@@ -1,5 +1,20 @@
 # Changelog
 
+## [2.0.2] - 2026-06-09
+
+### Added
+- **Telegram notification blueprint**: forwards Home Assistant persistent notifications to a Telegram chat, filtered by default to only this integration's notifications. Thanks to Adrià for the original automation. [`persistent_notification_to_telegram_blueprint.yaml`](blueprints/persistent_notification_to_telegram_blueprint.yaml).
+
+### Changed
+- **Persistent notification IDs namespaced** with a `marstek_venus_` prefix so automations can reliably target only this integration's notifications (the blueprint above filters on it). Note: breaks automations referencing the old IDs. [`const.py`](custom_components/marstek_venus_energy_manager/const.py).
+- **Venus D charge/discharge limit raised to 2500 W** (was 2200): firmware 149 supports the higher rating. The power sliders, setup/options flow, and dashboard panel now allow up to 2500 W. Existing Venus D configs keep their saved value — re-set the slider to use the new ceiling. [`const.py`](custom_components/marstek_venus_energy_manager/const.py).
+
+### Fixed
+- **Spurious active-balance cell-delta readings below the top voltage**: the BMS charge-rejection test fired on transient ~0 W reads (charge ramp-up, current taper near 3.58 V) even when the BMS was not cutting, logging low-vmax deltas that distorted the balance history. Rejection now must persist 3 cycles before recording a measurement. [`active_balance_mode.py`](custom_components/marstek_venus_energy_manager/active_balance_mode.py).
+- **Control-tab cards overflowed at ~1080p**: sliders collapsed to the knob and values/buttons spilled outside the card box on narrow screens. The settings blocks now lay out in a responsive grid that adapts the column count to the window width (collapsing on narrow screens), and section labels can wrap, so nothing crushes or overflows. [`marstek-panel.js`](custom_components/marstek_venus_energy_manager/frontend/marstek-panel.js).
+- **Charge taper pinned v3 cells at the top voltage, blocking discharge** (#293): the taper re-evaluated every cycle and re-paused whenever the cell touched 3.58 V, holding it there and leaving some v3 BMSs stuck in standby (ACK ok, ~7 W out) when discharge was commanded near full SOC. The pause now latches once the top voltage is reached and stays stopped — no re-trickle — releasing only after SOC drops a small margin (battery actually discharged). [`const.py`](custom_components/marstek_venus_energy_manager/const.py), [`__init__.py`](custom_components/marstek_venus_energy_manager/__init__.py), [`switch.py`](custom_components/marstek_venus_energy_manager/switch.py).
+- **Round-Trip Efficiency read >100% on Venus D/A with DC solar**: the AC-side charge counter can't see DC-coupled PV charging the cells, while discharge counts everything, so the ratio overshot. On D/A units the sensor now integrates the true terminal power (`battery_cell_power` = `battery_power` + MPPT) by sign and persists the totals across restarts; AC-only models keep the accurate hardware counters. [`calculated_sensors.py`](custom_components/marstek_venus_energy_manager/calculated_sensors.py).
+
 ## [2.0.1] - 2026-06-08
 
 > **Upgrade notes** (no manual action required unless stated):

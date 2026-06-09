@@ -10,7 +10,7 @@ import logging
 
 from homeassistant.core import HomeAssistant
 
-from .const import ALARM_BIT_DESCRIPTIONS, FAULT_BIT_DESCRIPTIONS
+from .const import ALARM_BIT_DESCRIPTIONS, FAULT_BIT_DESCRIPTIONS, NOTIFICATION_ID_PREFIX
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -44,7 +44,7 @@ class AlarmNotifier:
             await self._hass.services.async_call(
                 "persistent_notification",
                 "dismiss",
-                {"notification_id": f"battery_alarm_{self._device_name}"},
+                {"notification_id": f"{NOTIFICATION_ID_PREFIX}battery_alarm_{self._device_name}"},
             )
 
         self._previous_alarm_status = alarm_status
@@ -99,7 +99,7 @@ class AlarmNotifier:
             {
                 "title": title,
                 "message": message,
-                "notification_id": f"battery_alarm_{self._device_name}",
+                "notification_id": f"{NOTIFICATION_ID_PREFIX}battery_alarm_{self._device_name}",
             },
         )
         log_conditions = ", ".join(all_faults + all_alarms)

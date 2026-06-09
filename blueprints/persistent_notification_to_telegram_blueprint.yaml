@@ -1,0 +1,66 @@
+blueprint:
+  name: "Marstek Venus - Forward Persistent Notifications To Telegram"
+  description: >
+    Forwards Home Assistant persistent notifications to a Telegram chat.
+
+    Default behavior:
+    - Fires when a persistent notification is added or updated (not on reload,
+      so existing notifications are not re-sent every restart).
+    - Sends the title, ID and message to the selected Telegram notify entity,
+      HTML-escaping the dynamic fields so any character is delivered safely.
+    - By default forwards only this integration's notifications (IDs start with
+      "marstek_venus_"). Clear the prefix to forward every persistent
+      notification, or set a different prefix.
+  domain: automation
+  source_url: "https://github.com/ffunes/Marstek-Venus-Energy-Manager/blob/main/blueprints/persistent_notification_to_telegram_blueprint.yaml"
+
+  input:
+    telegram_target:
+      name: "Telegram Notify Entity"
+      description: "The telegram_bot notify entity that will receive the messages."
+      selector:
+        entity:
+          filter:
+            domain: notify
+            integration: telegram_bot
+
+    notification_id_prefix:
+      name: "Notification ID Prefix Filter"
+      description: >
+        Only forward notifications whose ID starts with this text. Defaults to
+        "marstek_venus_" so only this integration's notifications are sent.
+        Leave empty to forward every persistent notification.
+      default: "marstek_venus_"
+      selector:
+        text:
+
+variables:
+  notification_id_prefix: !input notification_id_prefix
+
+trigger:
+  - platform: persistent_notification
+    update_type:
+      - added
+      - updated
+
+condition:
+  - condition: template
+    value_template: >
+      {{ notification_id_prefix == ""
+         or (trigger.notification.notification_id | string).startswith(notification_id_prefix) }}
+
+mode: parallel
+
+action:
+  - service: telegram_bot.send_message
+    data:
+      entity_id:
+        - !input telegram_target
+      parse_mode: html
+      message: |
+        🔔 Home Assistant Notification
+
+        <b>Title:</b> {{ (trigger.notification.title | default('', true)) | e }}
+        <b>ID:</b> {{ (trigger.notification.notification_id | default('', true)) | e }}
+
+        <pre>{{ (trigger.notification.message | default('', true)) | e }}</pre>

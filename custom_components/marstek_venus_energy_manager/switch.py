@@ -22,6 +22,7 @@ from .const import (
     CONF_FULL_CHARGE_VOLTAGE_TAPER_ENABLED,
     CONF_MANUAL_MODE_ENABLED,
     CONF_PREDICTIVE_CHARGING_OVERRIDDEN,
+    NOTIFICATION_ID_PREFIX,
 )
 from .coordinator import MarstekVenusDataUpdateCoordinator
 
@@ -285,6 +286,7 @@ class BatteryFullChargeVoltageTaperSwitch(SwitchEntity):
     def _clear_runtime_state(self) -> None:
         self.controller._normal_balance_charge_paused.pop(self.coordinator, None)
         self.controller._normal_balance_voltage_tapered.pop(self.coordinator, None)
+        self.controller._normal_balance_pause_latch_soc.pop(self.coordinator, None)
         self.controller.remove_charge_block("normal_balance_pause", coordinator=self.coordinator)
 
     async def async_turn_on(self, **kwargs) -> None:
@@ -387,7 +389,7 @@ class PredictiveChargingSwitch(SwitchEntity):
         await self.hass.services.async_call(
             "persistent_notification",
             "dismiss",
-            {"notification_id": "predictive_charging_override"},
+            {"notification_id": f"{NOTIFICATION_ID_PREFIX}predictive_charging_override"},
         )
         _LOGGER.info("Predictive charging enabled")
         self.async_write_ha_state()
@@ -408,7 +410,7 @@ class PredictiveChargingSwitch(SwitchEntity):
             {
                 "title": "Predictive Charging Disabled",
                 "message": message,
-                "notification_id": "predictive_charging_override",
+                "notification_id": f"{NOTIFICATION_ID_PREFIX}predictive_charging_override",
             },
         )
         _LOGGER.info("Predictive charging disabled (overridden)")
@@ -841,7 +843,7 @@ class ManualModeSwitch(SwitchEntity):
                     "'Set Forcible Charge/Discharge Power' controls.\n\n"
                     "Turn off Manual Mode to resume automatic control."
                 ),
-                "notification_id": "manual_mode_active",
+                "notification_id": f"{NOTIFICATION_ID_PREFIX}manual_mode_active",
             },
         )
         self.async_write_ha_state()
@@ -865,7 +867,7 @@ class ManualModeSwitch(SwitchEntity):
         await self.hass.services.async_call(
             "persistent_notification",
             "dismiss",
-            {"notification_id": "manual_mode_active"},
+            {"notification_id": f"{NOTIFICATION_ID_PREFIX}manual_mode_active"},
         )
         self.async_write_ha_state()
 

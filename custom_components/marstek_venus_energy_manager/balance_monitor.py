@@ -20,6 +20,7 @@ from .const import (
     BALANCE_RED_CONSECUTIVE_ALERT,
     BALANCE_TREND_ALERT_AVG_MV,
     BALANCE_NOTIFY_COOLDOWN_DAYS,
+    NOTIFICATION_ID_PREFIX,
 )
 
 if TYPE_CHECKING:
@@ -382,7 +383,7 @@ class BalanceMonitor:
         title = f"{icon} Cell balance — {name}"
         message = "\n".join(f"• {line}" for line in issues)
         self._hass.async_create_task(
-            self._notify(f"marstek_balance_{host}", title, message)
+            self._notify(f"{NOTIFICATION_ID_PREFIX}marstek_balance_{host}", title, message)
         )
 
     async def _persist_state(self, host: str, state: _BatteryState) -> None:

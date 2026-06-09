@@ -61,12 +61,13 @@ La carga semanal completa no usa un perfil de balanceo distinto. Solo cambia el 
 |---|---:|
 | `max_cell_voltage` por debajo de 3.48 V | Límite de carga configurado normal |
 | `max_cell_voltage` igual o superior a 3.48 V | Limita la carga a 95 W |
-| `max_cell_voltage` igual o superior a 3.58 V | Para la carga y espera 60 s |
+| `max_cell_voltage` llega a 3.58 V | Para la carga y **enclava**; no vuelve a cargar a goteo cuando la celda se relaja |
+| El SOC baja el margen de reanudación (3%) por debajo del SOC de enclavamiento | Libera el enclavamiento; vuelve a aplicar la lógica de carga normal |
 | Tras la espera de 60 s | Registra `delta_mV = (Vmax - Vmin) * 1000` |
 
-La lógica se basa en tensión de celda. El SOC no se usa para decidir cuándo empieza o termina la reducción por voltaje, porque cerca del final de carga los registros de tensión de celda son más fiables que el SOC reportado.
+El inicio de la reducción se basa en tensión de celda: el SOC no se usa para decidir cuándo empieza, porque cerca del final de carga los registros de tensión de celda son más fiables que el SOC reportado.
 
-No hay histéresis adicional de voltaje en esta ruta. Cuando la batería llega a 3.58 V y se toma la lectura, la integración no fuerza una descarga. Deja la carga parada en esa tensión y permite que la lógica normal de SOC/carga decida cuándo se podrá volver a cargar.
+Cuando la batería llega a 3.58 V, la reducción para la carga y **se enclava**. No vuelve a cargar a goteo cuando la tensión de celda se relaja — re-pausar cada ciclo dejaría la celda clavada en la tensión alta y puede impedir que algunos BMS v3 salgan de standby para descargar. El enclavamiento se libera —dejando que una recarga posterior vuelva a reducir— solo cuando el SOC ha bajado un pequeño margen (por defecto 3%, `NORMAL_BALANCE_RESUME_SOC_DROP`) por debajo del SOC al que se enclavó, es decir, la batería se ha descargado de verdad.
 
 En sistemas con varias baterías, la lógica se evalúa por batería. Una batería puede estar limitada o pausada mientras otra sigue cargando con normalidad.
 
@@ -127,7 +128,7 @@ Todos los cortes de tensión usados por la reducción al 100 % y por el modo de 
 | **3,49 V** | Suelo de descarga entre reintentos del balanceo activo; cambio de carga "rápida" a carga regulada | Está justo dentro de la ventana de balanceo. Parar la descarga aquí mantiene el pack en la zona donde el BMS aún puede ver y drenar la celda alta. Bajar más sacaría al pack de la rodilla y desperdiciaría el tiempo ya invertido en balancear. |
 | **3,58 V** | Punto de medida superior; se para la carga y se esperan 60 s antes de leer el delta | Lo bastante alto como para que incluso la celda *más baja* esté firmemente en la rodilla y la diferencia entre celdas sea significativa. Lo bastante bajo como para que la celda *más alta* siga claramente por debajo del techo de 3,65 V que indican las hojas LFP y por debajo del corte por sobretensión del BMS. El margen de ~70 mV es intencional: la diferencia entre celdas es justo lo que se quiere medir, y hay que dejarle sitio. |
 | **3,48 V (otra vez)** | Suelo de descarga al final del ciclo — la descarga final a 200 W tras completar un balanceo activo se detiene aquí | El mismo umbral usado para entrar en la reducción se reutiliza para salir de la ventana de balanceo. Parar a 3,48 V deja al pack justo por debajo del comienzo de la rodilla superior sin devolverlo del todo a la meseta profunda. Quedarse a 3,55 – 3,58 V durante mucho tiempo acelera el envejecimiento calendario, así que la integración baja deliberadamente al borde inferior de la ventana antes de soltar el control. |
-| **3,40 V** | Límite inferior del voltaje de reintento del balanceo activo cuando se detecta rechazo de carga | La integración baja el voltaje de reintento en 0,01 V cada vez que el BMS rechaza la carga, pero nunca por debajo de 3,40 V. Bajar más saldría completamente de la ventana de balanceo y obligaría a volver a subir toda la curva, lo que es una pérdida de tiempo. |
+| **3,40 V** | Límite inferior del voltaje de reintento del balanceo activo cuando se detecta rechazo de carga | La integración baja el voltaje de reintento en 0,01 V cada vez que el BMS rechaza la carga durante 3 ciclos consecutivos (~6 s, para ignorar caídas transitorias de potencia durante la rampa o el taper de carga), pero nunca por debajo de 3,40 V. Bajar más saldría completamente de la ventana de balanceo y obligaría a volver a subir toda la curva, lo que es una pérdida de tiempo. |
 | **0,03 V (30 mV)** | Umbral de finalización del balanceo activo | Se considera "suficientemente equilibrado" para un pack LFP en la parte alta de la rodilla. Forzar valores más estrictos (10 mV o menos) rara vez compensa, porque las corrientes de balanceo pasivo son minúsculas — ver la sección siguiente. |
 | **0,05 V (50 mV)** | Frontera verde / amarillo | Un pack por debajo de 50 mV en la parte alta se considera sano. Es más estricto que las especificaciones típicas de fabricantes LFP (80 – 100 mV) porque la medida se toma en la ventana de balanceo, donde las diferencias entre celdas están exageradas. |
 
@@ -211,6 +212,7 @@ El sensor **Integration Status** expone un atributo `normal_balance_protection` 
 | `enabled` | Si la reducción por voltaje al 100 % está activada para esa batería |
 | `in_zone` | Si `max_cell_voltage` está en la ventana de balanceo superior |
 | `paused` | Si la carga está parada por tensión alta de celda |
+| `pause_latched_soc` | SOC al que se enclavó la pausa; la carga sigue parada hasta que el SOC baja el margen de reanudación por debajo de este valor (vacío si no está enclavada) |
 | `max_cell_voltage` / `min_cell_voltage` | Tensiones máxima y mínima actuales |
 | `delta_V` | Diferencia actual de tensión en voltios |
 | `voltage_taper_latched` | Si la reducción a 95 W está activa |
