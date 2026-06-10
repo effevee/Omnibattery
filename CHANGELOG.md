@@ -1,6 +1,6 @@
 # Changelog
 
-## [2.0.3b1] - 2026-06-10
+## [2.0.3] - 2026-06-10
 
 ### Fixed
 - **v3 reconnect storm**: failed reads/writes no longer tear down and reopen the TCP connection (v3 firmware holds a single connection slot); reconnection is owned by the coordinator's health gate, and a fresh connect waits 1 s after closing so v3 can release its slot.
