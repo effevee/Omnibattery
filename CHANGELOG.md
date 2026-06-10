@@ -1,5 +1,12 @@
 # Changelog
 
+## [2.0.3] - Unreleased
+
+### Fixed
+- **v3 reconnect storm**: failed reads/writes no longer tear down and reopen the TCP connection (v3 firmware holds a single connection slot); reconnection is owned by the coordinator's health gate, and a fresh connect waits 1 s after closing so v3 can release its slot.
+- **Inter-message delay was never applied**: `message_wait_milliseconds` is not a pymodbus feature, so the configured spacing (150 ms for v3/vA/vD) was silently ignored and registers were read back-to-back. The client now sleeps the configured delay after every Modbus request.
+- **v3 Modbus timeout lowered 10 s → 5 s** so a wedged battery stalls the poll cycle for less time before the health gate reacts.
+
 ## [2.0.2] - 2026-06-09
 
 ### Added
