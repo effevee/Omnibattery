@@ -169,11 +169,14 @@ NORMAL_BALANCE_MEASURE_WAIT_SECONDS = 60
 NORMAL_BALANCE_RESUME_SOC_DROP = 3             # %: SOC must fall this far below the latch SOC before charging may resume
 
 # SOC recalibration on a stuck top voltage.
-# Some packs hit the top cell voltage (pause point) while the BMS still reports a
-# SOC far below full — a sign the BMS coulomb counter has drifted. In that case,
-# instead of holding at the pause voltage, keep charging at the tapered power
-# until the BMS itself cuts off, which forces it to recalibrate SOC to 100%.
-NORMAL_BALANCE_RECAL_SOC_THRESHOLD = 90        # %: reported SOC below this at the pause voltage = miscalibration
+# A pack that hits the top cell voltage (pause point) while the BMS reports a SOC
+# below full is miscalibrated: these BMSs do not correct the coulomb counter until
+# they perform the charge cutoff themselves (users see e.g. 70% — or 96% — with a
+# cell already at 3.58 V). In that case, instead of holding at the pause voltage,
+# keep charging at the tapered power until the BMS itself cuts off, which forces it
+# to recalibrate SOC to 100%. Threshold is just below full so the whole drifted
+# range (not only "far below full") gets one recalibrating cutoff.
+NORMAL_BALANCE_RECAL_SOC_THRESHOLD = 99        # %: reported SOC below this at the pause voltage = miscalibration
 NORMAL_BALANCE_RECAL_CUTOFF_POWER_W = 10       # W: charge collapsed (BMS terminated)
 NORMAL_BALANCE_RECAL_CUTOFF_CYCLES = 5         # consecutive cycles to confirm the BMS cutoff
 NORMAL_BALANCE_RECAL_INVERTER_STANDBY = 1      # inverter_state raw value for Standby

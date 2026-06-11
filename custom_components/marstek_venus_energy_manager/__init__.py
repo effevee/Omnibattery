@@ -833,8 +833,10 @@ class ChargeDischargeController:
     def _compute_recal_override(self, coordinator, vmax_f: float, soc) -> bool:
         """Decide whether to keep charging past the tapper pause to recalibrate SOC.
 
-        Called only when the max cell sits at the pause voltage. A low reported
-        SOC at full cell voltage means the BMS coulomb counter has drifted, so
+        Called while the max cell is in the top taper zone (down to the taper
+        voltage, so the BMS-cutoff counter keeps advancing as the cell relaxes
+        after a cut). A low reported SOC at full cell voltage means the BMS
+        coulomb counter has drifted, so
         keep charging (at the tapered power) until the BMS itself cuts off, then
         latch off so the SOC can recalibrate to 100%. The latch clears when the
         battery leaves the top zone (see _refresh_normal_balance_blocks).
@@ -931,7 +933,28 @@ class ChargeDischargeController:
                 # charge session, recording the SOC at that moment. The taper then
                 # stops charging and stays stopped — it must NOT re-trickle when
                 # the cell relaxes, which would pin the cell at the top voltage.
-                if in_zone and vmax_f >= NORMAL_BALANCE_PAUSE_CELL_VOLTAGE:
+                #
+                # Also latch on the BMS-cutoff signature (charge collapsed to ~0 W
+                # with the inverter in standby while still in the top zone). The
+                # cell relaxes below the pause voltage within a poll or two of the
+                # cut, so a 2 s poll may never observe vmax >= pause and the latch
+                # would otherwise never arm — the controller keeps re-commanding
+                # charge and the BMS cuts again, an endless top-of-charge ping-pong.
+                power = data.get("battery_power")
+                inv = data.get("inverter_state")
+                try:
+                    bms_cut_signature = (
+                        in_zone
+                        and power is not None
+                        and inv is not None
+                        and float(power) <= NORMAL_BALANCE_RECAL_CUTOFF_POWER_W
+                        and int(inv) == NORMAL_BALANCE_RECAL_INVERTER_STANDBY
+                    )
+                except (TypeError, ValueError):
+                    bms_cut_signature = False
+                if in_zone and (
+                    vmax_f >= NORMAL_BALANCE_PAUSE_CELL_VOLTAGE or bms_cut_signature
+                ):
                     self._normal_balance_top_voltage_seen[coordinator] = True
                     if coordinator not in self._normal_balance_pause_latch_soc:
                         self._normal_balance_pause_latch_soc[coordinator] = (
@@ -952,13 +975,17 @@ class ChargeDischargeController:
                 self._normal_balance_pause_latch_soc.pop(coordinator, None)
                 paused = False
 
-            # SOC recalibration: while actually at the top voltage, if the BMS
-            # reports a low SOC keep charging until the BMS cuts off (recalibrates).
+            # SOC recalibration: while in the top zone, if the BMS reports a low
+            # SOC keep charging until the BMS cuts off (recalibrates). The window
+            # extends down to the taper voltage, not just the pause voltage: the
+            # cell relaxes below 3.58 V within a poll or two of the BMS cut, so
+            # gating the cutoff counter on vmax >= pause would freeze it before it
+            # reaches the required consecutive cycles and recal would never latch.
             override = False
             if (
                 paused
                 and vmax_f is not None
-                and vmax_f >= NORMAL_BALANCE_PAUSE_CELL_VOLTAGE
+                and vmax_f >= NORMAL_BALANCE_TAPER_CELL_VOLTAGE
             ):
                 override = self._compute_recal_override(
                     coordinator, vmax_f, current_soc
@@ -3832,16 +3859,31 @@ class ChargeDischargeController:
                                 )
                             except (TypeError, ValueError):
                                 is_standby = False
-                            reason = "standby_no_delivery" if is_standby else "non_delivery"
-                            just_excluded = self._non_responsive.record_non_delivery(
-                                coordinator, discharge_power, actual_abs,
-                                reason=reason, retry_attempted=attempt > 0,
-                            )
-                            # One-shot wake nudge, only at the moment of exclusion —
-                            # a last-ditch RS485 re-assert before dropping it from the pool.
-                            if just_excluded:
-                                woke = await self._attempt_wake(coordinator)
-                                self._non_responsive.set_wake_attempted(coordinator, woke)
+                            # High-SOC counterpart to the low-SOC BMS-cutoff exemption
+                            # above: a battery that hit the top voltage this charge
+                            # session (cells full, BMS dropped to standby) legitimately
+                            # delivers 0 W until it leaves standby. That is expected
+                            # BMS-full behaviour, not a fault, so don't exclude it from
+                            # the PD pool. top_voltage_seen clears when the battery
+                            # leaves the top zone, so the exemption is self-limiting.
+                            if is_standby and self._normal_balance_top_voltage_seen.get(coordinator, False):
+                                _LOGGER.debug(
+                                    "[%s] No discharge delivered but battery is in standby "
+                                    "after hitting top voltage this session — BMS full, not a fault",
+                                    coordinator.name,
+                                )
+                                self._non_responsive.clear(coordinator)
+                            else:
+                                reason = "standby_no_delivery" if is_standby else "non_delivery"
+                                just_excluded = self._non_responsive.record_non_delivery(
+                                    coordinator, discharge_power, actual_abs,
+                                    reason=reason, retry_attempted=attempt > 0,
+                                )
+                                # One-shot wake nudge, only at the moment of exclusion —
+                                # a last-ditch RS485 re-assert before dropping it from the pool.
+                                if just_excluded:
+                                    woke = await self._attempt_wake(coordinator)
+                                    self._non_responsive.set_wake_attempted(coordinator, woke)
                     else:
                         self._non_responsive.clear(coordinator)
                 return True

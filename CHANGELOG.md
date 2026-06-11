@@ -10,6 +10,9 @@
 ### Changed
 - **`const.py` split into a `const/` package** (no behaviour change): per-model register/entity definitions moved to `registers_v2/v3/va/vd.py`, shared register infra to `registers_common.py`, and integration/feature constants to `integration_const.py`. `const/__init__.py` re-exports everything, so all existing imports keep working. [`const/`](custom_components/marstek_venus_energy_manager/const/).
 
+### Fixed
+- **v3 batteries marked non-responsive near full / charge ping-pong**: a pack whose cells reach 3.58 V before 100 % SOC could never latch the charge pause (the cell relaxes below 3.58 V between polls, so the latch never armed), so the controller kept re-commanding charge and the BMS cut again in a loop; once the BMS dropped to standby, a later discharge command then read ~0 W and the battery was wrongly excluded from the pool. The pause now also latches on the BMS-cutoff signature (~0 W in standby while in the top zone), a high-SOC standby with no discharge is treated as expected BMS-full behaviour (not a fault, mirroring the existing low-SOC exemption), and the SOC-recalibration threshold was raised 90→99 % so a pack stuck below full at the top voltage is driven to one BMS cutoff to recalibrate its coulomb counter. The recalibration's BMS-cutoff counter also keeps advancing as the cell relaxes (down to the taper voltage) instead of only at the pause voltage, so it actually reaches its confirmation cycles and latches rather than stalling. [`__init__.py`](custom_components/marstek_venus_energy_manager/__init__.py), [`integration_const.py`](custom_components/marstek_venus_energy_manager/const/integration_const.py).
+
 ## [2.0.3] - 2026-06-10
 
 ### Fixed
