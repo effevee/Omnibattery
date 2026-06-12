@@ -3087,7 +3087,7 @@ class ChargeDischargeController:
             "(restarted at %s, schedule not yet built for %s)",
             now.strftime("%H:%M"), now.date()
         )
-        await self._evaluate_dynamic_pricing()
+        await self._evaluate_dynamic_pricing(extended_horizon=True)
 
     async def _should_activate_grid_charging(self) -> dict:
         """
@@ -4162,10 +4162,11 @@ class ChargeDischargeController:
         except (ValueError, TypeError):
             return None
 
-    def _parse_price_data(self) -> list:
-        """Read price sensor and return list[PriceSlot] for the next 24 hours.
+    def _parse_price_data(self, *, horizon_end=None) -> list:
+        """Read price sensor and return list[PriceSlot] for remaining slots up to horizon_end.
 
         Dispatches to the correct parser based on price_integration_type.
+        When horizon_end is None, defaults to end of current day (today 23:59:59).
         Returns empty list on error.
         """
         if not self.price_sensor:
@@ -4200,14 +4201,15 @@ class ChargeDischargeController:
             self._price_data_status = "no_slots"
             return []
 
-        # Filter to remaining slots of the current day (00:00–23:59:59 today).
-        # Using end-of-day instead of now+24h ensures that a mid-day restart does
-        # not pull in tomorrow's cheap slots — those are handled by the 00:05 evaluation.
+        # Filter to remaining slots within the requested horizon.
+        # Default (horizon_end=None) keeps today-only semantics so mid-day restarts
+        # do not pull in tomorrow — callers that need cross-midnight slots pass an explicit horizon.
         now = datetime.now()
         end_of_day = now.replace(hour=23, minute=59, second=59, microsecond=0)
-        filtered = [s for s in raw_slots if s.end > now and s.start <= end_of_day]
+        effective_horizon = horizon_end if horizon_end is not None else end_of_day
+        filtered = [s for s in raw_slots if s.end > now and s.start <= effective_horizon]
         self._price_data_status = f"ok ({len(filtered)} slots)"
-        _LOGGER.info("Dynamic pricing: parsed %d slots (%d remaining today)", len(raw_slots), len(filtered))
+        _LOGGER.info("Dynamic pricing: parsed %d slots (%d within horizon)", len(raw_slots), len(filtered))
         return filtered
 
     # =========================================================================
@@ -4499,7 +4501,7 @@ class ChargeDischargeController:
     # DYNAMIC PRICING: Evaluation and notification methods
     # =========================================================================
 
-    async def _evaluate_dynamic_pricing(self) -> None:
+    async def _evaluate_dynamic_pricing(self, *, extended_horizon: bool = False) -> None:
         """Main evaluation at 00:05: energy balance + prices → schedule."""
         now = datetime.now()
         today = now.date()
@@ -4512,7 +4514,12 @@ class ChargeDischargeController:
         charging_needed = decision_data["should_charge"]
 
         # Step 2: Parse price data (always, even without deficit — for diagnostics)
-        slots = self._parse_price_data()
+        if extended_horizon:
+            end_of_day = now.replace(hour=23, minute=59, second=59, microsecond=0)
+            horizon = max(end_of_day, now + timedelta(hours=12))
+        else:
+            horizon = None
+        slots = self._parse_price_data(horizon_end=horizon)
         if slots:
             self._dp_daily_avg_price = sum(s.price for s in slots) / len(slots)
             _LOGGER.debug("Dynamic pricing: daily average price %.4f from %d slots", self._dp_daily_avg_price, len(slots))
@@ -4571,7 +4578,7 @@ class ChargeDischargeController:
         self._dynamic_pricing_schedule = schedule
         # Use the date of the selected slots (tomorrow at eval time) so the midnight
         # reset only fires the day AFTER the slots — not before they can be used.
-        slots_date = selected[0].start.date() if selected else (now.date() + timedelta(days=1))
+        slots_date = max(s.start.date() for s in selected) if selected else (now.date() + timedelta(days=1))
         self._dynamic_pricing_evaluated_date = slots_date
         self._dp_eval_retry_count = 0
 
@@ -4840,7 +4847,7 @@ class ChargeDischargeController:
 
         Runs once per day around T_end - 1.5h.  Checks the current battery SOC
         against the configured max_soc and, accounting for remaining solar, decides
-        whether to schedule cheap remaining slots from now until midnight.
+        whether to schedule cheap slots from now through the next 12 hours (crosses midnight when tomorrow prices are available).
 
         Decision flow:
         1. Batteries already at target → skip.
@@ -4930,8 +4937,9 @@ class ChargeDischargeController:
             evening_deficit_kwh, energy_to_full_kwh, remaining_solar_kwh,
         )
 
-        # --- Find cheap slots (today, future only) ---
-        slots = self._parse_price_data()
+        # --- Find cheap slots (extended horizon: now + 12h to capture cheap overnight slots) ---
+        end_of_day = now.replace(hour=23, minute=59, second=59, microsecond=0)
+        slots = self._parse_price_data(horizon_end=max(end_of_day, now + timedelta(hours=12)))
         if not slots:
             _LOGGER.warning("Evening recharge: no price data available")
             return
@@ -4960,6 +4968,7 @@ class ChargeDischargeController:
             )
             self._dynamic_pricing_schedule.selected_slots = merged
             self._dynamic_pricing_schedule.charging_needed = True
+            self._dynamic_pricing_evaluated_date = max(s.start.date() for s in merged)
         else:
             avg_price = sum(s.price for s in selected) / len(selected)
             effective_power_kw = min(self.max_contracted_power, self.max_charge_capacity) / 1000.0
@@ -4973,7 +4982,7 @@ class ChargeDischargeController:
                 energy_deficit_kwh=evening_deficit_kwh,
                 charging_needed=True,
             )
-            self._dynamic_pricing_evaluated_date = today
+            self._dynamic_pricing_evaluated_date = max(s.start.date() for s in selected)
 
         _LOGGER.info(
             "Evening recharge: scheduled %d slot(s) (%.1fh) for %.2f kWh deficit",
