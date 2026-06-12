@@ -18,6 +18,15 @@ from .coordinator import MarstekVenusDataUpdateCoordinator
 # offline) so a resumed update can't dump one giant energy block.
 _MAX_INTEGRATION_GAP_S = 600.0
 
+# Only sample the dual-plane efficiency (vA/vD) while PV is not feeding the
+# cells: above this MPPT total the AC port no longer equals the battery's own
+# conversion leg, so the AC/DC comparison would be contaminated.
+_MPPT_ZERO_W = 10.0
+
+# Ignore samples where either plane is near idle: standby self-consumption and
+# zero-crossings carry no useful conversion information and would just add noise.
+_MIN_POWER_W = 20.0
+
 
 async def async_setup_entry(
     hass: HomeAssistant,
@@ -57,25 +66,43 @@ class MarstekVenusEfficiencySensor(CoordinatorEntity, RestoreEntity, SensorEntit
         self._attr_entity_category = EntityCategory.DIAGNOSTIC
         self._attr_should_poll = False
         self._dependency_keys = definition["dependency_keys"]
-        # On Venus D/A the AC-side charge counter (reg 33000) can't see DC-coupled
-        # PV charging the cells, while the discharge counter (reg 33002) sees
-        # everything, so the hardware round-trip ratio runs >100%. For those units
-        # integrate the true terminal power (battery_cell_power = battery_power +
-        # MPPT) by sign instead. AC-only models have no MPPT and keep the accurate
-        # hardware counters.
+        # On Venus D/A the AC-side hardware energy counters can't see DC-coupled
+        # PV charging the cells, so their round-trip ratio runs >100%. For those
+        # units measure the real inverter loss directly while PV is idle (MPPT=0):
+        # the AC port (ac_power) and the DC battery terminal (battery_power) are
+        # two independent planes whose difference is the conversion loss. Each leg
+        # is the ratio of two simultaneous power readings, so unlike a cumulative
+        # charge/discharge ratio it has no SoC-endpoint dependence and can't blow
+        # up on partial cycles. AC-only models keep the accurate hardware counters.
         self._integrate_mode = coordinator.battery_version in ("vA", "vD")
         self._mppt_keys = ["mppt1_power", "mppt2_power", "mppt3_power", "mppt4_power"]
-        self._charge_energy_kwh = 0.0
-        self._discharge_energy_kwh = 0.0
+        # Energy on each plane, split by direction (kWh), MPPT=0 windows only.
+        self._charge_ac_kwh = 0.0      # AC drawn while charging the cells
+        self._charge_dc_kwh = 0.0      # DC stored while charging the cells
+        self._discharge_ac_kwh = 0.0   # AC delivered while discharging
+        self._discharge_dc_kwh = 0.0   # DC extracted while discharging
         self._last_mono: float | None = None
+
+    def _leg_efficiencies(self):
+        """Return (charge_eff, discharge_eff) or (None, None) if not yet sampled."""
+        charge_eff = (
+            self._charge_dc_kwh / self._charge_ac_kwh
+            if self._charge_ac_kwh > 0 else None
+        )
+        discharge_eff = (
+            self._discharge_ac_kwh / self._discharge_dc_kwh
+            if self._discharge_dc_kwh > 0 else None
+        )
+        return charge_eff, discharge_eff
 
     @property
     def native_value(self):
         """Return round-trip efficiency (%)."""
         if self._integrate_mode:
-            if self._charge_energy_kwh <= 0:
+            charge_eff, discharge_eff = self._leg_efficiencies()
+            if charge_eff is None or discharge_eff is None:
                 return None
-            return round(self._discharge_energy_kwh / self._charge_energy_kwh * 100, 2)
+            return round(min(charge_eff * discharge_eff * 100, 100.0), 2)
 
         if self.coordinator.data is None:
             return None
@@ -90,12 +117,22 @@ class MarstekVenusEfficiencySensor(CoordinatorEntity, RestoreEntity, SensorEntit
 
     @property
     def extra_state_attributes(self):
-        """Expose integrated energy so it survives restarts (vA/vD only)."""
+        """Expose per-leg efficiency and integrated energy (vA/vD only).
+
+        The energy buckets survive restarts; the leg efficiencies give partial
+        visibility before a full round trip (e.g. a unit that only discharges at
+        night surfaces its discharge efficiency while round-trip stays None).
+        """
         if not self._integrate_mode:
             return None
+        charge_eff, discharge_eff = self._leg_efficiencies()
         return {
-            "charge_energy_kwh": round(self._charge_energy_kwh, 4),
-            "discharge_energy_kwh": round(self._discharge_energy_kwh, 4),
+            "charge_efficiency": round(charge_eff * 100, 2) if charge_eff is not None else None,
+            "discharge_efficiency": round(discharge_eff * 100, 2) if discharge_eff is not None else None,
+            "charge_ac_kwh": round(self._charge_ac_kwh, 4),
+            "charge_dc_kwh": round(self._charge_dc_kwh, 4),
+            "discharge_ac_kwh": round(self._discharge_ac_kwh, 4),
+            "discharge_dc_kwh": round(self._discharge_dc_kwh, 4),
         }
 
     async def async_added_to_hass(self) -> None:
@@ -106,8 +143,10 @@ class MarstekVenusEfficiencySensor(CoordinatorEntity, RestoreEntity, SensorEntit
         last = await self.async_get_last_state()
         if last is not None:
             try:
-                self._charge_energy_kwh = float(last.attributes.get("charge_energy_kwh") or 0.0)
-                self._discharge_energy_kwh = float(last.attributes.get("discharge_energy_kwh") or 0.0)
+                self._charge_ac_kwh = float(last.attributes.get("charge_ac_kwh") or 0.0)
+                self._charge_dc_kwh = float(last.attributes.get("charge_dc_kwh") or 0.0)
+                self._discharge_ac_kwh = float(last.attributes.get("discharge_ac_kwh") or 0.0)
+                self._discharge_dc_kwh = float(last.attributes.get("discharge_dc_kwh") or 0.0)
             except (TypeError, ValueError):
                 pass
 
@@ -118,17 +157,17 @@ class MarstekVenusEfficiencySensor(CoordinatorEntity, RestoreEntity, SensorEntit
         super()._handle_coordinator_update()
 
     def _accumulate(self) -> None:
-        """Add the energy moved since the last update to the charge/discharge totals."""
+        """Integrate AC- and DC-plane energy by direction, while PV is idle."""
         if not self._integrate_mode:
             return
         data = self.coordinator.data
         if not data:
             return
-        battery = data.get("battery_power")
-        if battery is None:
+        battery = data.get("battery_power")  # DC terminal, + charge / - discharge
+        ac = data.get("ac_power")            # AC port, opposite sign to battery
+        if battery is None or ac is None:
             return
         solar = sum(v for k in self._mppt_keys if (v := data.get(k)) is not None)
-        cell_power = battery + solar  # W, + charge / - discharge
 
         now = time.monotonic()
         last = self._last_mono
@@ -137,14 +176,22 @@ class MarstekVenusEfficiencySensor(CoordinatorEntity, RestoreEntity, SensorEntit
         # nothing — monotonic resets across restarts, so this also skips downtime.
         if last is None:
             return
+        # PV feeding the cells, or either plane near idle: skip but keep the timer
+        # current so the next valid sample doesn't integrate the skipped span.
+        if solar > _MPPT_ZERO_W or abs(battery) < _MIN_POWER_W or abs(ac) < _MIN_POWER_W:
+            return
         dt = now - last
         if dt <= 0 or dt > _MAX_INTEGRATION_GAP_S:
             return
-        energy_kwh = cell_power * (dt / 3600.0) / 1000.0
-        if energy_kwh > 0:
-            self._charge_energy_kwh += energy_kwh
-        else:
-            self._discharge_energy_kwh += -energy_kwh
+        hours = dt / 3600.0
+        ac_kwh = abs(ac) * hours / 1000.0
+        dc_kwh = abs(battery) * hours / 1000.0
+        if battery > 0:  # charging the cells: AC drawn in, DC stored
+            self._charge_ac_kwh += ac_kwh
+            self._charge_dc_kwh += dc_kwh
+        else:            # discharging the cells: DC extracted, AC delivered
+            self._discharge_ac_kwh += ac_kwh
+            self._discharge_dc_kwh += dc_kwh
 
     @property
     def device_info(self):
