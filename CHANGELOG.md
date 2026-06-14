@@ -2,6 +2,9 @@
 
 ## [2.0.4b3] - 2026-06-12
 
+### Internal
+- **`charge_delay` module extracted**: the unified solar-forecast charge-delay gate (latch persistence, energy-balance decision, unlock-time projection, daily reset) moved out of `__init__.py` into [`charge_delay.py`](custom_components/marstek_venus_energy_manager/charge_delay.py); behavior unchanged, guarded by new characterization tests.
+
 ### Changed
 - **Skip redundant control writes**: the PD loop no longer re-writes force_mode + charge/discharge power (and reads them back) when the battery is already in the commanded state, cutting bus traffic on steady commands. A discharge write is still re-sent if the battery stops delivering, so non-responsive detection is unaffected. [`__init__.py`](custom_components/marstek_venus_energy_manager/__init__.py).
 - **Throttle control readback**: the 4-register ACK/feedback readback after each power write now runs only every Nth real write (default 5) instead of every write, removing the bulk of write-path bus traffic and the post-write settle delay on the other cycles. Trade-off: a rejected command or a battery that stops delivering is caught up to N writes later. [`coordinator.py`](custom_components/marstek_venus_energy_manager/coordinator.py), [`__init__.py`](custom_components/marstek_venus_energy_manager/__init__.py).
@@ -29,7 +32,6 @@
 - **Automated test suite + CI**: first `pytest` coverage (consumption model, excluded-device and EV-charger logic), run on every PR. No user-facing change. [`tests/`](tests/), [`tests.yml`](.github/workflows/tests.yml).
 - **`external_loads` module extracted**: excluded-device and EV-charger logic moved out of `__init__.py` into [`external_loads.py`](custom_components/marstek_venus_energy_manager/external_loads.py); behavior unchanged, guarded by the new tests.
 - **`power_distribution` module extracted**: multi-battery load-sharing (power allocation, battery selection, split-hold rebalance) moved out of `__init__.py` into [`power_distribution.py`](custom_components/marstek_venus_energy_manager/power_distribution.py); behavior unchanged, guarded by new characterization tests.
-- **`charge_delay` module extracted**: the unified solar-forecast charge-delay gate (latch persistence, energy-balance decision, unlock-time projection, daily reset) moved out of `__init__.py` into [`charge_delay.py`](custom_components/marstek_venus_energy_manager/charge_delay.py); behavior unchanged, guarded by new characterization tests.
 
 ### Changed
 - **`const.py` split into a `const/` package** (no behaviour change): per-model register/entity definitions moved to `registers_v2/v3/va/vd.py`, shared register infra to `registers_common.py`, and integration/feature constants to `integration_const.py`. `const/__init__.py` re-exports everything, so all existing imports keep working. [`const/`](custom_components/marstek_venus_energy_manager/const/).
