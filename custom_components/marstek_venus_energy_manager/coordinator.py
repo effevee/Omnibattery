@@ -16,15 +16,14 @@ from .const import (
     SWITCH_DEFINITIONS,
     BINARY_SENSOR_DEFINITIONS,
     BUTTON_DEFINITIONS,
-    MESSAGE_WAIT_MS,
-    READ_TIMEOUT_S,
     DEBUG_POLL_SENSOR_SKIPS,
     DEBUG_POLL_SENSOR_VALUES,
     CONF_ACTIVE_BALANCE_MODE_ENABLED,
     CONF_FULL_CHARGE_VOLTAGE_TAPER_ENABLED,
     DEFAULT_FULL_CHARGE_VOLTAGE_TAPER_ENABLED,
 )
-from .modbus_client import MarstekModbusClient, decode_registers
+from .modbus_client import decode_registers
+from .drivers.marstek import MarstekModbusDriver
 from .alarm_notifier import AlarmNotifier
 
 _LOGGER = logging.getLogger(__name__)
@@ -64,12 +63,6 @@ class MarstekVenusDataUpdateCoordinator(DataUpdateCoordinator):
             self.battery_version = battery_version
 
         _LOGGER.info("[%s] Initialized as %s battery", name, self.battery_version)
-
-        # Create Modbus client with version-specific timing and packet correction.
-        wait_ms = MESSAGE_WAIT_MS.get(self.battery_version, 50)
-        timeout_s = READ_TIMEOUT_S.get(self.battery_version, 10)
-        is_v3 = self.battery_version in ("v3", "vA", "vD")
-        self.client = MarstekModbusClient(host, port, message_wait_ms=wait_ms, timeout=timeout_s, is_v3=is_v3, slave_id=slave_id)
 
         self.max_charge_power = max_charge_power
         self.max_discharge_power = max_discharge_power
@@ -215,6 +208,21 @@ class MarstekVenusDataUpdateCoordinator(DataUpdateCoordinator):
         # Log sensor count for debugging
         _LOGGER.info("[%s] Total sensors to poll: %d", self.name, len(self._all_definitions))
 
+        # Hardware I/O goes through a brand-agnostic driver (driver abstraction
+        # Phase 2: connection lifecycle + telemetry reads). The driver owns the
+        # Modbus client and its version-correct timing / packet correction, and
+        # is seeded with this version's definitions so read_telemetry can resolve
+        # logical keys to registers. ``self.client`` is kept as a transitional
+        # alias because the write paths and block reads still use the
+        # register-level client directly until later phases migrate them.
+        self.driver = MarstekModbusDriver(
+            self.host, self.port, self.battery_version, self.slave_id,
+            max_charge_power_w=self.max_charge_power,
+            max_discharge_power_w=self.max_discharge_power,
+            definitions=self._all_definitions,
+        )
+        self.client = self.driver.client
+
     @property
     def is_available(self) -> bool:
         """Return whether the battery is currently reachable."""
@@ -233,16 +241,16 @@ class MarstekVenusDataUpdateCoordinator(DataUpdateCoordinator):
         return f"{self.host}_{self.port}_{self.slave_id}"
 
     async def connect(self) -> bool:
-        """Connect to the Modbus client."""
-        connected = await self.client.async_connect()
+        """Connect to the battery via the driver."""
+        connected = await self.driver.connect()
         if connected:
             self._is_connected = True
             self._consecutive_failures = 0
         return connected
 
     async def disconnect(self) -> None:
-        """Disconnect from the Modbus client."""
-        await self.client.async_close()
+        """Disconnect from the battery via the driver."""
+        await self.driver.close()
 
     async def async_reconnect_fresh(self) -> bool:
         """Close the current connection and reconnect with a fresh client.
@@ -261,8 +269,8 @@ class MarstekVenusDataUpdateCoordinator(DataUpdateCoordinator):
         )
 
         async with self.lock:
-            # async_connect() internally closes old client and creates a new one
-            connected = await self.client.async_connect()
+            # driver.connect() internally closes the old client and creates a new one
+            connected = await self.driver.connect()
 
             if connected:
                 self._consecutive_failures = 0
@@ -298,7 +306,7 @@ class MarstekVenusDataUpdateCoordinator(DataUpdateCoordinator):
             value (bool): True to suppress errors, False for normal operation.
         """
         self._is_shutting_down = value
-        self.client.set_shutting_down(value)
+        self.driver.set_shutting_down(value)
 
     def set_rs485_user_disabled(self, value: bool) -> None:
         """Set rs485_user_disabled and persist the value to config entry data."""
@@ -512,12 +520,11 @@ class MarstekVenusDataUpdateCoordinator(DataUpdateCoordinator):
             sensors_attempted += 1
             try:
                 async with self.lock:
-                    value = await self.client.async_read_register(
-                        register=sensor["register"],
-                        data_type=sensor.get("data_type", "uint16"),
-                        count=sensor.get("count"),
-                        sensor_key=key,
-                    )
+                    # The driver resolves the logical key to its register/dtype/
+                    # count from the definitions it was seeded with and returns the
+                    # raw decoded value (omitted from the snapshot on read failure).
+                    snapshot = await self.driver.read_telemetry([key])
+                value = snapshot.get(key)
 
                 # Yield to the event loop so the PD control writer waiting on
                 # self.lock can acquire it before this loop re-enters async with.

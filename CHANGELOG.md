@@ -1,5 +1,10 @@
 # Changelog
 
+## [2.1.0] - 2026-06-15
+
+### Internal
+- **Driver abstraction — coordinator reads via the driver**: the coordinator now builds a `MarstekModbusDriver` and routes its connection lifecycle (connect/close/reconnect/shutdown) and per-register polling through it instead of touching the Modbus client directly; writes and block reads still use the client until a later phase. Behavior unchanged. [`coordinator.py`](custom_components/marstek_venus_energy_manager/coordinator.py), [`drivers/`](custom_components/marstek_venus_energy_manager/drivers/).
+
 ## [2.0.4b4] - 2026-06-14
 
 ### Changed
