@@ -432,6 +432,60 @@ async def test_apply_config_propagates_write_failure():
 
 
 # ----------------------------------------------------------------------
+# set_charge_cutoff (weekly-full-charge / active-balance ceiling)
+# ----------------------------------------------------------------------
+async def test_set_charge_cutoff_v2_raises_ceiling_to_deci_percent():
+    client = _fake_client()
+    drv = _driver("v2", client=client)
+
+    ok = await drv.set_charge_cutoff(100)
+
+    assert ok is True
+    reg = REGISTER_MAP["v2"]["charging_cutoff_capacity"]
+    # 100% raises the BMS ceiling to the register's deci-percent max (1000), and
+    # only the charge cut-off is touched — not the discharge cut-off or power caps.
+    client.async_write_register.assert_awaited_once_with(reg, int(100 / 0.1))
+
+
+async def test_set_charge_cutoff_restore_value_scaled():
+    client = _fake_client()
+    drv = _driver("v2", client=client)
+
+    await drv.set_charge_cutoff(80)
+
+    reg = REGISTER_MAP["v2"]["charging_cutoff_capacity"]
+    client.async_write_register.assert_awaited_once_with(reg, int(80 / 0.1))
+
+
+@pytest.mark.parametrize("version", ["v3", "vA", "vD"])
+async def test_set_charge_cutoff_returns_false_when_register_absent(version):
+    client = _fake_client()
+    drv = _driver(version, client=client)
+
+    ok = await drv.set_charge_cutoff(100)
+
+    assert ok is False  # v3 family has no hardware cutoff register
+    client.async_write_register.assert_not_awaited()
+
+
+async def test_set_charge_cutoff_addresses_configured_slave():
+    client = _fake_client()
+    drv = _driver("v2", slave_id=7, client=client)
+
+    await drv.set_charge_cutoff(100)
+
+    assert client.unit_id == 7
+
+
+async def test_set_charge_cutoff_propagates_write_failure():
+    client = _fake_client()
+    client.async_write_register = AsyncMock(return_value=False)
+    drv = _driver("v2", client=client)
+
+    assert await drv.set_charge_cutoff(100) is False
+
+
+# ----------------------------------------------------------------------
 # standby (teardown)
 # ----------------------------------------------------------------------
 async def test_standby_zeros_setpoints_and_force_mode():

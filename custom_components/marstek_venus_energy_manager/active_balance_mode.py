@@ -15,7 +15,6 @@ cross-cycle dicts.
 """
 from __future__ import annotations
 
-import asyncio
 import logging
 from datetime import datetime
 from typing import TYPE_CHECKING
@@ -508,8 +507,7 @@ class ActiveBalanceModeManager:
         # the pre-top run-up. Hardware register write below is v2-only.
         coordinator.max_soc = 100
 
-        cutoff_reg = coordinator.get_register("charging_cutoff_capacity")
-        if cutoff_reg is None:
+        if not coordinator.capabilities.hardware_soc_cutoff:
             coordinator.active_balance_mode_cutoff_applied = True
             _LOGGER.info(
                 "%s: active balance mode raised software max_soc to 100%% "
@@ -518,8 +516,7 @@ class ActiveBalanceModeManager:
             )
         else:
             try:
-                await coordinator.write_register(cutoff_reg, 1000, do_refresh=False)
-                await asyncio.sleep(0.1)
+                await coordinator.set_charge_cutoff(100)
                 coordinator.active_balance_mode_cutoff_applied = True
                 _LOGGER.info(
                     "%s: active balance mode raised software max_soc and hardware "
@@ -547,15 +544,9 @@ class ActiveBalanceModeManager:
         # next cycle, regardless of whether the hardware write succeeds.
         coordinator.max_soc = saved_max_soc
 
-        cutoff_reg = coordinator.get_register("charging_cutoff_capacity")
-        if cutoff_reg is not None and not self._controller._is_backup_function_active(coordinator):
+        if coordinator.capabilities.hardware_soc_cutoff and not self._controller._is_backup_function_active(coordinator):
             try:
-                await coordinator.write_register(
-                    cutoff_reg,
-                    int(saved_max_soc / 0.1),
-                    do_refresh=False,
-                )
-                await asyncio.sleep(0.1)
+                await coordinator.set_charge_cutoff(saved_max_soc)
                 _LOGGER.info(
                     "%s: active balance mode restored software max_soc and hardware "
                     "charging cutoff to %d%%",

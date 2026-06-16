@@ -899,6 +899,31 @@ class MarstekVenusDataUpdateCoordinator(DataUpdateCoordinator):
                 _LOGGER.warning("[%s] One or more battery config writes failed", self.name)
             return ok
 
+    async def set_charge_cutoff(self, soc_pct: float) -> bool:
+        """Write the hardware charge-cutoff register via the driver, holding self.lock.
+
+        Semantic entry point for the weekly-full-charge / active-balance flows
+        that temporarily raise the BMS charge ceiling to 100% and later restore
+        the configured max_soc. The driver owns the register address, the
+        deci-percent scaling and the settle; this wrapper only adds the
+        per-coordinator infra (lock + health bookkeeping), matching write_register
+        / apply_config. No refresh. Callers gate the v3 (no-register) case on
+        capabilities.hardware_soc_cutoff, so a False here means the write failed.
+        """
+        async with self.lock:
+            try:
+                ok = await self.driver.set_charge_cutoff(soc_pct)
+            except Exception as e:
+                if not self._is_shutting_down:
+                    _LOGGER.error("[%s] Exception writing charge cutoff: %s", self.name, e)
+                return False
+            if ok:
+                self._consecutive_failures = 0
+                self._is_connected = True
+            elif not self._is_shutting_down:
+                _LOGGER.warning("[%s] Failed to write charge cutoff", self.name)
+            return ok
+
     async def standby(self) -> bool:
         """Idle the battery for teardown via the driver, holding self.lock.
 

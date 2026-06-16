@@ -51,6 +51,7 @@ class FakeCoordinator:
         "rs485_user_disabled": False,
         "balance_hold": False,
         "apply_power": None,
+        "set_charge_cutoff": None,
     }
 
     def __init__(self, **kw):

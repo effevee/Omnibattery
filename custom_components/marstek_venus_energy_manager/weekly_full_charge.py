@@ -274,10 +274,9 @@ class WeeklyFullChargeManager:
             for coordinator in ctrl.coordinators:
                 if ctrl._is_active_balance_mode_running(coordinator):
                     continue
-                cutoff_reg = coordinator.get_register("charging_cutoff_capacity")
                 if ctrl._is_backup_function_active(coordinator):
                     continue
-                if cutoff_reg is None:
+                if not coordinator.capabilities.hardware_soc_cutoff:
                     _LOGGER.debug("%s: No hardware cutoff register to restore (v3 battery)", coordinator.name)
                     continue
                 try:
@@ -286,9 +285,7 @@ class WeeklyFullChargeManager:
                     original_max_soc = ctrl._weekly_charge_saved_max_soc.get(
                         coordinator.name, coordinator.max_soc
                     )
-                    max_soc_value = int(original_max_soc / 0.1)
-                    await coordinator.write_register(cutoff_reg, max_soc_value, do_refresh=False)
-                    await asyncio.sleep(0.1)
+                    await coordinator.set_charge_cutoff(original_max_soc)
                     _LOGGER.info("%s: Restored hardware cutoff to %d%% after mid-charge abort",
                                  coordinator.name, original_max_soc)
                 except Exception as e:
@@ -325,13 +322,11 @@ class WeeklyFullChargeManager:
             for coordinator in ctrl.coordinators:
                 if ctrl._is_active_balance_mode_running(coordinator):
                     continue
-                cutoff_reg = coordinator.get_register("charging_cutoff_capacity")
-
                 if ctrl._is_backup_function_active(coordinator):
                     _LOGGER.debug("%s: Skipping weekly full charge - backup function is active", coordinator.name)
                     continue
 
-                if cutoff_reg is None:
+                if not coordinator.capabilities.hardware_soc_cutoff:
                     _LOGGER.debug(
                         "%s: Weekly full charge - no hardware cutoff register (v3 battery). "
                         "Using software enforcement to 100%%.",
@@ -346,9 +341,8 @@ class WeeklyFullChargeManager:
                 try:
                     # Save original max_soc before overwriting the hardware register
                     ctrl._weekly_charge_saved_max_soc[coordinator.name] = coordinator.max_soc
-                    # Write 1000 to register 44000 (100% = 1000 in register scale)
-                    await coordinator.write_register(cutoff_reg, 1000, do_refresh=False)
-                    await asyncio.sleep(0.1)
+                    # Raise the hardware charging cutoff to 100%
+                    await coordinator.set_charge_cutoff(100)
                     _LOGGER.debug("%s: Set hardware charging cutoff to 100%% (saved original max_soc=%d%%)",
                                   coordinator.name, coordinator.max_soc)
                 except Exception as e:
@@ -395,13 +389,11 @@ class WeeklyFullChargeManager:
         for coordinator in ctrl.coordinators:
             if ctrl._is_active_balance_mode_running(coordinator):
                 continue
-            cutoff_reg = coordinator.get_register("charging_cutoff_capacity")
-
             if ctrl._is_backup_function_active(coordinator):
                 _LOGGER.debug("%s: Skipping cutoff restore - backup function is active", coordinator.name)
                 continue
 
-            if cutoff_reg is None:
+            if not coordinator.capabilities.hardware_soc_cutoff:
                 _LOGGER.debug("%s: No hardware cutoff register to restore (v3 battery)", coordinator.name)
                 continue
 
@@ -409,11 +401,9 @@ class WeeklyFullChargeManager:
                 original_max_soc = ctrl._weekly_charge_saved_max_soc.get(
                     coordinator.name, coordinator.max_soc
                 )
-                max_soc_value = int(original_max_soc / 0.1)
-                await coordinator.write_register(cutoff_reg, max_soc_value, do_refresh=False)
-                await asyncio.sleep(0.1)
-                _LOGGER.debug("%s: Restored hardware cutoff to %d%% (reg=%d)",
-                              coordinator.name, original_max_soc, max_soc_value)
+                await coordinator.set_charge_cutoff(original_max_soc)
+                _LOGGER.debug("%s: Restored hardware cutoff to %d%%",
+                              coordinator.name, original_max_soc)
             except Exception as e:
                 _LOGGER.error("%s: Failed to restore charging cutoff register: %s", coordinator.name, e)
 

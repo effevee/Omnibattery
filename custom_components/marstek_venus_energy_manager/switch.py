@@ -827,17 +827,7 @@ class ManualModeSwitch(SwitchEntity):
         # Set all batteries to 0W (idle state) when entering manual mode
         for coordinator in self.controller.coordinators:
             try:
-                charge_reg = coordinator.get_register("set_charge_power")
-                discharge_reg = coordinator.get_register("set_discharge_power")
-                force_reg = coordinator.get_register("force_mode")
-
-                if charge_reg:
-                    await coordinator.write_register(charge_reg, 0, do_refresh=False)
-                if discharge_reg:
-                    await coordinator.write_register(discharge_reg, 0, do_refresh=False)
-                if force_reg:
-                    await coordinator.write_register(force_reg, 0, do_refresh=False)
-
+                await coordinator.apply_power(0, read_back=False)
                 await coordinator.async_request_refresh()
                 _LOGGER.info("Set %s to 0W (idle) for manual mode", coordinator.name)
             except Exception as e:

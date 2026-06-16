@@ -419,6 +419,31 @@ class MarstekModbusDriver(BatteryDriver):
             ok &= await self._client.async_write_register(max_discharge_reg, max_discharge_power_w)
         return bool(ok)
 
+    async def set_charge_cutoff(self, soc_pct: float) -> bool:
+        """Write only the hardware charge-cutoff register to a SOC percentage.
+
+        Used by the weekly-full-charge and active-balance flows to temporarily
+        raise the BMS charge ceiling to 100% and later restore the configured
+        max_soc, *without* disturbing the discharge cut-off or the power caps
+        that :meth:`apply_config` writes together. The register exists only on
+        v2; on v3/vA/vD it is absent (SOC is enforced in software) and this
+        returns False so the caller can fall back to software enforcement. The
+        deci-percent scaling and the post-write settle are register detail kept
+        here, not in the control layer. Returns True only when the write was
+        accepted.
+
+        Concrete to this driver (not on :class:`BatteryDriver`): a hardware SOC
+        cut-off register is Marstek-specific. Hoist with a semantic name only
+        when a second brand needs it.
+        """
+        reg = self.get_register("charging_cutoff_capacity")
+        if reg is None:
+            return False
+        self._client.unit_id = self._slave_id
+        ok = await self._client.async_write_register(reg, int(soc_pct / 0.1))
+        await asyncio.sleep(0.1)
+        return bool(ok)
+
     async def standby(self) -> bool:
         """Idle the battery (zero set-points, no force mode) for teardown.
 
