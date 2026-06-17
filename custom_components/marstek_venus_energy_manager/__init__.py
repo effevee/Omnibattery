@@ -4649,11 +4649,20 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             )
             _LOGGER.info("Startup consumption backfill scheduled for after HA fully started")
 
-    # Dynamic pricing: evaluate at startup if restarted after the 00:05 window
+    # Dynamic pricing: schedule daily evaluation at 00:05 and run startup catch-up
     if (
         controller.predictive_charging_enabled
         and controller.predictive_charging_mode == PREDICTIVE_MODE_DYNAMIC_PRICING
     ):
+        async def _daily_pricing_evaluation(_now):
+            await controller._pricing_mgr._evaluate_dynamic_pricing()
+
+        entry.async_on_unload(
+            async_track_time_change(
+                hass, _daily_pricing_evaluation, hour=0, minute=5, second=0
+            )
+        )
+        _LOGGER.info("Dynamic pricing: daily evaluation scheduled at 00:05 local time")
         hass.async_create_task(controller._startup_dynamic_pricing_evaluation())
         _LOGGER.info("Dynamic pricing: startup evaluation task scheduled")
 
