@@ -398,6 +398,21 @@ class ZendureLocalDriver(BatteryDriver):
             return False
         return await self._post_write({prop: value})
 
+    def net_power_from_data(self, data: dict):
+        ac_mode = data.get("ac_mode")
+        if ac_mode is None:
+            return None
+        if int(ac_mode) == _AC_MODE_CHARGE:
+            limit = data.get("input_limit")
+            return int(limit) if limit is not None else None
+        # _AC_MODE_DISCHARGE or idle: output_limit (0 = idle/hold)
+        limit = data.get("output_limit")
+        return -int(limit) if limit is not None else None
+
+    @property
+    def control_dependency_keys(self) -> frozenset:
+        return frozenset()
+
     # --- concrete methods (not on BatteryDriver ABC) ------------------------
     # These mirror the Marstek-side concrete API so the coordinator can call
     # them without isinstance guards.

@@ -220,3 +220,25 @@ class BatteryDriver(ABC):
         does not break here. Returns True if the write was accepted, False if this
         driver has no control for the key or the write failed.
         """
+
+    @abstractmethod
+    def net_power_from_data(self, data: dict) -> Optional[int]:
+        """Derive the current commanded net power from coordinator telemetry cache.
+
+        Returns the signed net power (+ charge / - discharge / 0 idle) last echoed
+        into ``coordinator.data``, or None if the required keys are absent. None
+        tells the skip-if-unchanged logic to fall through to a real write rather
+        than incorrectly skipping it. Each driver reads its own brand-native keys
+        (Marstek: force_mode + set_charge/discharge_power; Zendure: ac_mode +
+        input/output_limit).
+        """
+
+    @property
+    @abstractmethod
+    def control_dependency_keys(self) -> frozenset:
+        """Keys the coordinator must keep polling even when their entities are disabled.
+
+        The control loop reads these from ``coordinator.data`` to drive set-points,
+        power caps, and SOC cutoffs. Each driver returns only the keys relevant to
+        its own telemetry model; the coordinator adds brand-agnostic keys separately.
+        """

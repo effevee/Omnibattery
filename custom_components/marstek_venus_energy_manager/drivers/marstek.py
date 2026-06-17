@@ -480,6 +480,28 @@ class MarstekModbusDriver(BatteryDriver):
         self._client.unit_id = self._slave_id
         return bool(await self._client.async_write_register(reg, value))
 
+    def net_power_from_data(self, data: dict):
+        force = data.get("force_mode")
+        charge = data.get("set_charge_power")
+        discharge = data.get("set_discharge_power")
+        if force is None or charge is None or discharge is None:
+            return None
+        force = int(round(float(force)))
+        if force == _FORCE_CHARGE:
+            return int(round(float(charge)))
+        if force == _FORCE_DISCHARGE:
+            return -int(round(float(discharge)))
+        return 0
+
+    @property
+    def control_dependency_keys(self) -> frozenset:
+        return frozenset({
+            "set_charge_power", "set_discharge_power",
+            "max_charge_power", "max_discharge_power",
+            "force_mode",
+            "charging_cutoff_capacity", "discharging_cutoff_capacity",
+        })
+
     async def apply_config(
         self,
         *,

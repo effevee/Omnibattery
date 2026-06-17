@@ -2866,59 +2866,13 @@ class ChargeDischargeController:
             _LOGGER.debug("[%s] Legacy balance hold active - discharge suppressed", coordinator.name)
             discharge_power = 0
 
-        # Determine expected force mode
+        # Determine expected force mode (used in log messages below)
         if charge_power > 0:
             expected_force_mode = 1  # Charge
         elif discharge_power > 0:
             expected_force_mode = 2  # Discharge
         else:
             expected_force_mode = 0  # None
-
-        # Bus-load reduction: skip the atomic write+readback when the battery is
-        # already in the commanded state. coordinator.data is kept fresh by polling
-        # (and by every real write's readback), so external writers (manual slot,
-        # active balance) and BMS reverts self-correct — the next poll updates data
-        # and we write again on mismatch.
-        #
-        # For a discharge command we additionally require the battery to actually be
-        # delivering (polled battery_power within the same 10% tolerance the
-        # non-responsive tracker uses). If a battery silently stops while its
-        # set-points still match (the v3 non-responsive failure mode), delivery
-        # drops and we fall through to a real write so the tracker keeps seeing it.
-        data = coordinator.data or {}
-        cur_force = data.get("force_mode")
-        cur_charge = data.get("set_charge_power")
-        cur_discharge = data.get("set_discharge_power")
-        if cur_force is not None and cur_charge is not None and cur_discharge is not None:
-            setpoints_match = (
-                int(round(float(cur_force))) == expected_force_mode
-                and int(round(float(cur_charge))) == int(charge_power)
-                and int(round(float(cur_discharge))) == int(discharge_power)
-            )
-            if setpoints_match:
-                skip_write = True
-                if int(discharge_power) >= 100 and int(charge_power) == 0:
-                    batt_power = data.get("battery_power")
-                    skip_write = (
-                        batt_power is not None
-                        and abs(float(batt_power)) >= 0.10 * int(discharge_power)
-                    )
-                if skip_write:
-                    _LOGGER.debug(
-                        "[%s] Power write skipped - already at force=%d charge=%dW "
-                        "discharge=%dW",
-                        coordinator.name, expected_force_mode,
-                        int(charge_power), int(discharge_power),
-                    )
-                    return True
-
-        # Bus-load reduction: only read back (verify ACK + run non-delivery
-        # detection) every Nth real write. Option-B skips above don't reach here,
-        # so the cadence is measured in actual writes. Write-only cycles skip the
-        # 4-register readback and its settle delay.
-        write_count = getattr(coordinator, "_pd_write_count", 0)
-        coordinator._pd_write_count = write_count + 1
-        read_back = (write_count % PD_READBACK_EVERY_N_WRITES) == 0
 
         # Translate the control decision into one signed net power for the
         # brand-agnostic driver: +charge / -discharge / 0 = idle. charge_power and
@@ -2930,6 +2884,46 @@ class ChargeDischargeController:
             net_power = -int(discharge_power)
         else:
             net_power = 0
+
+        # Bus-load reduction: skip the atomic write+readback when the battery is
+        # already in the commanded state. coordinator.driver.net_power_from_data()
+        # derives the current net from brand-native telemetry keys (Marstek:
+        # force_mode + set_charge/discharge_power; Zendure: ac_mode +
+        # input/output_limit), which coordinator.data keeps fresh via polling and
+        # write readbacks. External writers and BMS reverts self-correct on the
+        # next poll.
+        #
+        # For a discharge command we additionally require the battery to actually be
+        # delivering (polled battery_power within the same 10% tolerance the
+        # non-responsive tracker uses). If a battery silently stops while its
+        # set-points still match (the v3 non-responsive failure mode), delivery
+        # drops and we fall through to a real write so the tracker keeps seeing it.
+        data = coordinator.data or {}
+        current_net = coordinator.driver.net_power_from_data(data)
+        if current_net is not None and current_net == net_power:
+            skip_write = True
+            if net_power < 0 and abs(net_power) >= 100:
+                batt_power = data.get("battery_power")
+                skip_write = (
+                    batt_power is not None
+                    and abs(float(batt_power)) >= 0.10 * abs(net_power)
+                )
+            if skip_write:
+                _LOGGER.debug(
+                    "[%s] Power write skipped - already at force=%d charge=%dW "
+                    "discharge=%dW",
+                    coordinator.name, expected_force_mode,
+                    int(charge_power), int(discharge_power),
+                )
+                return True
+
+        # Bus-load reduction: only read back (verify ACK + run non-delivery
+        # detection) every Nth real write. Option-B skips above don't reach here,
+        # so the cadence is measured in actual writes. Write-only cycles skip the
+        # 4-register readback and its settle delay.
+        write_count = getattr(coordinator, "_pd_write_count", 0)
+        coordinator._pd_write_count = write_count + 1
+        read_back = (write_count % PD_READBACK_EVERY_N_WRITES) == 0
 
         # Attempt the setpoint + verify, with one retry on failure.
         # last_fail_reason carries the most specific failure category seen across

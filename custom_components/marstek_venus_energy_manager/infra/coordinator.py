@@ -355,13 +355,9 @@ class MarstekVenusDataUpdateCoordinator(DataUpdateCoordinator):
         # Control registers must keep polling even when the user disables their
         # number entities, otherwise the control loop loses its commanded power,
         # power caps and SOC cutoffs from coordinator.data and stops driving the
-        # batteries.
-        dependency_keys_set.update({
-            "set_charge_power", "set_discharge_power",
-            "max_charge_power", "max_discharge_power",
-            "force_mode",
-            "charging_cutoff_capacity", "discharging_cutoff_capacity",
-        })
+        # batteries. Each driver declares its own control keys so this set stays
+        # brand-agnostic.
+        dependency_keys_set.update(self.driver.control_dependency_keys)
 
         # Track read attempts vs successes for connection health monitoring
         sensors_attempted = 0
@@ -652,9 +648,9 @@ class MarstekVenusDataUpdateCoordinator(DataUpdateCoordinator):
             except Exception as e:
                 if not self._is_shutting_down:
                     _LOGGER.warning("[%s] Power setpoint write failed: %s", self.name, e)
-                self._last_write_failure_reason = "modbus_exception"
+                self._last_write_failure_reason = "driver_exception"
                 return SetpointResult(
-                    ok=False, net_power_w=0, confirmed=False, failure_reason="modbus_exception",
+                    ok=False, net_power_w=0, confirmed=False, failure_reason="driver_exception",
                 )
 
             if result.ok and result.failure_reason is None:

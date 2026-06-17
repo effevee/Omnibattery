@@ -17,6 +17,33 @@ from __future__ import annotations
 from custom_components.marstek_venus_energy_manager.drivers import DriverCapabilities
 
 
+class _FakeMarstekDriver:
+    """Minimal driver stub with Marstek net_power_from_data logic for unit tests."""
+
+    @staticmethod
+    def net_power_from_data(data: dict):
+        force = data.get("force_mode")
+        charge = data.get("set_charge_power")
+        discharge = data.get("set_discharge_power")
+        if force is None or charge is None or discharge is None:
+            return None
+        force = int(round(float(force)))
+        if force == 1:  # _FORCE_CHARGE
+            return int(round(float(charge)))
+        if force == 2:  # _FORCE_DISCHARGE
+            return -int(round(float(discharge)))
+        return 0
+
+    @property
+    def control_dependency_keys(self) -> frozenset:
+        return frozenset({
+            "set_charge_power", "set_discharge_power",
+            "max_charge_power", "max_discharge_power",
+            "force_mode",
+            "charging_cutoff_capacity", "discharging_cutoff_capacity",
+        })
+
+
 class FakeCoordinator:
     """Test double pinned to the real coordinator's public surface.
 
@@ -64,6 +91,10 @@ class FakeCoordinator:
             )
         for key, default in self._DEFAULTS.items():
             setattr(self, key, kw.get(key, default))
+
+    @property
+    def driver(self) -> _FakeMarstekDriver:
+        return _FakeMarstekDriver()
 
     @property
     def capabilities(self) -> DriverCapabilities:
