@@ -246,6 +246,7 @@ class ZendureLocalDriver(BatteryDriver):
         self._connected = False
         self._shutting_down = False
         self._sn: Optional[str] = None  # populated from first GET response
+        self._product: Optional[str] = None  # device model from the report root
 
         self._capabilities = DriverCapabilities(
             hardware_soc_cutoff=True,    # minSoc + socSet exist on the device
@@ -328,6 +329,10 @@ class ZendureLocalDriver(BatteryDriver):
     def capabilities(self) -> DriverCapabilities:
         return self._capabilities
 
+    @property
+    def model_label(self) -> Optional[str]:
+        return self._product
+
     # --- connection lifecycle -----------------------------------------------
 
     @property
@@ -346,6 +351,7 @@ class ZendureLocalDriver(BatteryDriver):
             return False
 
         self._sn = data.get("sn")
+        self._product = data.get("product")
         self._connected = True
         _LOGGER.info("Connected to Zendure device at %s (sn=%s)", self._base_url, self._sn)
         return True
@@ -381,6 +387,8 @@ class ZendureLocalDriver(BatteryDriver):
 
         if self._sn is None:
             self._sn = data.get("sn")
+        if self._product is None:
+            self._product = data.get("product")
 
         snapshot = self._snapshot_from_report(data)
 

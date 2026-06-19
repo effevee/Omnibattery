@@ -50,6 +50,7 @@ def _session(
 
 _REPORT = {
     "sn": "ZB123456",
+    "product": "Solarflow 2400 AC",
     "properties": {
         "electricLevel": 80,
         "outputHomePower": 200,
@@ -295,6 +296,13 @@ async def test_read_telemetry_emits_per_pack_keys():
     assert snap["pack1_sn"] == "PK1"
     assert snap["pack1_model"] == 500              # packType
     assert snap["pack1_state"] == 0
+
+
+async def test_model_label_from_report_product():
+    drv = _driver(session=_session(get_data=_REPORT), sn=None)
+    assert drv.model_label is None        # nothing read yet
+    await drv.read_telemetry()
+    assert drv.model_label == "Solarflow 2400 AC"
 
 
 async def test_read_telemetry_keeps_max_charge_power_through_filter():

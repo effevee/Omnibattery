@@ -100,6 +100,7 @@ from .sensors.calculated_sensors import (
     MarstekVenusSolarPowerSensor,
     MarstekVenusBatteryCellPowerSensor,
     SyntheticEnergySensor,
+    SyntheticCapacitySensor,
     ZendurePackSensor,
     SYNTHETIC_ENERGY_SENSOR_DEFINITIONS,
 )
@@ -149,6 +150,7 @@ async def async_setup_entry(
         if not coordinator.capabilities.has_energy_counters:
             for definition in SYNTHETIC_ENERGY_SENSOR_DEFINITIONS:
                 entities.append(SyntheticEnergySensor(coordinator, definition))
+            entities.append(SyntheticCapacitySensor(coordinator))
         pack_specs = getattr(coordinator.driver, "pack_field_specs", None)
         if pack_specs:
             data = coordinator.data or {}
@@ -295,6 +297,19 @@ class MarstekVenusSensor(CoordinatorEntity, SensorEntity):
                 return "No active alarms/faults"
         
         return value
+
+    @property
+    def extra_state_attributes(self):
+        """Surface the driver's model label on the SOC sensor for the panel chip.
+
+        The device-registry model is hardcoded "Venus", so the per-battery model
+        (Marstek version / Zendure product) rides along here on the always-present
+        battery_soc entity the panel already reads.
+        """
+        if self.definition["key"] != "battery_soc":
+            return None
+        model = getattr(self.coordinator.driver, "model_label", None)
+        return {"model": model} if model else None
 
     @property
     def device_info(self):

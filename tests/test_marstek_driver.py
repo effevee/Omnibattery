@@ -68,6 +68,11 @@ def test_v3_family_has_no_hardware_cutoff(version):
     assert _driver(version).capabilities.hardware_soc_cutoff is False
 
 
+@pytest.mark.parametrize("version", ["v2", "v3", "vA", "vD"])
+def test_model_label_is_venus_plus_version(version):
+    assert _driver(version).model_label == f"Venus {version}"
+
+
 def test_capabilities_carry_power_envelope_and_force_mode():
     caps = _driver("v3", max_charge_power_w=800, max_discharge_power_w=1200).capabilities
     assert isinstance(caps, DriverCapabilities)

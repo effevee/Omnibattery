@@ -486,6 +486,46 @@ class SyntheticEnergySensor(CoordinatorEntity, RestoreEntity, SensorEntity):
         }
 
 
+class SyntheticCapacitySensor(CoordinatorEntity, SensorEntity):
+    """Nominal battery capacity (kWh) for drivers without energy counters.
+
+    Marstek exposes battery_total_energy as a register sensor; Zendure has no such
+    register, so the coordinator injects the user-set capacity into data instead.
+    This entity surfaces that value under the same translation_key so the panel,
+    more-info and aggregate sensors see it like a register-backed battery.
+    """
+
+    def __init__(self, coordinator: MarstekVenusDataUpdateCoordinator) -> None:
+        """Initialize the capacity sensor."""
+        super().__init__(coordinator)
+        self._attr_has_entity_name = True
+        self._attr_translation_key = "battery_total_energy"
+        self._attr_unique_id = f"{coordinator.device_key}_battery_total_energy"
+        self.entity_id = english_entity_id("sensor", coordinator.name, "battery_total_energy")
+        self._attr_device_class = "energy"
+        self._attr_state_class = "total"
+        self._attr_native_unit_of_measurement = "kWh"
+        self._attr_should_poll = False
+
+    @property
+    def native_value(self):
+        """Return the user-set capacity injected by the coordinator (None if unset)."""
+        if self.coordinator.data is None:
+            return None
+        capacity = self.coordinator.data.get("battery_total_energy")
+        return capacity if capacity and capacity > 0 else None
+
+    @property
+    def device_info(self):
+        """Return device information."""
+        return {
+            "identifiers": {(DOMAIN, f"{self.coordinator.device_key}")},
+            "name": self.coordinator.name,
+            "manufacturer": "Marstek",
+            "model": "Venus",
+        }
+
+
 class ZendurePackSensor(CoordinatorEntity, SensorEntity):
     """Per-pack telemetry sensor (one per pack × field).
 

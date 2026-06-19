@@ -150,6 +150,16 @@ class BatteryDriver(ABC):
     def capabilities(self) -> DriverCapabilities:
         """Static traits of this battery (see :class:`DriverCapabilities`)."""
 
+    @property
+    def model_label(self) -> Optional[str]:
+        """Human-readable model for display (panel chip / device page).
+
+        Defaults to None; concrete drivers override (Marstek: "Venus <version>";
+        Zendure: the report's ``product`` field). Not abstract so a driver with no
+        model identity need not implement it.
+        """
+        return None
+
     # --- connection lifecycle ----------------------------------------------
 
     @property

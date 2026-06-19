@@ -406,6 +406,7 @@ const K = {
   // per battery
   batterySoc: "battery_soc",
   acPower: "ac_power", // AC-side power. HA sign: - charge / + discharge (W)
+  batteryPower: "battery_power", // synthesised cell power (Zendure). + charge / - discharge (W)
   acOffgridPower: "ac_offgrid_power", // off-grid/backup AC output. HA sign: + discharge (W)
   storedEnergy: "stored_energy", // kWh
   batteryTotalEnergy: "battery_total_energy", // capacity kWh
@@ -500,6 +501,11 @@ const BAT_CONTROLS = [
   { key: "battery_allow_discharge", domain: "switch", lk: "bcAllowDischarge", icon: "mdi:battery-arrow-down" },
   { key: "charging_cutoff_capacity", domain: "number", lk: "bcSocMax", icon: "mdi:battery-high" },
   { key: "discharging_cutoff_capacity", domain: "number", lk: "bcSocMin", icon: "mdi:battery-low" },
+  // Zendure SOC + inverter-output controls (no Marstek equivalent register; reuse
+  // the same labels — only one of each pair ever exists on a given device).
+  { key: "soc_set", domain: "number", lk: "bcSocMax", icon: "mdi:battery-high" },
+  { key: "min_soc", domain: "number", lk: "bcSocMin", icon: "mdi:battery-low" },
+  { key: "inverse_max_power", domain: "number", lk: "bcMaxDischarge", icon: "mdi:battery-arrow-down-outline" },
   { key: "force_mode", domain: "select", lk: "bcForceMode", icon: "mdi:gesture-tap-button" },
   { key: "set_charge_power", domain: "number", lk: "bcChargePower", icon: "mdi:battery-arrow-up-outline" },
   { key: "set_discharge_power", domain: "number", lk: "bcDischargePower", icon: "mdi:battery-arrow-down-outline" },
@@ -1106,7 +1112,11 @@ class MarstekVenusPanel extends HTMLElement {
       // charges the cells without crossing the AC port, so add this unit's MPPT to
       // recover the true cell power. ac_power is used instead of the battery_power
       // sensor, whose reported value is unreliable.
-      const powerW = acW == null ? null : -acW - (acoW || 0) + (mpptW || 0);
+      // Zendure exposes no ac_power; fall back to its synthesised battery_power
+      // sensor (already + charge / - discharge, MPPT-inclusive).
+      const battPwrW = this._watts(get(K.batteryPower));
+      const powerW =
+        acW != null ? -acW - (acoW || 0) + (mpptW || 0) : battPwrW;
       batteries.push({
         dev,
         soc: this._num(socObj),
@@ -2927,9 +2937,14 @@ class MarstekVenusPanel extends HTMLElement {
       list.push({
         dev,
         name,
+        // model label rides on the battery_soc entity attributes (device-registry
+        // model is hardcoded "Venus"): Marstek version / Zendure product.
+        model: (socObj.attributes && socObj.attributes.model) || null,
         soc: this._num(socObj),
-        // ac_power HA sign is - charge / + discharge; negate to + charge / - discharge
-        powerW: acW == null ? null : -acW,
+        // ac_power HA sign is - charge / + discharge; negate to + charge / - discharge.
+        // Zendure has no ac_power: fall back to its synthesised battery_power
+        // (already + charge / - discharge).
+        powerW: acW != null ? -acW : this._watts(byTk[K.batteryPower]),
         offgridW: this._watts(byTk[K.acOffgridPower]),
         backupOn: (byTk[K.backupFunction] || {}).state === "on",
         hysteresisActive: (() => {
@@ -3022,7 +3037,9 @@ class MarstekVenusPanel extends HTMLElement {
     head.className = "bat-head";
     head.innerHTML =
       `<div class="bat-title"><span class="ic"><ha-icon icon="mdi:battery-high"></ha-icon></span>` +
-      `<span class="bat-name"></span></div><span class="chip bat-state">—</span>`;
+      `<span class="bat-name"></span></div>` +
+      `<div class="bat-chips"><span class="chip bat-model" style="display:none"></span>` +
+      `<span class="chip bat-state">—</span></div>`;
     card.appendChild(head);
 
     // ----- top: SOC ring + power readout -----
@@ -3121,6 +3138,7 @@ class MarstekVenusPanel extends HTMLElement {
     this._batCards[b.dev] = {
       card,
       name: head.querySelector(".bat-name"),
+      model: head.querySelector(".bat-model"),
       state: head.querySelector(".bat-state"),
       ringFg: ring.fg,
       ringCirc: ring.circ,
@@ -3167,6 +3185,16 @@ class MarstekVenusPanel extends HTMLElement {
   _patchBatteryCard(r, b) {
     r.name.textContent = b.name || this._t("battery");
 
+    // model chip (left of the state chip); hidden when the model is unknown
+    if (r.model) {
+      if (b.model) {
+        r.model.textContent = b.model;
+        r.model.style.display = "";
+      } else {
+        r.model.style.display = "none";
+      }
+    }
+
     // inverter-state chip (localized; tone by state)
     const inv = b.inverter;
     const invState = this._sval(inv);
@@ -3187,6 +3215,12 @@ class MarstekVenusPanel extends HTMLElement {
           ? this._hass.formatEntityState(inv)
           : invState;
       this._setChip(r.state, disp, tone);
+      r.state.style.display = "";
+    } else if (b.powerW != null) {
+      // No inverter_state sensor (e.g. Zendure): derive the chip from power flow.
+      const w = b.powerW;
+      const disp = w > 30 ? this._t("charging") : w < -30 ? this._t("discharging") : this._t("idle");
+      this._setChip(r.state, disp, w > 30 || w < -30 ? "good" : "neutral");
       r.state.style.display = "";
     } else {
       r.state.style.display = "none";
@@ -4131,6 +4165,8 @@ class MarstekVenusPanel extends HTMLElement {
       .bat-title .ic { color: var(--ink-dim); display: grid; place-items: center; flex-shrink: 0; }
       .bat-name { font-family: var(--font-display); font-size: 15px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
       .bat-head .chip { flex-shrink: 0; }
+      .bat-chips { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+      .bat-model { font-weight: 600; color: var(--ink-dim); }
       .bat-top { display: flex; align-items: center; gap: 18px; }
       .bat-ring { flex: 0 0 auto; }
       .bat-ring .ring-val { font-size: 30px; font-weight: 600; line-height: 1; }

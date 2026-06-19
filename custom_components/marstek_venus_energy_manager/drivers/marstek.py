@@ -239,6 +239,10 @@ class MarstekModbusDriver(BatteryDriver):
     def capabilities(self) -> DriverCapabilities:
         return self._capabilities
 
+    @property
+    def model_label(self) -> str:
+        return f"Venus {self._version}"
+
     # --- entity definitions -------------------------------------------------
     # The driver owns this version's register/entity set; the coordinator and
     # platform setups read these back instead of branching on the version

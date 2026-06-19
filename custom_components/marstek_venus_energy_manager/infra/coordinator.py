@@ -73,6 +73,23 @@ class MarstekVenusDataUpdateCoordinator(DataUpdateCoordinator):
         # battery_total_energy each poll so stored_energy / predictive / pricing
         # math work. Set from battery_config after construction; 0 = not yet set.
         self.battery_capacity_kwh = 0.0
+        # Software manual-control setpoints for drivers without force_mode /
+        # set_*_power registers (e.g. Zendure). While global manual mode is on the
+        # controller asserts these via apply_setpoint each cycle. Persisted.
+        self.manual_force_mode = "None"
+        self.manual_set_charge_power = 0
+        self.manual_set_discharge_power = 0
+        # Live charge/discharge power the controller is currently commanding for
+        # this battery (W, +ve magnitudes; mutually exclusive). Refreshed by
+        # _set_battery_power every cycle (PD or manual) so the manual sliders /
+        # force_mode select can mirror the active setpoint like the Marstek
+        # register entities do. Not persisted; seeded from the manual targets.
+        self.commanded_charge_power = 0
+        self.commanded_discharge_power = 0
+        # Software charge-power ceiling for drivers whose reported max_charge_power
+        # is a read-only device cap (Zendure chargeMaxLimit). Caps PD allocation
+        # below the device limit; default = device max (no extra cap). Persisted.
+        self.user_max_charge_power = max_charge_power
         self.allow_charge = allow_charge
         self.allow_discharge = allow_discharge
         self.active_balance_mode_enabled = active_balance_mode_enabled
@@ -189,6 +206,22 @@ class MarstekVenusDataUpdateCoordinator(DataUpdateCoordinator):
     @property
     def _all_definitions(self):
         return self.driver.all_definitions
+
+    @property
+    def needs_software_manual_control(self) -> bool:
+        """True when the driver exposes no force_mode/set_*_power registers, so
+        manual control must be asserted via apply_setpoint each cycle (e.g.
+        Zendure). Register-based drivers (Marstek) drive the hardware directly."""
+        has_force = any(d["key"] == "force_mode" for d in self.select_definitions)
+        has_setpoint = any(d["key"] == "set_charge_power" for d in self.number_definitions)
+        return not (has_force or has_setpoint)
+
+    @property
+    def needs_software_max_charge(self) -> bool:
+        """True when max_charge_power is a read-only device cap rather than a
+        writable register, so a software ceiling entity governs it (e.g. Zendure
+        chargeMaxLimit)."""
+        return not any(d["key"] == "max_charge_power" for d in self.number_definitions)
 
     @property
     def is_available(self) -> bool:
@@ -572,10 +605,30 @@ class MarstekVenusDataUpdateCoordinator(DataUpdateCoordinator):
         # the source of truth; config_entry.data holds only the initial defaults.
         if "charging_cutoff_capacity" in self.data:
             self.max_soc = int(self.data["charging_cutoff_capacity"])
+        # Registerless drivers (Zendure) expose the device SOC ceiling as soc_set
+        # instead of charging_cutoff_capacity. Sync it so coordinator.max_soc tracks
+        # the user-configured ceiling; otherwise it stays pinned at the 100% default
+        # and the full-charge taper machinery stays armed even when the user sets a
+        # lower cap.
+        if "soc_set" in self.data:
+            self.max_soc = int(self.data["soc_set"])
         if "discharging_cutoff_capacity" in self.data:
             self.min_soc = int(self.data["discharging_cutoff_capacity"])
+        # Registerless drivers (Zendure) expose the device discharge floor as min_soc
+        # instead of discharging_cutoff_capacity. Same key-mismatch as soc_set above:
+        # the number entity writes only to the device, so without this sync
+        # coordinator.min_soc stays at the construction default across restarts.
+        if "min_soc" in self.data:
+            self.min_soc = int(self.data["min_soc"])
         if "max_charge_power" in self.data:
-            self.max_charge_power = int(self.data["max_charge_power"])
+            device_cap = int(self.data["max_charge_power"])
+            # When max_charge_power is a read-only device cap (Zendure), honour the
+            # user's software ceiling on top of it; otherwise the polled register
+            # value is itself the user setting.
+            self.max_charge_power = (
+                min(device_cap, self.user_max_charge_power)
+                if self.needs_software_max_charge else device_cap
+            )
         if "max_discharge_power" in self.data:
             self.max_discharge_power = int(self.data["max_discharge_power"])
 

@@ -2778,6 +2778,25 @@ class ChargeDischargeController:
             data.get("inverter_state"),
         )
 
+    async def _apply_software_manual_setpoints(self) -> None:
+        """Assert the per-battery manual setpoint for drivers without manual
+        registers (Zendure) while global manual mode is active.
+
+        Register-based batteries (Marstek) are driven by the user's own register
+        writes, so they are skipped here. The setpoint is re-asserted every cycle;
+        _set_battery_power's skip-if-unchanged guard avoids redundant writes.
+        """
+        for coordinator in self.coordinators:
+            if not coordinator.needs_software_manual_control:
+                continue
+            mode = coordinator.manual_force_mode
+            if mode == "Charge":
+                await self._set_battery_power(coordinator, coordinator.manual_set_charge_power, 0)
+            elif mode == "Discharge":
+                await self._set_battery_power(coordinator, 0, coordinator.manual_set_discharge_power)
+            else:
+                await self._set_battery_power(coordinator, 0, 0)
+
     async def _set_battery_power(
         self,
         coordinator: MarstekVenusDataUpdateCoordinator,
@@ -2884,6 +2903,13 @@ class ChargeDischargeController:
             net_power = -int(discharge_power)
         else:
             net_power = 0
+
+        # Record the live commanded setpoint so the manual sliders / force_mode
+        # select can mirror it (parity with the Marstek register entities).
+        # Done before the skip-write short-circuit so it tracks intent even when
+        # the battery is already in the commanded state.
+        coordinator.commanded_charge_power = net_power if net_power > 0 else 0
+        coordinator.commanded_discharge_power = -net_power if net_power < 0 else 0
 
         # Bus-load reduction: skip the atomic write+readback when the battery is
         # already in the commanded state. coordinator.driver.net_power_from_data()
@@ -3253,6 +3279,11 @@ class ChargeDischargeController:
         # If manual mode is enabled, skip all automatic control logic
         if self.manual_mode_enabled:
             _LOGGER.debug("Manual Mode active - skipping automatic control")
+            # Register-based drivers (Marstek) obey the user's force_mode /
+            # set_*_power register writes directly, so we just freeze the
+            # controller. Drivers controlled only via apply_setpoint (Zendure)
+            # have no such registers — assert their stored manual setpoint here.
+            await self._apply_software_manual_setpoints()
             # Do not set batteries to 0 - preserve user's manual settings
             # Do not update PD state - freeze controller state
             return
@@ -4365,6 +4396,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         coordinator._config_entry = entry
         coordinator.rs485_user_disabled = battery_config.get("rs485_user_disabled", False)
         coordinator.battery_capacity_kwh = battery_config.get("battery_capacity_kwh", 0.0)
+        # Software manual-control + charge-ceiling state (Zendure-class drivers).
+        coordinator.manual_force_mode = battery_config.get("manual_force_mode", "None")
+        coordinator.manual_set_charge_power = battery_config.get("manual_set_charge_power", 0)
+        coordinator.manual_set_discharge_power = battery_config.get("manual_set_discharge_power", 0)
+        # Seed the live display from the persisted manual targets until the first
+        # control cycle refreshes them.
+        coordinator.commanded_charge_power = coordinator.manual_set_charge_power
+        coordinator.commanded_discharge_power = coordinator.manual_set_discharge_power
+        coordinator.user_max_charge_power = battery_config.get(
+            "user_max_charge_power", coordinator.max_charge_power
+        )
         coordinator.active_balance_mode_started_ts = battery_config.get("active_balance_mode_started_ts")
         coordinator.active_balance_mode_run_date = battery_config.get("active_balance_mode_run_date")
         coordinator.active_balance_mode_phase = battery_config.get("active_balance_mode_phase")
