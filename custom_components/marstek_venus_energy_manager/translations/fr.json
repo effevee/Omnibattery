@@ -43,13 +43,15 @@
           "name": "Nom",
           "host": "Adresse IP",
           "port": "Port Modbus",
-          "battery_version": "Modèle de batterie"
+          "battery_version": "Modèle de batterie",
+          "slave_id": "ID d'esclave Modbus"
         },
         "data_description": {
           "name": "Nom descriptif pour identifier cette batterie",
           "host": "Adresse IP de la batterie sur votre réseau local",
           "port": "Port Modbus (généralement 502)",
-          "battery_version": "Sélectionnez la version du modèle de votre batterie. Ev2 pour les anciens modèles, Ev3 pour les nouveaux modèles avec cartographie mise à jour, A (Venus A) ou D (Venus D) pour les onduleurs hybrides"
+          "battery_version": "Sélectionnez la version du modèle de votre batterie. Ev2 pour les anciens modèles, Ev3 pour les nouveaux modèles avec cartographie mise à jour, A (Venus A) ou D (Venus D) pour les onduleurs hybrides",
+          "slave_id": "ID d'esclave/unité Modbus (par défaut 1). À modifier uniquement lorsqu'un proxy Modbus expose plusieurs batteries sur une même IP:port avec des ID d'esclave distincts."
         }
       },
       "battery_connection_zendure": {
@@ -403,13 +405,15 @@
           "name": "Nom",
           "host": "Adresse IP",
           "port": "Port Modbus",
-          "battery_version": "Modèle de batterie"
+          "battery_version": "Modèle de batterie",
+          "slave_id": "ID d'esclave Modbus"
         },
         "data_description": {
           "name": "Nom descriptif pour identifier cette batterie",
           "host": "Nouvelle adresse IP de la batterie sur le réseau local",
           "port": "Port Modbus (généralement 502)",
-          "battery_version": "Sélectionnez la version de votre modèle de batterie"
+          "battery_version": "Sélectionnez la version de votre modèle de batterie",
+          "slave_id": "ID d'esclave/unité Modbus (par défaut 1). À modifier uniquement lorsqu'un proxy Modbus expose plusieurs batteries sur une même IP:port avec des ID d'esclave distincts."
         }
       },
       "reconfigure_battery_zendure": {
@@ -502,13 +506,15 @@
           "name": "Nom",
           "host": "Adresse IP",
           "port": "Port Modbus",
-          "battery_version": "Modèle de batterie"
+          "battery_version": "Modèle de batterie",
+          "slave_id": "ID d'esclave Modbus"
         },
         "data_description": {
           "name": "Nom descriptif pour identifier cette batterie",
           "host": "Adresse IP de la batterie sur votre réseau local",
           "port": "Port Modbus (généralement 502)",
-          "battery_version": "Sélectionnez la version du modèle de votre batterie. Ev2 pour les anciens modèles, Ev3 pour les nouveaux modèles avec cartographie mise à jour, A (Venus A) ou D (Venus D) pour les onduleurs hybrides"
+          "battery_version": "Sélectionnez la version du modèle de votre batterie. Ev2 pour les anciens modèles, Ev3 pour les nouveaux modèles avec cartographie mise à jour, A (Venus A) ou D (Venus D) pour les onduleurs hybrides",
+          "slave_id": "ID d'esclave/unité Modbus (par défaut 1). À modifier uniquement lorsqu'un proxy Modbus expose plusieurs batteries sur une même IP:port avec des ID d'esclave distincts."
         }
       },
       "battery_connection_zendure": {
@@ -1235,6 +1241,21 @@
           "compensating_export": "Compensation Export",
           "compensation_stopped": "Compensation Arrêtée"
         }
+      },
+      "output_home_power": {
+        "name": "Sortie vers la Maison"
+      },
+      "grid_input_power": {
+        "name": "Puissance d'Entrée Réseau"
+      },
+      "pack_input_power": {
+        "name": "Puissance de Décharge Batterie"
+      },
+      "output_pack_power": {
+        "name": "Puissance de Charge Batterie"
+      },
+      "remain_discharge_time": {
+        "name": "Temps de Décharge Restant"
       }
     },
     "binary_sensor": {
@@ -1290,6 +1311,14 @@
           "aggressive": "Agressif",
           "very_aggressive": "Très agressif",
           "custom": "Personnalisé"
+        }
+      },
+      "grid_off_mode": {
+        "name": "Mode Hors-Réseau",
+        "state": {
+          "normal": "Normal",
+          "economy": "Économique",
+          "off": "Arrêt"
         }
       }
     },
@@ -1377,6 +1406,18 @@
       },
       "predictive_grid_charge_margin_pct": {
         "name": "Marge de Charge Réseau Prédictive"
+      },
+      "battery_capacity": {
+        "name": "Capacité de la Batterie"
+      },
+      "soc_set": {
+        "name": "SOC Cible"
+      },
+      "min_soc": {
+        "name": "SOC Minimum"
+      },
+      "inverse_max_power": {
+        "name": "Puissance Max. de l'Onduleur"
       }
     },
     "button": {

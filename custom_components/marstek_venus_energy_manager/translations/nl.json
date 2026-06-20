@@ -43,13 +43,15 @@
           "name": "Naam",
           "host": "IP-adres",
           "port": "Modbus-poort",
-          "battery_version": "Batterijmodel"
+          "battery_version": "Batterijmodel",
+          "slave_id": "Modbus slave-ID"
         },
         "data_description": {
           "name": "Beschrijvende naam om deze batterij te identificeren",
           "host": "IP-adres van de batterij op uw lokale netwerk",
           "port": "Modbus-poort (meestal 502)",
-          "battery_version": "Selecteer de modelversie van uw batterij. Ev2 voor oudere modellen, Ev3 voor nieuwere modellen met bijgewerkte registerkaart, A (Venus A) of D (Venus D) voor hybride omvormermodellen"
+          "battery_version": "Selecteer de modelversie van uw batterij. Ev2 voor oudere modellen, Ev3 voor nieuwere modellen met bijgewerkte registerkaart, A (Venus A) of D (Venus D) voor hybride omvormermodellen",
+          "slave_id": "Modbus slave-/unit-id (standaard 1). Wijzig dit alleen wanneer een Modbus-proxy meerdere batterijen op één IP:poort koppelt met verschillende slave-id's."
         }
       },
       "battery_connection_zendure": {
@@ -403,13 +405,15 @@
           "name": "Naam",
           "host": "IP-adres",
           "port": "Modbus-poort",
-          "battery_version": "Batterijmodel"
+          "battery_version": "Batterijmodel",
+          "slave_id": "Modbus slave-ID"
         },
         "data_description": {
           "name": "Beschrijvende naam om deze batterij te identificeren",
           "host": "Nieuw IP-adres van de batterij op het lokale netwerk",
           "port": "Modbus-poort (gewoonlijk 502)",
-          "battery_version": "Selecteer uw batterijmodelversie"
+          "battery_version": "Selecteer uw batterijmodelversie",
+          "slave_id": "Modbus slave-/unit-id (standaard 1). Wijzig dit alleen wanneer een Modbus-proxy meerdere batterijen op één IP:poort koppelt met verschillende slave-id's."
         }
       },
       "reconfigure_battery_zendure": {
@@ -502,13 +506,15 @@
           "name": "Naam",
           "host": "IP-adres",
           "port": "Modbus-poort",
-          "battery_version": "Batterijmodel"
+          "battery_version": "Batterijmodel",
+          "slave_id": "Modbus slave-ID"
         },
         "data_description": {
           "name": "Beschrijvende naam om deze batterij te identificeren",
           "host": "IP-adres van de batterij op uw lokale netwerk",
           "port": "Modbus-poort (meestal 502)",
-          "battery_version": "Selecteer de modelversie van uw batterij. Ev2 voor oudere modellen, Ev3 voor nieuwere modellen met bijgewerkte registerkaart, A (Venus A) of D (Venus D) voor hybride omvormermodellen"
+          "battery_version": "Selecteer de modelversie van uw batterij. Ev2 voor oudere modellen, Ev3 voor nieuwere modellen met bijgewerkte registerkaart, A (Venus A) of D (Venus D) voor hybride omvormermodellen",
+          "slave_id": "Modbus slave-/unit-id (standaard 1). Wijzig dit alleen wanneer een Modbus-proxy meerdere batterijen op één IP:poort koppelt met verschillende slave-id's."
         }
       },
       "battery_connection_zendure": {
@@ -1235,6 +1241,21 @@
           "compensating_export": "Export compenseren",
           "compensation_stopped": "Compensatie Gestopt"
         }
+      },
+      "output_home_power": {
+        "name": "Uitvoer naar Huis"
+      },
+      "grid_input_power": {
+        "name": "Netingangsvermogen"
+      },
+      "pack_input_power": {
+        "name": "Batterij-ontlaadvermogen"
+      },
+      "output_pack_power": {
+        "name": "Batterij-laadvermogen"
+      },
+      "remain_discharge_time": {
+        "name": "Resterende Ontlaadtijd"
       }
     },
     "binary_sensor": {
@@ -1290,6 +1311,14 @@
           "aggressive": "Agressief",
           "very_aggressive": "Zeer agressief",
           "custom": "Aangepast"
+        }
+      },
+      "grid_off_mode": {
+        "name": "Off-Grid-modus",
+        "state": {
+          "normal": "Normaal",
+          "economy": "Zuinig",
+          "off": "Uit"
         }
       }
     },
@@ -1377,6 +1406,18 @@
       },
       "predictive_grid_charge_margin_pct": {
         "name": "Voorspellende Netladingsmarge"
+      },
+      "battery_capacity": {
+        "name": "Batterijcapaciteit"
+      },
+      "soc_set": {
+        "name": "Doel-SOC"
+      },
+      "min_soc": {
+        "name": "Minimale SOC"
+      },
+      "inverse_max_power": {
+        "name": "Max. Omvormervermogen"
       }
     },
     "button": {

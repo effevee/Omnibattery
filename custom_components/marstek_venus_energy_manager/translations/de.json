@@ -43,13 +43,15 @@
           "name": "Name",
           "host": "IP-Adresse",
           "port": "Modbus-Port",
-          "battery_version": "Batteriemodell"
+          "battery_version": "Batteriemodell",
+          "slave_id": "Modbus-Slave-ID"
         },
         "data_description": {
           "name": "Beschreibender Name zur Identifizierung dieser Batterie",
           "host": "IP-Adresse der Batterie in Ihrem lokalen Netzwerk",
           "port": "Modbus-Port (normalerweise 502)",
-          "battery_version": "Wählen Sie die Modellversion Ihrer Batterie. Ev2 für ältere Modelle, Ev3 für neuere Modelle mit aktualisierter Registerkarte, A (Venus A) oder D (Venus D) für Hybrid-Wechselrichter-Modelle"
+          "battery_version": "Wählen Sie die Modellversion Ihrer Batterie. Ev2 für ältere Modelle, Ev3 für neuere Modelle mit aktualisierter Registerkarte, A (Venus A) oder D (Venus D) für Hybrid-Wechselrichter-Modelle",
+          "slave_id": "Modbus Slave-/Unit-ID (Standard 1). Nur ändern, wenn ein Modbus-Proxy mehrere Batterien über dieselbe IP:Port mit unterschiedlichen Slave-IDs abbildet."
         }
       },
       "battery_connection_zendure": {
@@ -403,13 +405,15 @@
           "name": "Name",
           "host": "IP-Adresse",
           "port": "Modbus-Port",
-          "battery_version": "Batteriemodell"
+          "battery_version": "Batteriemodell",
+          "slave_id": "Modbus-Slave-ID"
         },
         "data_description": {
           "name": "Beschreibender Name zur Identifikation dieser Batterie",
           "host": "Neue IP-Adresse der Batterie im lokalen Netzwerk",
           "port": "Modbus-Port (normalerweise 502)",
-          "battery_version": "Wählen Sie Ihre Batteriemodellversion"
+          "battery_version": "Wählen Sie Ihre Batteriemodellversion",
+          "slave_id": "Modbus Slave-/Unit-ID (Standard 1). Nur ändern, wenn ein Modbus-Proxy mehrere Batterien über dieselbe IP:Port mit unterschiedlichen Slave-IDs abbildet."
         }
       },
       "reconfigure_battery_zendure": {
@@ -502,13 +506,15 @@
           "name": "Name",
           "host": "IP-Adresse",
           "port": "Modbus-Port",
-          "battery_version": "Batteriemodell"
+          "battery_version": "Batteriemodell",
+          "slave_id": "Modbus-Slave-ID"
         },
         "data_description": {
           "name": "Beschreibender Name zur Identifizierung dieser Batterie",
           "host": "IP-Adresse der Batterie in Ihrem lokalen Netzwerk",
           "port": "Modbus-Port (normalerweise 502)",
-          "battery_version": "Wählen Sie die Modellversion Ihrer Batterie. Ev2 für ältere Modelle, Ev3 für neuere Modelle mit aktualisierter Registerkarte, A (Venus A) oder D (Venus D) für Hybrid-Wechselrichter-Modelle"
+          "battery_version": "Wählen Sie die Modellversion Ihrer Batterie. Ev2 für ältere Modelle, Ev3 für neuere Modelle mit aktualisierter Registerkarte, A (Venus A) oder D (Venus D) für Hybrid-Wechselrichter-Modelle",
+          "slave_id": "Modbus Slave-/Unit-ID (Standard 1). Nur ändern, wenn ein Modbus-Proxy mehrere Batterien über dieselbe IP:Port mit unterschiedlichen Slave-IDs abbildet."
         }
       },
       "battery_connection_zendure": {
@@ -1235,6 +1241,21 @@
           "compensating_export": "Export-Kompensation",
           "compensation_stopped": "Kompensation Gestoppt"
         }
+      },
+      "output_home_power": {
+        "name": "Ausgang zum Haus"
+      },
+      "grid_input_power": {
+        "name": "Netzeingangsleistung"
+      },
+      "pack_input_power": {
+        "name": "Batterie-Entladeleistung"
+      },
+      "output_pack_power": {
+        "name": "Batterie-Ladeleistung"
+      },
+      "remain_discharge_time": {
+        "name": "Verbleibende Entladezeit"
       }
     },
     "binary_sensor": {
@@ -1290,6 +1311,14 @@
           "aggressive": "Aggressiv",
           "very_aggressive": "Sehr aggressiv",
           "custom": "Benutzerdefiniert"
+        }
+      },
+      "grid_off_mode": {
+        "name": "Off-Grid-Modus",
+        "state": {
+          "normal": "Normal",
+          "economy": "Sparmodus",
+          "off": "Aus"
         }
       }
     },
@@ -1377,6 +1406,18 @@
       },
       "predictive_grid_charge_margin_pct": {
         "name": "Prädiktive Netzladungs-Marge"
+      },
+      "battery_capacity": {
+        "name": "Batteriekapazität"
+      },
+      "soc_set": {
+        "name": "Ziel-SOC"
+      },
+      "min_soc": {
+        "name": "Minimaler SOC"
+      },
+      "inverse_max_power": {
+        "name": "Max. Wechselrichterleistung"
       }
     },
     "button": {

@@ -1241,6 +1241,21 @@
           "compensating_export": "Compensant Exportació",
           "compensation_stopped": "Compensació Aturada"
         }
+      },
+      "output_home_power": {
+        "name": "Potència cap a Casa"
+      },
+      "grid_input_power": {
+        "name": "Potència d'Entrada de Xarxa"
+      },
+      "pack_input_power": {
+        "name": "Potència de Descàrrega de la Bateria"
+      },
+      "output_pack_power": {
+        "name": "Potència de Càrrega de la Bateria"
+      },
+      "remain_discharge_time": {
+        "name": "Temps de Descàrrega Restant"
       }
     },
     "binary_sensor": {
@@ -1296,6 +1311,14 @@
           "aggressive": "Agressiu",
           "very_aggressive": "Molt Agressiu",
           "custom": "Personalitzat"
+        }
+      },
+      "grid_off_mode": {
+        "name": "Mode Off-Grid",
+        "state": {
+          "normal": "Normal",
+          "economy": "Econòmic",
+          "off": "Apagat"
         }
       }
     },
@@ -1383,6 +1406,18 @@
       },
       "predictive_grid_charge_margin_pct": {
         "name": "Marge de Càrrega de Xarxa Predictiva"
+      },
+      "battery_capacity": {
+        "name": "Capacitat de la Bateria"
+      },
+      "soc_set": {
+        "name": "SOC Objectiu"
+      },
+      "min_soc": {
+        "name": "SOC Mínim"
+      },
+      "inverse_max_power": {
+        "name": "Potència Màx. de l'Inversor"
       }
     },
     "button": {
