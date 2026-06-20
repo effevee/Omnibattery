@@ -2,13 +2,14 @@
 from __future__ import annotations
 
 import time
+from dataclasses import dataclass
 
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.restore_state import RestoreEntity
+from homeassistant.helpers.restore_state import ExtraStoredData, RestoreEntity
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from homeassistant.util import dt as dt_util
 
@@ -376,6 +377,34 @@ SYNTHETIC_ENERGY_SENSOR_DEFINITIONS: list[dict] = [
 ]
 
 
+@dataclass
+class _SyntheticEnergyData(ExtraStoredData):
+    """Raw accumulator persisted independently of the displayed state.
+
+    The displayed state reads ``unavailable`` whenever the battery connection
+    drops (frequent for Zendure's single connection). If a restart's last
+    persisted *state* is non-numeric it can't be parsed back, which previously
+    zeroed the lifetime total. This extra data is taken from the entity object
+    at dump time, not the state string, so it survives an unavailable-at-
+    shutdown and the total is never lost.
+    """
+
+    kwh: float
+    reset_date: str | None
+
+    def as_dict(self) -> dict:
+        """Serialize for the restore-state store."""
+        return {"kwh": self.kwh, "reset_date": self.reset_date}
+
+    @classmethod
+    def from_dict(cls, restored: dict) -> "_SyntheticEnergyData | None":
+        """Rebuild from stored data, or None if it is malformed."""
+        try:
+            return cls(float(restored["kwh"]), restored.get("reset_date"))
+        except (KeyError, TypeError, ValueError):
+            return None
+
+
 class SyntheticEnergySensor(CoordinatorEntity, RestoreEntity, SensorEntity):
     """Charge/discharge energy (kWh) integrated from battery_power.
 
@@ -413,19 +442,33 @@ class SyntheticEnergySensor(CoordinatorEntity, RestoreEntity, SensorEntity):
         self._reset_date = dt_util.now().date() if self._daily else None
 
     async def async_added_to_hass(self) -> None:
-        """Restore the accumulated energy on startup."""
+        """Restore the accumulated energy on startup.
+
+        Prefer the typed extra data (immune to a non-numeric last state); fall
+        back to the recorded state string for installs that predate it.
+        """
         await super().async_added_to_hass()
-        last = await self.async_get_last_state()
-        if last is None:
-            return
-        try:
-            self._kwh = float(last.state)
-        except (TypeError, ValueError):
-            self._kwh = 0.0
+
+        stored = await self.async_get_last_extra_data()
+        data = _SyntheticEnergyData.from_dict(stored.as_dict()) if stored else None
+        if data is not None:
+            self._kwh = data.kwh
+            stored_reset_date = data.reset_date
+        else:
+            # Legacy fallback. A non-numeric state (unavailable/unknown) leaves
+            # the accumulator untouched rather than wiping a real lifetime total.
+            last = await self.async_get_last_state()
+            stored_reset_date = last.attributes.get("reset_date") if last else None
+            if last is not None:
+                try:
+                    self._kwh = float(last.state)
+                except (TypeError, ValueError):
+                    pass
+
         if self._daily:
             today = dt_util.now().date()
             # A restart that straddled local midnight starts a fresh day.
-            if last.attributes.get("reset_date") != today.isoformat():
+            if stored_reset_date != today.isoformat():
                 self._kwh = 0.0
             self._reset_date = today
 
@@ -467,6 +510,14 @@ class SyntheticEnergySensor(CoordinatorEntity, RestoreEntity, SensorEntity):
     def native_value(self) -> float:
         """Return the accumulated energy (kWh)."""
         return round(self._kwh, self._precision)
+
+    @property
+    def extra_restore_state_data(self) -> _SyntheticEnergyData:
+        """Persist the raw accumulator so it survives an unavailable shutdown."""
+        return _SyntheticEnergyData(
+            self._kwh,
+            self._reset_date.isoformat() if self._reset_date else None,
+        )
 
     @property
     def extra_state_attributes(self):
