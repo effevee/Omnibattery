@@ -3,6 +3,7 @@
 ## [2.1.0] - 2026-06-15
 
 ### Fixed
+- **Solar charge delay let a higher-SOC battery overshoot the setpoint in multi-battery setups**: the setpoint gate was system-wide on the *minimum* SOC, so a lower battery held the gate open while a higher one charged from grid past the setpoint. The setpoint floor is now enforced per battery (`charge_delay_setpoint` block) — only batteries below the floor keep charging. [`control/charge_delay.py`](custom_components/marstek_venus_energy_manager/control/charge_delay.py), [`__init__.py`](custom_components/marstek_venus_energy_manager/__init__.py).
 - **Home Consumption dropped registerless-driver (Zendure) discharge**: the aggregate summed only `ac_power`, so a Zendure (which exposes only `battery_power`) was missing from Home Consumption — undercounting it and collapsing the dashboard Energy Flow Home node toward 0 once an excluded device was subtracted. Now reuses the `_ac_convention_power` fallback (−`battery_power`), matching the charge/discharge aggregates. [`sensors/aggregate_sensors.py`](custom_components/marstek_venus_energy_manager/sensors/aggregate_sensors.py).
 - **Energy Flow Home node hit 0 with an "additional" excluded device**: the panel subtracted every excluded device's power from the Home node, but "additional" devices (`included_in_consumption` = false) are not in the home sensor, so subtracting them drove Home to 0. Now only the `included_in_consumption` portion is subtracted. [`frontend/marstek-panel.js`](custom_components/marstek_venus_energy_manager/frontend/marstek-panel.js).
 

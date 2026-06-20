@@ -1622,6 +1622,9 @@ class ChargeDischargeController:
         else:
             self.remove_charge_block("charge_delay")
 
+        if self.charge_delay_enabled:
+            self._charge_delay_mgr.refresh_setpoint_blocks()
+
         self._refresh_time_slot_blocks()
         self._apply_price_discharge_block()
         self._refresh_ev_blocks()

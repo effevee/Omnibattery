@@ -212,6 +212,46 @@ class ChargeDelayManager:
             asyncio.create_task(ctrl._weekly_charge_mgr.save_state())
         return False
 
+    def refresh_setpoint_blocks(self) -> None:
+        """Enforce the SOC setpoint floor per battery during the charge delay.
+
+        The system-level gate (``is_charge_delayed``) only leaves the
+        "charging to setpoint" phase once the *minimum* SOC across all batteries
+        reaches the setpoint. With mixed SOCs (e.g. a second battery added at a
+        lower charge), a higher-SOC battery keeps charging from grid past the
+        setpoint while the lower one holds the system-wide gate open.
+
+        Block each battery individually once it reaches the setpoint, so only
+        batteries still below the floor keep charging. Once the floor is reached
+        for all of them (``_delay_setpoint_reached``), the system-wide forecast
+        delay (the global ``charge_delay`` block) governs everyone equally and
+        these per-battery blocks are cleared.
+        """
+        ctrl = self._controller
+        setpoint_active = (
+            ctrl.charge_delay_enabled
+            and ctrl._delay_soc_setpoint_enabled
+            and not ctrl._charge_delay_unlocked
+            and not ctrl._delay_setpoint_reached
+            and not ctrl._balance_monitor_overrides_delay()
+            and not ctrl._active_balance_overrides_delay()
+        )
+        for coordinator in ctrl.coordinators:
+            soc = coordinator.data.get("battery_soc") if coordinator.data else None
+            if setpoint_active and soc is not None and soc >= ctrl._delay_soc_setpoint:
+                ctrl.set_charge_block(
+                    "charge_delay_setpoint",
+                    "charge_delay",
+                    {
+                        "battery": coordinator.name,
+                        "soc": soc,
+                        "setpoint": ctrl._delay_soc_setpoint,
+                    },
+                    coordinator=coordinator,
+                )
+            else:
+                ctrl.remove_charge_block("charge_delay_setpoint", coordinator=coordinator)
+
     def _should_delay_charge(self, target_soc: int) -> bool:
         """Determine if charging should be delayed based on solar forecast.
 
