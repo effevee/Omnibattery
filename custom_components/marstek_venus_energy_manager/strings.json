@@ -76,20 +76,20 @@
           "max_discharge_power": "Maximum discharge power (W)",
           "max_soc": "Maximum SOC (%)",
           "min_soc": "Minimum SOC (%)",
-          "enable_charge_hysteresis": "Enable Charge Hysteresis",
-          "charge_hysteresis_percent": "Hysteresis Percentage (%)",
+          "charge_hysteresis_percent": "Charge hysteresis (%)",
           "backup_offgrid_threshold": "Backup offgrid load threshold (W)",
-          "full_charge_voltage_taper_enabled": "Enable 100% charge voltage taper"
+          "full_charge_voltage_taper_enabled": "Enable 100% charge voltage taper",
+          "battery_capacity_kwh": "Battery nominal capacity (kWh)"
         },
         "data_description": {
           "max_charge_power": "Maximum power allowed to charge the battery",
           "max_discharge_power": "Maximum power allowed to discharge the battery",
           "max_soc": "Maximum state of charge - battery won't charge above this value",
           "min_soc": "Minimum state of charge - battery won't discharge below this value",
-          "enable_charge_hysteresis": "Prevents battery from charging when SOC is near maximum",
-          "charge_hysteresis_percent": "Battery will not charge until SOC drops to (max_soc - hysteresis). Ex: Max SOC 100% with 5% hysteresis = no charge until 95%",
+          "charge_hysteresis_percent": "Always on (minimum 2%). After reaching the top, the battery won't charge again until SOC drops to (Max SOC − hysteresis). Ex: Max SOC 100% with 2% = no charge until 98%.",
           "backup_offgrid_threshold": "Offgrid load above this value is treated as an active backup event, excluding the battery from PD control. Set higher if you have permanent loads (router, cameras) on the offgrid port.",
-          "full_charge_voltage_taper_enabled": "When the target is 100%, limit charge to 95 W from 3.48 V max cell voltage and stop at 3.58 V to measure imbalance after 60 seconds."
+          "full_charge_voltage_taper_enabled": "When the target is 100%, limit charge to 95 W from 3.48 V max cell voltage and stop at 3.58 V to measure imbalance after 60 seconds.",
+          "battery_capacity_kwh": "Nominal usable capacity of the battery pack. Used to calculate stored energy and efficiency from SOC. Leave at 0 if unknown."
         }
       },
       "time_slots": {
@@ -539,20 +539,20 @@
           "max_discharge_power": "Maximum discharge power (W)",
           "max_soc": "Maximum SOC (%)",
           "min_soc": "Minimum SOC (%)",
-          "enable_charge_hysteresis": "Enable Charge Hysteresis",
-          "charge_hysteresis_percent": "Hysteresis Percentage (%)",
+          "charge_hysteresis_percent": "Charge hysteresis (%)",
           "backup_offgrid_threshold": "Backup offgrid load threshold (W)",
-          "full_charge_voltage_taper_enabled": "Enable 100% charge voltage taper"
+          "full_charge_voltage_taper_enabled": "Enable 100% charge voltage taper",
+          "battery_capacity_kwh": "Battery nominal capacity (kWh)"
         },
         "data_description": {
           "max_charge_power": "Maximum power allowed to charge the battery",
           "max_discharge_power": "Maximum power allowed to discharge the battery",
           "max_soc": "Maximum state of charge",
           "min_soc": "Minimum state of charge",
-          "enable_charge_hysteresis": "Prevents battery from charging when SOC is near maximum",
-          "charge_hysteresis_percent": "Battery will not charge until SOC drops to (max_soc - hysteresis). Ex: Max SOC 100% with 5% hysteresis = no charge until 95%",
+          "charge_hysteresis_percent": "Always on (minimum 2%). After reaching the top, the battery won't charge again until SOC drops to (Max SOC − hysteresis). Ex: Max SOC 100% with 2% = no charge until 98%.",
           "backup_offgrid_threshold": "Offgrid load above this value is treated as an active backup event, excluding the battery from PD control. Set higher if you have permanent loads (router, cameras) on the offgrid port.",
-          "full_charge_voltage_taper_enabled": "When the target is 100%, limit charge to 95 W from 3.48 V max cell voltage and stop at 3.58 V to measure imbalance after 60 seconds."
+          "full_charge_voltage_taper_enabled": "When the target is 100%, limit charge to 95 W from 3.48 V max cell voltage and stop at 3.58 V to measure imbalance after 60 seconds.",
+          "battery_capacity_kwh": "Nominal usable capacity of the battery pack. Used to calculate stored energy and efficiency from SOC. Leave at 0 if unknown."
         }
       },
       "time_slots": {

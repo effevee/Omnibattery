@@ -31,7 +31,7 @@ class MarstekVenusDataUpdateCoordinator(DataUpdateCoordinator):
                  battery_version: str = "v2", slave_id: int = 1,
                  max_charge_power: int = 2500, max_discharge_power: int = 2500,
                  max_soc: int = 100, min_soc: int = 12,
-                 enable_charge_hysteresis: bool = False, charge_hysteresis_percent: int = 5,
+                 charge_hysteresis_percent: int = 2,
                  backup_offgrid_threshold: int = 50,
                  allow_charge: bool = True, allow_discharge: bool = True,
                  active_balance_mode_enabled: bool = False,
@@ -50,6 +50,9 @@ class MarstekVenusDataUpdateCoordinator(DataUpdateCoordinator):
         self.slave_id = slave_id
         self.consumption_sensor = consumption_sensor
         self.brand = brand
+        if self.brand == "zendure":
+            full_charge_voltage_taper_enabled = False
+            active_balance_mode_enabled = False
 
         # Validate and store battery version
         from ..const import SUPPORTED_VERSIONS, DEFAULT_VERSION
@@ -65,8 +68,11 @@ class MarstekVenusDataUpdateCoordinator(DataUpdateCoordinator):
         self.max_discharge_power = max_discharge_power
         self.max_soc = max_soc
         self.min_soc = min_soc
-        self.enable_charge_hysteresis = enable_charge_hysteresis
-        self.charge_hysteresis_percent = charge_hysteresis_percent
+        # Hysteresis is mandatory; floor the percent so SOC drift can't shrink the
+        # deadband below the chatter-safe minimum (see MIN_CHARGE_HYSTERESIS_PERCENT).
+        from ..const import MIN_CHARGE_HYSTERESIS_PERCENT
+        self.enable_charge_hysteresis = True
+        self.charge_hysteresis_percent = max(MIN_CHARGE_HYSTERESIS_PERCENT, int(charge_hysteresis_percent))
         self.backup_offgrid_threshold = backup_offgrid_threshold
         # User-set nominal capacity (kWh) for drivers that don't report it
         # (has_energy_counters=False, e.g. Zendure). Injected into data as

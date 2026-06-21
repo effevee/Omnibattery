@@ -20,7 +20,7 @@ Select how many Marstek Venus units you have (1–6). The integration will ask y
 | **Max charge/discharge power** | Rated power of your setup | — |
 | **Max SOC** | Stop charging at this percentage | `100 %` |
 | **Min SOC** | Stop discharging at this percentage | `12 %` |
-| **Charge hysteresis** | Margin to avoid rapid cycling near the charge limit | — |
+| **Charge hysteresis** | Always on (minimum 2 %). After the battery reaches the top it won't charge again until SOC drops by this margin — avoids rapid cycling and absorbs SOC-reading drift | `2 %` |
 | **Backup offgrid threshold** | Minimum offgrid load (W) to be considered an active backup event | `50 W` |
 
 ### Battery versions

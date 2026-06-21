@@ -113,6 +113,8 @@ from .const import (
     CONF_ACTIVE_BALANCE_MODE_ENABLED,
     CONF_FULL_CHARGE_VOLTAGE_TAPER_ENABLED,
     DEFAULT_FULL_CHARGE_VOLTAGE_TAPER_ENABLED,
+    MIN_CHARGE_HYSTERESIS_PERCENT,
+    DEFAULT_CHARGE_HYSTERESIS_PERCENT,
     DEBUG_CONTROL_LOOP_DETAIL,
 )
 from .control.charge_delay import ChargeDelayManager
@@ -2841,9 +2843,9 @@ class ChargeDischargeController:
                 continue
             mode = coordinator.manual_force_mode
             if mode == "Charge":
-                await self._set_battery_power(coordinator, coordinator.manual_set_charge_power, 0)
+                await self._set_battery_power(coordinator, coordinator.manual_set_charge_power, 0, bypass_blockers=True)
             elif mode == "Discharge":
-                await self._set_battery_power(coordinator, 0, coordinator.manual_set_discharge_power)
+                await self._set_battery_power(coordinator, 0, coordinator.manual_set_discharge_power, bypass_blockers=True)
             else:
                 await self._set_battery_power(coordinator, 0, 0)
 
@@ -2854,6 +2856,7 @@ class ChargeDischargeController:
         discharge_power: float,
         ignore_charge_blockers: set[str] | None = None,
         ignore_discharge_blockers: set[str] | None = None,
+        bypass_blockers: bool = False,
     ) -> bool:
         """Set charge/discharge power for a single battery with ACK verification.
 
@@ -2892,16 +2895,31 @@ class ChargeDischargeController:
             )
             return False
 
-        if charge_power > 0:
-            charge_blockers = self.get_charge_blockers(coordinator)
-            if ignore_charge_blockers:
-                charge_blockers = {
-                    source: block
-                    for source, block in charge_blockers.items()
-                    if source not in ignore_charge_blockers
-                }
-        else:
+        if bypass_blockers:
             charge_blockers = {}
+            discharge_blockers = {}
+        else:
+            if charge_power > 0:
+                charge_blockers = self.get_charge_blockers(coordinator)
+                if ignore_charge_blockers:
+                    charge_blockers = {
+                        source: block
+                        for source, block in charge_blockers.items()
+                        if source not in ignore_charge_blockers
+                    }
+            else:
+                charge_blockers = {}
+
+            if discharge_power > 0:
+                discharge_blockers = self.get_discharge_blockers(coordinator)
+                if ignore_discharge_blockers:
+                    discharge_blockers = {
+                        source: block
+                        for source, block in discharge_blockers.items()
+                        if source not in ignore_discharge_blockers
+                    }
+            else:
+                discharge_blockers = {}
 
         if charge_power > 0 and charge_blockers:
             _LOGGER.debug(
@@ -2910,17 +2928,6 @@ class ChargeDischargeController:
                 ", ".join(charge_blockers.keys()),
             )
             charge_power = 0
-
-        if discharge_power > 0:
-            discharge_blockers = self.get_discharge_blockers(coordinator)
-            if ignore_discharge_blockers:
-                discharge_blockers = {
-                    source: block
-                    for source, block in discharge_blockers.items()
-                    if source not in ignore_discharge_blockers
-                }
-        else:
-            discharge_blockers = {}
 
         if discharge_power > 0 and discharge_blockers:
             _LOGGER.debug(
@@ -2931,7 +2938,7 @@ class ChargeDischargeController:
             discharge_power = 0
 
         # Clear any legacy balance hold that may have been restored from storage.
-        if coordinator.balance_hold and discharge_power > 0:
+        if not bypass_blockers and coordinator.balance_hold and discharge_power > 0:
             _LOGGER.debug("[%s] Legacy balance hold active - discharge suppressed", coordinator.name)
             discharge_power = 0
 
@@ -4418,8 +4425,13 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
               marstek_venus_system_home_consumption. Renames both the unique_id
               and the registry entity_id (the entity_id is not derived from the
               unique_id, so it must be renamed explicitly).
+    v7 -> v8: charge hysteresis is now mandatory. Per battery: force
+              enable_charge_hysteresis=True; batteries that already had it enabled
+              keep their configured percent; batteries that had it off (or unset)
+              get the MIN_CHARGE_HYSTERESIS_PERCENT floor. Any value is clamped up
+              to the floor so SOC drift can't shrink the deadband into chatter.
     """
-    if entry.version >= 7:
+    if entry.version >= 8:
         return True
 
     new_data = dict(entry.data)
@@ -4546,7 +4558,28 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             "(fixed Home Consumption sensor unique_id + entity_id: removed duplicate 'system' prefix)"
         )
 
-    hass.config_entries.async_update_entry(entry, data=new_data, version=7)
+    if entry.version < 8:
+        migrated_batteries = []
+        for battery in new_data.get("batteries", []):
+            nb = dict(battery)
+            was_enabled = nb.get("enable_charge_hysteresis", False)
+            nb["enable_charge_hysteresis"] = True
+            # Preserve a previously-configured percent; otherwise apply the floor.
+            pct = nb.get("charge_hysteresis_percent") if was_enabled else MIN_CHARGE_HYSTERESIS_PERCENT
+            try:
+                pct = int(pct)
+            except (TypeError, ValueError):
+                pct = MIN_CHARGE_HYSTERESIS_PERCENT
+            nb["charge_hysteresis_percent"] = max(MIN_CHARGE_HYSTERESIS_PERCENT, pct)
+            migrated_batteries.append(nb)
+        new_data["batteries"] = migrated_batteries
+        _LOGGER.info(
+            "Marstek: migrated config entry to version 8 "
+            "(charge hysteresis now mandatory; min %d%%, configured values preserved)",
+            MIN_CHARGE_HYSTERESIS_PERCENT,
+        )
+
+    hass.config_entries.async_update_entry(entry, data=new_data, version=8)
     return True
 
 
@@ -4580,8 +4613,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             max_discharge_power=battery_config["max_discharge_power"],
             max_soc=battery_config["max_soc"],
             min_soc=battery_config["min_soc"],
-            enable_charge_hysteresis=battery_config.get("enable_charge_hysteresis", False),
-            charge_hysteresis_percent=battery_config.get("charge_hysteresis_percent", 5),
+            charge_hysteresis_percent=battery_config.get(
+                "charge_hysteresis_percent", DEFAULT_CHARGE_HYSTERESIS_PERCENT
+            ),
             backup_offgrid_threshold=battery_config.get("backup_offgrid_threshold", 50),
             allow_charge=battery_config.get("allow_charge", True),
             allow_discharge=battery_config.get("allow_discharge", True),

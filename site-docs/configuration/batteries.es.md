@@ -19,7 +19,7 @@ Selecciona cuántas unidades Marstek Venus tienes (1–6). La integración te pe
 | **Potencia máx. carga/descarga** | Potencia nominal de la instalación | — |
 | **SOC máximo** | Detiene la carga al alcanzar este % | `100 %` |
 | **SOC mínimo** | Detiene la descarga al alcanzar este % | `12 %` |
-| **Histéresis de carga** | Margen para evitar ciclos rápidos cerca del límite | — |
+| **Histéresis de carga** | Siempre activa (mínimo 2 %). Tras llegar al tope, la batería no vuelve a cargar hasta que el SOC baje este margen — evita ciclos rápidos y absorbe la deriva de la lectura de SOC | `2 %` |
 | **Umbral offgrid backup** | Carga offgrid mínima (W) para considerarse un evento de backup activo | `50 W` |
 
 ### Versiones de batería

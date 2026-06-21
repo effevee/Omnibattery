@@ -47,8 +47,9 @@ async def async_setup_entry(
         if controller:
             entities.append(BatteryAllowChargeSwitch(hass, entry, controller, coordinator))
             entities.append(BatteryAllowDischargeSwitch(hass, entry, controller, coordinator))
-            entities.append(BatteryFullChargeVoltageTaperSwitch(hass, entry, controller, coordinator))
-            entities.append(BatteryActiveBalanceModeSwitch(hass, entry, controller, coordinator))
+            if coordinator.brand != "zendure":
+                entities.append(BatteryFullChargeVoltageTaperSwitch(hass, entry, controller, coordinator))
+                entities.append(BatteryActiveBalanceModeSwitch(hass, entry, controller, coordinator))
 
     # Add manual mode switch (system-level, always present)
     if controller:

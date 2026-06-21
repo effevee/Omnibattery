@@ -51,6 +51,16 @@ MULTI_BATTERY_MIN_ACTIVATION        = 0.50   # floor: never activate below this 
 # Cap at 0.95: stage 5% before single-battery saturation to absorb demand transients,
 # even when efficiency analysis alone would keep a single battery active.
 MULTI_BATTERY_MAX_ACTIVATION        = 0.95
+
+# Charge hysteresis (per-battery). Hysteresis is mandatory — after a battery
+# reaches its ceiling it must not recharge until SOC falls this far below the
+# latched peak. The 2 % floor keeps the deadband wider than typical SOC-reading
+# drift/quantization, which would otherwise release the latch and cause charge
+# chatter at the top. Existing installs are migrated (async_migrate_entry
+# v7 -> v8): previously-configured values are preserved, others get the floor.
+MIN_CHARGE_HYSTERESIS_PERCENT = 2
+DEFAULT_CHARGE_HYSTERESIS_PERCENT = 2
+MAX_CHARGE_HYSTERESIS_PERCENT = 50
 # Keep additional batteries active long enough to avoid pulsing when bursty loads
 # repeatedly cross the split-load threshold. Refreshed while the split condition holds.
 MULTI_BATTERY_SELECTION_HOLD_SECONDS = 120

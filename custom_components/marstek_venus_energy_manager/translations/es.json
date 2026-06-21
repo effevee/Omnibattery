@@ -76,20 +76,20 @@
           "max_discharge_power": "Potencia máxima de descarga",
           "max_soc": "SOC máximo (%)",
           "min_soc": "SOC mínimo de descarga (%)",
-          "enable_charge_hysteresis": "Activar histéresis de carga",
-          "charge_hysteresis_percent": "Porcentaje de histéresis (%)",
+          "charge_hysteresis_percent": "Histéresis de carga (%)",
           "backup_offgrid_threshold": "Umbral de carga offgrid de backup (W)",
-          "full_charge_voltage_taper_enabled": "Activar reduccion por voltaje al cargar al 100%"
+          "full_charge_voltage_taper_enabled": "Activar reduccion por voltaje al cargar al 100%",
+          "battery_capacity_kwh": "Capacidad nominal de la batería (kWh)"
         },
         "data_description": {
           "max_charge_power": "Potencia máxima permitida para cargar la batería",
           "max_discharge_power": "Potencia máxima permitida para descargar la batería",
           "max_soc": "Estado de carga máximo (80-100%) - la batería no cargará por encima de este valor",
           "min_soc": "Estado de carga mínimo para descarga (12-30%) - la batería no descargará por debajo de este valor",
-          "enable_charge_hysteresis": "Evita que la batería cargue cuando está cerca del SOC máximo",
-          "charge_hysteresis_percent": "La batería no cargará hasta que el SOC baje a (max_soc - histéresis). Ej: SOC max 100% con 5% histéresis = no carga hasta 95%",
+          "charge_hysteresis_percent": "Siempre activa (mínimo 2%). Tras llegar al tope, la batería no volverá a cargar hasta que el SOC baje a (SOC máx − histéresis). Ej: SOC máx 100% con 2% = no carga hasta 98%.",
           "backup_offgrid_threshold": "Una carga offgrid superior a este valor se considera un evento de backup activo, excluyendo la batería del control PD. Auméntalo si tienes cargas permanentes (router, cámaras) en el puerto offgrid.",
-          "full_charge_voltage_taper_enabled": "Cuando el objetivo es 100%, limita la carga a 95 W desde 3.48 V de celda maxima y para en 3.58 V para medir el desbalanceo tras 60 segundos."
+          "full_charge_voltage_taper_enabled": "Cuando el objetivo es 100%, limita la carga a 95 W desde 3.48 V de celda maxima y para en 3.58 V para medir el desbalanceo tras 60 segundos.",
+          "battery_capacity_kwh": "Capacidad utilizable nominal del pack de baterías. Se usa para calcular la energía almacenada y la eficiencia a partir del SOC. Deja en 0 si no la conoces."
         }
       },
       "time_slots": {
@@ -539,20 +539,20 @@
           "max_discharge_power": "Potencia máxima de descarga",
           "max_soc": "SOC máximo (%)",
           "min_soc": "SOC mínimo de descarga (%)",
-          "enable_charge_hysteresis": "Activar histéresis de carga",
-          "charge_hysteresis_percent": "Porcentaje de histéresis (%)",
+          "charge_hysteresis_percent": "Histéresis de carga (%)",
           "backup_offgrid_threshold": "Umbral de carga offgrid de backup (W)",
-          "full_charge_voltage_taper_enabled": "Activar reduccion por voltaje al cargar al 100%"
+          "full_charge_voltage_taper_enabled": "Activar reduccion por voltaje al cargar al 100%",
+          "battery_capacity_kwh": "Capacidad nominal de la batería (kWh)"
         },
         "data_description": {
           "max_charge_power": "Potencia máxima permitida para cargar la batería",
           "max_discharge_power": "Potencia máxima permitida para descargar la batería",
           "max_soc": "Estado de carga máximo (80-100%)",
           "min_soc": "Estado de carga mínimo para descarga (12-30%)",
-          "enable_charge_hysteresis": "Evita que la batería cargue cuando está cerca del SOC máximo",
-          "charge_hysteresis_percent": "La batería no cargará hasta que el SOC baje a (max_soc - histéresis). Ej: SOC max 100% con 5% histéresis = no carga hasta 95%",
+          "charge_hysteresis_percent": "Siempre activa (mínimo 2%). Tras llegar al tope, la batería no volverá a cargar hasta que el SOC baje a (SOC máx − histéresis). Ej: SOC máx 100% con 2% = no carga hasta 98%.",
           "backup_offgrid_threshold": "Una carga offgrid superior a este valor se considera un evento de backup activo, excluyendo la batería del control PD. Auméntalo si tienes cargas permanentes (router, cámaras) en el puerto offgrid.",
-          "full_charge_voltage_taper_enabled": "Cuando el objetivo es 100%, limita la carga a 95 W desde 3.48 V de celda maxima y para en 3.58 V para medir el desbalanceo tras 60 segundos."
+          "full_charge_voltage_taper_enabled": "Cuando el objetivo es 100%, limita la carga a 95 W desde 3.48 V de celda maxima y para en 3.58 V para medir el desbalanceo tras 60 segundos.",
+          "battery_capacity_kwh": "Capacidad utilizable nominal del pack de baterías. Se usa para calcular la energía almacenada y la eficiencia a partir del SOC. Deja en 0 si no la conoces."
         }
       },
       "time_slots": {

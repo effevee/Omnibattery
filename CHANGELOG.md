@@ -1,5 +1,11 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+- **Zendure battery capacity moved to config/options flow**: capacity (kWh) is now set during initial setup and via Options → Batteries, not as a live entity. Precision raised to 0.01 kWh. Options flow battery reconfigure now preserves all persisted battery data (capacity, soft-max, force-mode) instead of dropping keys not in the form. [`config_flow.py`](custom_components/marstek_venus_energy_manager/config_flow.py), [`number.py`](custom_components/marstek_venus_energy_manager/number.py).
+- **Charge hysteresis is now mandatory (min 2%)**: the per-battery enable toggle is gone — hysteresis is always on. Existing batteries keep their configured percent; those that had it off get the 2% floor. The 2% minimum keeps the deadband wider than SOC-reading drift, preventing charge chatter at the top. Migrated on upgrade (config entry v7 → v8). [`__init__.py`](custom_components/marstek_venus_energy_manager/__init__.py), [`config_flow.py`](custom_components/marstek_venus_energy_manager/config_flow.py), [`number.py`](custom_components/marstek_venus_energy_manager/number.py).
+
 ## [2.1.0] - 2026-06-15
 
 ### Fixed

@@ -76,20 +76,20 @@
           "max_discharge_power": "Maximale Entladeleistung (W)",
           "max_soc": "Maximaler SOC (%)",
           "min_soc": "Minimaler SOC (%)",
-          "enable_charge_hysteresis": "Ladehysterese aktivieren",
-          "charge_hysteresis_percent": "Hysterese-Prozentsatz (%)",
+          "charge_hysteresis_percent": "Ladehysterese (%)",
           "backup_offgrid_threshold": "Schwellenwert für Backup-Offgrid-Last (W)",
-          "full_charge_voltage_taper_enabled": "100%-Ladung per Zellspannung reduzieren"
+          "full_charge_voltage_taper_enabled": "100%-Ladung per Zellspannung reduzieren",
+          "battery_capacity_kwh": "Nominale Batteriekapazität (kWh)"
         },
         "data_description": {
           "max_charge_power": "Maximal zulässige Leistung zum Laden der Batterie",
           "max_discharge_power": "Maximal zulässige Leistung zum Entladen der Batterie",
           "max_soc": "Maximaler Ladezustand - Batterie lädt nicht über diesen Wert",
           "min_soc": "Minimaler Ladezustand - Batterie entlädt nicht unter diesen Wert",
-          "enable_charge_hysteresis": "Verhindert das Laden der Batterie, wenn der SOC nahe am Maximum ist",
-          "charge_hysteresis_percent": "Batterie lädt nicht, bis der SOC auf (max_soc - Hysterese) fällt. Bsp.: Max SOC 100% mit 5% Hysterese = kein Laden bis 95%",
+          "charge_hysteresis_percent": "Immer aktiv (mindestens 2%). Nach Erreichen des Maximums lädt die Batterie erst wieder, wenn der SOC auf (Max SOC − Hysterese) fällt. Bsp.: Max SOC 100% mit 2% = kein Laden bis 98%.",
           "backup_offgrid_threshold": "Eine Offgrid-Last über diesem Wert wird als aktives Backup-Ereignis behandelt und schließt die Batterie aus der PD-Regelung aus. Erhöhen, wenn dauerhafte Lasten (Router, Kameras) am Offgrid-Port angeschlossen sind.",
-          "full_charge_voltage_taper_enabled": "Wenn das Ziel 100% ist, wird die Ladung ab 3.48 V maximaler Zellspannung auf 95 W begrenzt und bei 3.58 V gestoppt, um den Zellversatz nach 60 Sekunden zu messen."
+          "full_charge_voltage_taper_enabled": "Wenn das Ziel 100% ist, wird die Ladung ab 3.48 V maximaler Zellspannung auf 95 W begrenzt und bei 3.58 V gestoppt, um den Zellversatz nach 60 Sekunden zu messen.",
+          "battery_capacity_kwh": "Nominale nutzbare Kapazität des Batteriepacks. Wird zur Berechnung der gespeicherten Energie und Effizienz aus dem SOC verwendet. Bei 0 lassen, wenn unbekannt."
         }
       },
       "time_slots": {
@@ -539,20 +539,20 @@
           "max_discharge_power": "Maximale Entladeleistung (W)",
           "max_soc": "Maximaler SOC (%)",
           "min_soc": "Minimaler SOC (%)",
-          "enable_charge_hysteresis": "Ladehysterese aktivieren",
-          "charge_hysteresis_percent": "Hysterese-Prozentsatz (%)",
+          "charge_hysteresis_percent": "Ladehysterese (%)",
           "backup_offgrid_threshold": "Schwellenwert für Backup-Offgrid-Last (W)",
-          "full_charge_voltage_taper_enabled": "100%-Ladung per Zellspannung reduzieren"
+          "full_charge_voltage_taper_enabled": "100%-Ladung per Zellspannung reduzieren",
+          "battery_capacity_kwh": "Nominale Batteriekapazität (kWh)"
         },
         "data_description": {
           "max_charge_power": "Maximal zulässige Leistung zum Laden der Batterie",
           "max_discharge_power": "Maximal zulässige Leistung zum Entladen der Batterie",
           "max_soc": "Maximaler Ladezustand",
           "min_soc": "Minimaler Ladezustand",
-          "enable_charge_hysteresis": "Verhindert das Laden der Batterie, wenn der SOC nahe am Maximum ist",
-          "charge_hysteresis_percent": "Batterie lädt nicht, bis der SOC auf (max_soc - Hysterese) fällt. Bsp.: Max SOC 100% mit 5% Hysterese = kein Laden bis 95%",
+          "charge_hysteresis_percent": "Immer aktiv (mindestens 2%). Nach Erreichen des Maximums lädt die Batterie erst wieder, wenn der SOC auf (Max SOC − Hysterese) fällt. Bsp.: Max SOC 100% mit 2% = kein Laden bis 98%.",
           "backup_offgrid_threshold": "Eine Offgrid-Last über diesem Wert wird als aktives Backup-Ereignis behandelt und schließt die Batterie aus der PD-Regelung aus. Erhöhen, wenn dauerhafte Lasten (Router, Kameras) am Offgrid-Port angeschlossen sind.",
-          "full_charge_voltage_taper_enabled": "Wenn das Ziel 100% ist, wird die Ladung ab 3.48 V maximaler Zellspannung auf 95 W begrenzt und bei 3.58 V gestoppt, um den Zellversatz nach 60 Sekunden zu messen."
+          "full_charge_voltage_taper_enabled": "Wenn das Ziel 100% ist, wird die Ladung ab 3.48 V maximaler Zellspannung auf 95 W begrenzt und bei 3.58 V gestoppt, um den Zellversatz nach 60 Sekunden zu messen.",
+          "battery_capacity_kwh": "Nominale nutzbare Kapazität des Batteriepacks. Wird zur Berechnung der gespeicherten Energie und Effizienz aus dem SOC verwendet. Bei 0 lassen, wenn unbekannt."
         }
       },
       "time_slots": {

@@ -76,20 +76,20 @@
           "max_discharge_power": "Maximaal ontlaadvermogen (W)",
           "max_soc": "Maximale SOC (%)",
           "min_soc": "Minimale SOC (%)",
-          "enable_charge_hysteresis": "Laadhysterese inschakelen",
-          "charge_hysteresis_percent": "Hysterese percentage (%)",
+          "charge_hysteresis_percent": "Laadhysterese (%)",
           "backup_offgrid_threshold": "Drempelwaarde backup offgrid-belasting (W)",
-          "full_charge_voltage_taper_enabled": "100%-lading op spanning begrenzen"
+          "full_charge_voltage_taper_enabled": "100%-lading op spanning begrenzen",
+          "battery_capacity_kwh": "Nominale batterijcapaciteit (kWh)"
         },
         "data_description": {
           "max_charge_power": "Maximaal toegestaan vermogen om de batterij op te laden",
           "max_discharge_power": "Maximaal toegestaan vermogen om de batterij te ontladen",
           "max_soc": "Maximale laadtoestand - batterij laadt niet boven deze waarde",
           "min_soc": "Minimale laadtoestand - batterij ontlaadt niet onder deze waarde",
-          "enable_charge_hysteresis": "Voorkomt dat de batterij laadt wanneer SOC dicht bij het maximum is",
-          "charge_hysteresis_percent": "Batterij laadt niet tot SOC daalt naar (max_soc - hysterese). Bijv.: Max SOC 100% met 5% hysterese = geen laden tot 95%",
+          "charge_hysteresis_percent": "Altijd aan (minimaal 2%). Na het bereiken van het maximum laadt de batterij pas weer als de SOC daalt naar (Max SOC − hysterese). Bijv.: Max SOC 100% met 2% = geen laden tot 98%.",
           "backup_offgrid_threshold": "Een offgrid-belasting boven deze waarde wordt behandeld als een actieve back-upgebeurtenis en sluit de batterij uit van PD-regeling. Verhoog dit als er permanente lasten (router, camera's) op de offgrid-poort zijn aangesloten.",
-          "full_charge_voltage_taper_enabled": "Wanneer het doel 100% is, wordt laden vanaf 3.48 V maximale celspanning beperkt tot 95 W en gestopt bij 3.58 V om de onbalans na 60 seconden te meten."
+          "full_charge_voltage_taper_enabled": "Wanneer het doel 100% is, wordt laden vanaf 3.48 V maximale celspanning beperkt tot 95 W en gestopt bij 3.58 V om de onbalans na 60 seconden te meten.",
+          "battery_capacity_kwh": "Nominale bruikbare capaciteit van het batterijpakket. Gebruikt om opgeslagen energie en rendement te berekenen vanuit SOC. Laat op 0 als onbekend."
         }
       },
       "time_slots": {
@@ -539,20 +539,20 @@
           "max_discharge_power": "Maximaal ontlaadvermogen (W)",
           "max_soc": "Maximale SOC (%)",
           "min_soc": "Minimale SOC (%)",
-          "enable_charge_hysteresis": "Laadhysterese inschakelen",
-          "charge_hysteresis_percent": "Hysterese percentage (%)",
+          "charge_hysteresis_percent": "Laadhysterese (%)",
           "backup_offgrid_threshold": "Drempelwaarde backup offgrid-belasting (W)",
-          "full_charge_voltage_taper_enabled": "100%-lading op spanning begrenzen"
+          "full_charge_voltage_taper_enabled": "100%-lading op spanning begrenzen",
+          "battery_capacity_kwh": "Nominale batterijcapaciteit (kWh)"
         },
         "data_description": {
           "max_charge_power": "Maximaal toegestaan vermogen om de batterij op te laden",
           "max_discharge_power": "Maximaal toegestaan vermogen om de batterij te ontladen",
           "max_soc": "Maximale laadtoestand",
           "min_soc": "Minimale laadtoestand",
-          "enable_charge_hysteresis": "Voorkomt dat de batterij laadt wanneer SOC dicht bij het maximum is",
-          "charge_hysteresis_percent": "Batterij laadt niet tot SOC daalt naar (max_soc - hysterese). Bijv.: Max SOC 100% met 5% hysterese = geen laden tot 95%",
+          "charge_hysteresis_percent": "Altijd aan (minimaal 2%). Na het bereiken van het maximum laadt de batterij pas weer als de SOC daalt naar (Max SOC − hysterese). Bijv.: Max SOC 100% met 2% = geen laden tot 98%.",
           "backup_offgrid_threshold": "Een offgrid-belasting boven deze waarde wordt behandeld als een actieve back-upgebeurtenis en sluit de batterij uit van PD-regeling. Verhoog dit als er permanente lasten (router, camera's) op de offgrid-poort zijn aangesloten.",
-          "full_charge_voltage_taper_enabled": "Wanneer het doel 100% is, wordt laden vanaf 3.48 V maximale celspanning beperkt tot 95 W en gestopt bij 3.58 V om de onbalans na 60 seconden te meten."
+          "full_charge_voltage_taper_enabled": "Wanneer het doel 100% is, wordt laden vanaf 3.48 V maximale celspanning beperkt tot 95 W en gestopt bij 3.58 V om de onbalans na 60 seconden te meten.",
+          "battery_capacity_kwh": "Nominale bruikbare capaciteit van het batterijpakket. Gebruikt om opgeslagen energie en rendement te berekenen vanuit SOC. Laat op 0 als onbekend."
         }
       },
       "time_slots": {

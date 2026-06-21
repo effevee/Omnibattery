@@ -15,6 +15,8 @@ from .const import (
     CONF_ENABLE_SYSTEM_POWER_LIMITS,
     CONF_SYSTEM_MAX_CHARGE_POWER,
     CONF_SYSTEM_MAX_DISCHARGE_POWER,
+    MIN_CHARGE_HYSTERESIS_PERCENT,
+    MAX_CHARGE_HYSTERESIS_PERCENT,
     DOMAIN,
 )
 from .infra.coordinator import MarstekVenusDataUpdateCoordinator
@@ -60,13 +62,6 @@ async def async_setup_entry(
         # a software charge-power ceiling instead of the writable register entity.
         if coordinator.needs_software_max_charge:
             entities.append(MarstekSoftMaxChargeNumber(coordinator))
-
-        # Drivers without hardware energy counters (Zendure) report no capacity,
-        # so stored_energy / predictive / pricing have nothing to multiply SOC by.
-        # Expose a user-set nominal capacity (kWh) the coordinator injects as
-        # battery_total_energy.
-        if not coordinator.capabilities.has_energy_counters:
-            entities.append(ZendureCapacityNumber(coordinator))
 
     # Add config numbers (system-level, PD parameters)
     for definition in CONFIG_NUMBER_DEFINITIONS:
@@ -425,12 +420,24 @@ class MarstekManualSetPowerNumber(CoordinatorEntity, NumberEntity):
         new_value = int(value)
         if self._kind == "charge":
             self.coordinator.manual_set_charge_power = new_value
-            self.coordinator.commanded_charge_power = new_value
             self.coordinator.persist_battery_config("manual_set_charge_power", new_value)
+            if new_value > 0:
+                self.coordinator.commanded_charge_power = new_value
+                self.coordinator.commanded_discharge_power = 0
+                self.coordinator.manual_set_discharge_power = 0
+                self.coordinator.manual_force_mode = "Charge"
+                self.coordinator.persist_battery_config("manual_set_discharge_power", 0)
+                self.coordinator.persist_battery_config("manual_force_mode", "Charge")
         else:
             self.coordinator.manual_set_discharge_power = new_value
-            self.coordinator.commanded_discharge_power = new_value
             self.coordinator.persist_battery_config("manual_set_discharge_power", new_value)
+            if new_value > 0:
+                self.coordinator.commanded_discharge_power = new_value
+                self.coordinator.commanded_charge_power = 0
+                self.coordinator.manual_set_charge_power = 0
+                self.coordinator.manual_force_mode = "Discharge"
+                self.coordinator.persist_battery_config("manual_set_charge_power", 0)
+                self.coordinator.persist_battery_config("manual_force_mode", "Discharge")
         _LOGGER.info("%s: manual_set_%s_power → %dW", self.coordinator.name, self._kind, new_value)
         self.async_write_ha_state()
 
@@ -500,56 +507,6 @@ class MarstekSoftMaxChargeNumber(CoordinatorEntity, NumberEntity):
         }
 
 
-class ZendureCapacityNumber(CoordinatorEntity, NumberEntity):
-    """User-set nominal battery capacity (kWh) for drivers without energy counters.
-
-    The hardware exposes no capacity, so stored_energy / predictive / pricing have
-    nothing to multiply SOC by. This software-only entity holds the value on the
-    coordinator (battery_capacity_kwh), persists it to config_entry.data, and the
-    coordinator injects it into data as battery_total_energy each poll. No device write.
-    """
-
-    def __init__(self, coordinator: MarstekVenusDataUpdateCoordinator) -> None:
-        """Initialize the capacity entity."""
-        super().__init__(coordinator)
-        self._attr_has_entity_name = True
-        self._attr_translation_key = "battery_capacity"
-        self._attr_unique_id = f"{coordinator.device_key}_battery_capacity"
-        self.entity_id = english_entity_id("number", coordinator.name, "battery_capacity")
-        self._attr_icon = "mdi:battery-high"
-        self._attr_native_unit_of_measurement = "kWh"
-        self._attr_native_min_value = 0
-        self._attr_native_max_value = 100
-        self._attr_native_step = 0.1
-        self._attr_entity_category = EntityCategory.CONFIG
-        self._attr_should_poll = False
-
-    @property
-    def native_value(self) -> float:
-        """Return the current capacity from the coordinator."""
-        return float(self.coordinator.battery_capacity_kwh)
-
-    async def async_set_native_value(self, value: float) -> None:
-        """Update the capacity on the coordinator, persist it, and surface it now."""
-        self.coordinator.battery_capacity_kwh = value
-        self.coordinator.persist_battery_config("battery_capacity_kwh", value)
-        # Reflect immediately so stored_energy doesn't wait for the next poll.
-        if self.coordinator.data is not None:
-            self.coordinator.data["battery_total_energy"] = value
-        _LOGGER.info("%s: battery capacity set to %.2f kWh", self.coordinator.name, value)
-        self.async_write_ha_state()
-
-    @property
-    def device_info(self):
-        """Return device information."""
-        return {
-            "identifiers": {(DOMAIN, f"{self.coordinator.device_key}")},
-            "name": self.coordinator.name,
-            "manufacturer": "Marstek",
-            "model": "Venus",
-        }
-
-
 class MarstekChargeHysteresisNumber(CoordinatorEntity, NumberEntity):
     """Number entity for the per-battery charge hysteresis percentage.
 
@@ -565,8 +522,8 @@ class MarstekChargeHysteresisNumber(CoordinatorEntity, NumberEntity):
         self.entity_id = english_entity_id("number", coordinator.name, "charge_hysteresis_percent")
         self._attr_icon = "mdi:battery-sync"
         self._attr_native_unit_of_measurement = "%"
-        self._attr_native_min_value = 5
-        self._attr_native_max_value = 50
+        self._attr_native_min_value = MIN_CHARGE_HYSTERESIS_PERCENT
+        self._attr_native_max_value = MAX_CHARGE_HYSTERESIS_PERCENT
         self._attr_native_step = 1
         self._attr_should_poll = False
 
@@ -577,7 +534,7 @@ class MarstekChargeHysteresisNumber(CoordinatorEntity, NumberEntity):
 
     async def async_set_native_value(self, value: float) -> None:
         """Update the hysteresis on the coordinator and persist it."""
-        new_value = int(value)
+        new_value = max(MIN_CHARGE_HYSTERESIS_PERCENT, int(value))
         old = self.coordinator.charge_hysteresis_percent
         self.coordinator.charge_hysteresis_percent = new_value
         self.coordinator.persist_battery_config("charge_hysteresis_percent", new_value)

@@ -100,6 +100,9 @@ from .const import (
     DEFAULT_PREDICTIVE_GRID_CHARGE_MARGIN_PCT,
     CONF_FULL_CHARGE_VOLTAGE_TAPER_ENABLED,
     DEFAULT_FULL_CHARGE_VOLTAGE_TAPER_ENABLED,
+    MIN_CHARGE_HYSTERESIS_PERCENT,
+    DEFAULT_CHARGE_HYSTERESIS_PERCENT,
+    MAX_CHARGE_HYSTERESIS_PERCENT,
     SLOT_BATTERY_SCOPE_ALL,
     SLOT_MODE_PD,
     SLOT_MODE_MANUAL,
@@ -416,7 +419,7 @@ def _finalize_slot(step_a: dict, step_b: dict | None) -> dict:
 class MarstekVenusConfigFlow(ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Marstek Venus Energy Manager."""
 
-    VERSION = 7
+    VERSION = 8
 
     def __init__(self):
         """Initialize the config flow."""
@@ -668,13 +671,19 @@ class MarstekVenusConfigFlow(ConfigFlow, domain=DOMAIN):
             merged["max_discharge_power"] = int(user_input["max_discharge_power"])
             merged["max_soc"] = int(user_input["max_soc"])
             merged["min_soc"] = int(user_input["min_soc"])
-            merged["enable_charge_hysteresis"] = user_input["enable_charge_hysteresis"]
-            merged["charge_hysteresis_percent"] = int(user_input.get("charge_hysteresis_percent", 5))
-            merged["backup_offgrid_threshold"] = int(user_input.get("backup_offgrid_threshold", 50))
-            merged[CONF_FULL_CHARGE_VOLTAGE_TAPER_ENABLED] = user_input.get(
-                CONF_FULL_CHARGE_VOLTAGE_TAPER_ENABLED,
-                DEFAULT_FULL_CHARGE_VOLTAGE_TAPER_ENABLED,
+            # Hysteresis is mandatory; floor the percent against SOC drift.
+            merged["enable_charge_hysteresis"] = True
+            merged["charge_hysteresis_percent"] = max(
+                MIN_CHARGE_HYSTERESIS_PERCENT,
+                int(user_input.get("charge_hysteresis_percent", DEFAULT_CHARGE_HYSTERESIS_PERCENT)),
             )
+            merged["backup_offgrid_threshold"] = int(user_input.get("backup_offgrid_threshold", 50))
+            merged[CONF_FULL_CHARGE_VOLTAGE_TAPER_ENABLED] = (
+                False if brand == "zendure"
+                else user_input.get(CONF_FULL_CHARGE_VOLTAGE_TAPER_ENABLED, DEFAULT_FULL_CHARGE_VOLTAGE_TAPER_ENABLED)
+            )
+            if brand == "zendure":
+                merged["battery_capacity_kwh"] = round(float(user_input.get("battery_capacity_kwh", 0.0)), 2)
             self.battery_configs.append(merged)
             self.battery_index += 1
 
@@ -683,26 +692,29 @@ class MarstekVenusConfigFlow(ConfigFlow, domain=DOMAIN):
                 return await self.async_step_time_slots()
             return await self.async_step_battery_brand()
 
+        _schema: dict = {
+            vol.Required("max_charge_power", default=max_power):
+                NumberSelector(NumberSelectorConfig(min=100, max=max_power, step=50, unit_of_measurement="W", mode=NumberSelectorMode.SLIDER)),
+            vol.Required("max_discharge_power", default=max_power):
+                NumberSelector(NumberSelectorConfig(min=100, max=max_power, step=50, unit_of_measurement="W", mode=NumberSelectorMode.SLIDER)),
+            vol.Required("max_soc", default=100):
+                NumberSelector(NumberSelectorConfig(min=80, max=100, step=1, mode=NumberSelectorMode.SLIDER)),
+            vol.Required("min_soc", default=12):
+                NumberSelector(NumberSelectorConfig(min=soc_min_lo, max=soc_min_hi, step=1, mode=NumberSelectorMode.SLIDER)),
+            vol.Required("charge_hysteresis_percent", default=DEFAULT_CHARGE_HYSTERESIS_PERCENT):
+                NumberSelector(NumberSelectorConfig(min=MIN_CHARGE_HYSTERESIS_PERCENT, max=MAX_CHARGE_HYSTERESIS_PERCENT, step=1, mode=NumberSelectorMode.SLIDER)),
+            vol.Required("backup_offgrid_threshold", default=50):
+                NumberSelector(NumberSelectorConfig(min=0, max=500, step=10, unit_of_measurement="W", mode=NumberSelectorMode.SLIDER)),
+        }
+        if brand != "zendure":
+            _schema[vol.Required(CONF_FULL_CHARGE_VOLTAGE_TAPER_ENABLED, default=DEFAULT_FULL_CHARGE_VOLTAGE_TAPER_ENABLED)] = bool
+        if brand == "zendure":
+            _schema[vol.Optional("battery_capacity_kwh", default=0.0)] = NumberSelector(
+                NumberSelectorConfig(min=0, max=100, step=0.01, unit_of_measurement="kWh", mode=NumberSelectorMode.BOX)
+            )
         return self.async_show_form(
             step_id="battery_limits",
-            data_schema=vol.Schema(
-                {
-                    vol.Required("max_charge_power", default=max_power):
-                        NumberSelector(NumberSelectorConfig(min=100, max=max_power, step=50, unit_of_measurement="W", mode=NumberSelectorMode.SLIDER)),
-                    vol.Required("max_discharge_power", default=max_power):
-                        NumberSelector(NumberSelectorConfig(min=100, max=max_power, step=50, unit_of_measurement="W", mode=NumberSelectorMode.SLIDER)),
-                    vol.Required("max_soc", default=100):
-                        NumberSelector(NumberSelectorConfig(min=80, max=100, step=1, mode=NumberSelectorMode.SLIDER)),
-                    vol.Required("min_soc", default=12):
-                        NumberSelector(NumberSelectorConfig(min=soc_min_lo, max=soc_min_hi, step=1, mode=NumberSelectorMode.SLIDER)),
-                    vol.Required("enable_charge_hysteresis", default=False): bool,
-                    vol.Optional("charge_hysteresis_percent", default=5):
-                        NumberSelector(NumberSelectorConfig(min=5, max=50, step=1, mode=NumberSelectorMode.SLIDER)),
-                    vol.Required("backup_offgrid_threshold", default=50):
-                        NumberSelector(NumberSelectorConfig(min=0, max=500, step=10, unit_of_measurement="W", mode=NumberSelectorMode.SLIDER)),
-                    vol.Required(CONF_FULL_CHARGE_VOLTAGE_TAPER_ENABLED, default=DEFAULT_FULL_CHARGE_VOLTAGE_TAPER_ENABLED): bool,
-                }
-            ),
+            data_schema=vol.Schema(_schema),
             description_placeholders={"battery_num": str(battery_num)},
         )
 
@@ -2252,18 +2264,29 @@ class OptionsFlowHandler(OptionsFlow):
             current_batteries = self.config_entry.data.get("batteries", [])
 
             if user_input is not None:
-                merged = dict(self._current_battery_data)
+                # Start from existing battery config to preserve persisted keys not in this form.
+                if self.battery_index < len(current_batteries):
+                    merged = dict(current_batteries[self.battery_index])
+                    merged.update(self._current_battery_data)
+                else:
+                    merged = dict(self._current_battery_data)
                 merged["max_charge_power"] = int(user_input["max_charge_power"])
                 merged["max_discharge_power"] = int(user_input["max_discharge_power"])
                 merged["max_soc"] = int(user_input["max_soc"])
                 merged["min_soc"] = int(user_input["min_soc"])
-                merged["enable_charge_hysteresis"] = user_input["enable_charge_hysteresis"]
-                merged["charge_hysteresis_percent"] = int(user_input.get("charge_hysteresis_percent", 5))
-                merged["backup_offgrid_threshold"] = int(user_input.get("backup_offgrid_threshold", 50))
-                merged[CONF_FULL_CHARGE_VOLTAGE_TAPER_ENABLED] = user_input.get(
-                    CONF_FULL_CHARGE_VOLTAGE_TAPER_ENABLED,
-                    DEFAULT_FULL_CHARGE_VOLTAGE_TAPER_ENABLED,
+                # Hysteresis is mandatory; floor the percent against SOC drift.
+                merged["enable_charge_hysteresis"] = True
+                merged["charge_hysteresis_percent"] = max(
+                    MIN_CHARGE_HYSTERESIS_PERCENT,
+                    int(user_input.get("charge_hysteresis_percent", DEFAULT_CHARGE_HYSTERESIS_PERCENT)),
                 )
+                merged["backup_offgrid_threshold"] = int(user_input.get("backup_offgrid_threshold", 50))
+                merged[CONF_FULL_CHARGE_VOLTAGE_TAPER_ENABLED] = (
+                    False if brand == "zendure"
+                    else user_input.get(CONF_FULL_CHARGE_VOLTAGE_TAPER_ENABLED, DEFAULT_FULL_CHARGE_VOLTAGE_TAPER_ENABLED)
+                )
+                if brand == "zendure":
+                    merged["battery_capacity_kwh"] = round(float(user_input.get("battery_capacity_kwh", 0.0)), 2)
                 self.battery_configs.append(merged)
                 self.battery_index += 1
 
@@ -2280,13 +2303,16 @@ class OptionsFlowHandler(OptionsFlow):
                     "max_discharge_power": min(current_battery.get("max_discharge_power", max_power), max_power),
                     "max_soc": current_battery.get("max_soc", 100),
                     "min_soc": current_battery.get("min_soc", 12),
-                    "enable_charge_hysteresis": current_battery.get("enable_charge_hysteresis", False),
-                    "charge_hysteresis_percent": current_battery.get("charge_hysteresis_percent", 5),
+                    "charge_hysteresis_percent": max(
+                        MIN_CHARGE_HYSTERESIS_PERCENT,
+                        int(current_battery.get("charge_hysteresis_percent", DEFAULT_CHARGE_HYSTERESIS_PERCENT)),
+                    ),
                     "backup_offgrid_threshold": current_battery.get("backup_offgrid_threshold", 50),
                     CONF_FULL_CHARGE_VOLTAGE_TAPER_ENABLED: current_battery.get(
                         CONF_FULL_CHARGE_VOLTAGE_TAPER_ENABLED,
                         DEFAULT_FULL_CHARGE_VOLTAGE_TAPER_ENABLED,
                     ),
+                    "battery_capacity_kwh": current_battery.get("battery_capacity_kwh", 0.0),
                 }
             else:
                 defaults = {
@@ -2294,35 +2320,38 @@ class OptionsFlowHandler(OptionsFlow):
                     "max_discharge_power": max_power,
                     "max_soc": 100,
                     "min_soc": 12,
-                    "enable_charge_hysteresis": False,
-                    "charge_hysteresis_percent": 5,
+                    "charge_hysteresis_percent": DEFAULT_CHARGE_HYSTERESIS_PERCENT,
                     "backup_offgrid_threshold": 50,
                     CONF_FULL_CHARGE_VOLTAGE_TAPER_ENABLED: DEFAULT_FULL_CHARGE_VOLTAGE_TAPER_ENABLED,
+                    "battery_capacity_kwh": 0.0,
                 }
         except Exception as e:
             _LOGGER.error("Error in options flow battery_limits step: %s", e, exc_info=True)
             return self.async_abort(reason="unknown_error")
 
+        _schema: dict = {
+            vol.Required("max_charge_power", default=defaults["max_charge_power"]):
+                NumberSelector(NumberSelectorConfig(min=100, max=max_power, step=50, unit_of_measurement="W", mode=NumberSelectorMode.SLIDER)),
+            vol.Required("max_discharge_power", default=defaults["max_discharge_power"]):
+                NumberSelector(NumberSelectorConfig(min=100, max=max_power, step=50, unit_of_measurement="W", mode=NumberSelectorMode.SLIDER)),
+            vol.Required("max_soc", default=defaults["max_soc"]):
+                NumberSelector(NumberSelectorConfig(min=80, max=100, step=1, mode=NumberSelectorMode.SLIDER)),
+            vol.Required("min_soc", default=max(soc_min_lo, min(soc_min_hi, defaults["min_soc"]))):
+                NumberSelector(NumberSelectorConfig(min=soc_min_lo, max=soc_min_hi, step=1, mode=NumberSelectorMode.SLIDER)),
+            vol.Required("charge_hysteresis_percent", default=defaults["charge_hysteresis_percent"]):
+                NumberSelector(NumberSelectorConfig(min=MIN_CHARGE_HYSTERESIS_PERCENT, max=MAX_CHARGE_HYSTERESIS_PERCENT, step=1, mode=NumberSelectorMode.SLIDER)),
+            vol.Required("backup_offgrid_threshold", default=defaults["backup_offgrid_threshold"]):
+                NumberSelector(NumberSelectorConfig(min=0, max=500, step=10, unit_of_measurement="W", mode=NumberSelectorMode.SLIDER)),
+        }
+        if brand != "zendure":
+            _schema[vol.Required(CONF_FULL_CHARGE_VOLTAGE_TAPER_ENABLED, default=defaults[CONF_FULL_CHARGE_VOLTAGE_TAPER_ENABLED])] = bool
+        if brand == "zendure":
+            _schema[vol.Optional("battery_capacity_kwh", default=defaults["battery_capacity_kwh"])] = NumberSelector(
+                NumberSelectorConfig(min=0, max=100, step=0.01, unit_of_measurement="kWh", mode=NumberSelectorMode.BOX)
+            )
         return self.async_show_form(
             step_id="battery_limits",
-            data_schema=vol.Schema(
-                {
-                    vol.Required("max_charge_power", default=defaults["max_charge_power"]):
-                        NumberSelector(NumberSelectorConfig(min=100, max=max_power, step=50, unit_of_measurement="W", mode=NumberSelectorMode.SLIDER)),
-                    vol.Required("max_discharge_power", default=defaults["max_discharge_power"]):
-                        NumberSelector(NumberSelectorConfig(min=100, max=max_power, step=50, unit_of_measurement="W", mode=NumberSelectorMode.SLIDER)),
-                    vol.Required("max_soc", default=defaults["max_soc"]):
-                        NumberSelector(NumberSelectorConfig(min=80, max=100, step=1, mode=NumberSelectorMode.SLIDER)),
-                    vol.Required("min_soc", default=max(soc_min_lo, min(soc_min_hi, defaults["min_soc"]))):
-                        NumberSelector(NumberSelectorConfig(min=soc_min_lo, max=soc_min_hi, step=1, mode=NumberSelectorMode.SLIDER)),
-                    vol.Required("enable_charge_hysteresis", default=defaults["enable_charge_hysteresis"]): bool,
-                    vol.Optional("charge_hysteresis_percent", default=defaults["charge_hysteresis_percent"]):
-                        NumberSelector(NumberSelectorConfig(min=5, max=50, step=1, mode=NumberSelectorMode.SLIDER)),
-                    vol.Required("backup_offgrid_threshold", default=defaults["backup_offgrid_threshold"]):
-                        NumberSelector(NumberSelectorConfig(min=0, max=500, step=10, unit_of_measurement="W", mode=NumberSelectorMode.SLIDER)),
-                    vol.Required(CONF_FULL_CHARGE_VOLTAGE_TAPER_ENABLED, default=defaults[CONF_FULL_CHARGE_VOLTAGE_TAPER_ENABLED]): bool,
-                }
-            ),
+            data_schema=vol.Schema(_schema),
             description_placeholders={"battery_num": str(battery_num)},
         )
 
