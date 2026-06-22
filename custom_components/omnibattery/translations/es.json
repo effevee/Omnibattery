@@ -252,7 +252,7 @@
           "predictive_grid_charge_margin_pct": "Margen de carga de red predictiva (%)"
         },
         "data_description": {
-          "price_integration_type": "Selecciona tu integración de precios de electricidad",
+          "price_integration_type": "Selecciona tu integración de precios de electricidad. Tibber funciona por servicio: lee los precios del servicio tibber.get_prices, así que el sensor de precio de abajo puede dejarse vacío.",
           "price_sensor": "Sensor que proporciona precios horarios de electricidad",
           "max_price_threshold": "Las horas por encima de este precio no serán seleccionadas. Cuando el control de descarga por precio está activado, este valor también se usa como umbral de descarga. Usa la misma unidad que el sensor: €/kWh para Nordpool/PVPC, CHF/kWh para CKW. Deja vacío para usar todas las horas y usar la media diaria como umbral de descarga.",
           "dp_price_discharge_control": "Si está activado, la batería solo descarga cuando el precio eléctrico actual supera el precio máximo configurado. Si no hay umbral configurado, usa el precio medio del día calculado automáticamente a partir del sensor de precios. Si hay franjas de descarga configuradas, ambas condiciones deben cumplirse.",
@@ -443,7 +443,8 @@
       "midnight_crossing": "La hora de inicio debe ser anterior a la hora de fin. Para períodos nocturnos, cree dos franjas separadas (ej: 22:00-23:59 y 00:00-06:00).",
       "slot_does_nothing": "La franja debe permitir al menos una dirección (carga o descarga).",
       "manual_requires_power": "El modo manual requiere activar el control de potencia.",
-      "no_price_data": "El sensor seleccionado no tiene los atributos de precio esperados. Nordpool: necesita `raw_today`. PVPC: necesita `price_00h` … `price_23h`. CKW: necesita el atributo `prices` con una lista de franjas. EPEX: necesita el atributo `data` con una lista de franjas. ENTSO-e: necesita el atributo `prices_today` con una lista de franjas."
+      "no_price_data": "El sensor seleccionado no tiene los atributos de precio esperados. Nordpool: necesita `raw_today`. PVPC: necesita `price_00h` … `price_23h`. CKW: necesita el atributo `prices` con una lista de franjas. EPEX: necesita el atributo `data` con una lista de franjas. ENTSO-e: necesita el atributo `prices_today` con una lista de franjas.",
+      "tibber_unavailable": "La integración Tibber no está instalada, o su servicio `tibber.get_prices` no está disponible. Instala y configura Tibber primero."
     },
     "abort": {
       "already_configured": "Esta integración ya está configurada.",
@@ -717,7 +718,7 @@
           "predictive_grid_charge_margin_pct": "Margen de carga de red predictiva (%)"
         },
         "data_description": {
-          "price_integration_type": "Selecciona tu integración de precios de electricidad",
+          "price_integration_type": "Selecciona tu integración de precios de electricidad. Tibber funciona por servicio: lee los precios del servicio tibber.get_prices, así que el sensor de precio de abajo puede dejarse vacío.",
           "price_sensor": "Sensor que proporciona precios horarios de electricidad",
           "max_price_threshold": "Las horas por encima de este precio no serán seleccionadas. Cuando el control de descarga por precio está activado, este valor también se usa como umbral de descarga. Usa la misma unidad que el sensor: €/kWh para Nordpool/PVPC, CHF/kWh para CKW. Deja vacío para usar todas las horas y usar la media diaria como umbral de descarga.",
           "dp_price_discharge_control": "Si está activado, la batería solo descarga cuando el precio eléctrico actual supera el precio máximo configurado. Si no hay umbral configurado, usa el precio medio del día calculado automáticamente a partir del sensor de precios. Si hay franjas de descarga configuradas, ambas condiciones deben cumplirse.",
@@ -876,7 +877,8 @@
       "midnight_crossing": "La hora de inicio debe ser anterior a la hora de fin. Para períodos nocturnos, cree dos franjas separadas (ej: 22:00-23:59 y 00:00-06:00).",
       "slot_does_nothing": "La franja debe permitir al menos una dirección (carga o descarga).",
       "manual_requires_power": "El modo manual requiere activar el control de potencia.",
-      "no_price_data": "El sensor seleccionado no tiene los atributos de precio esperados. Nordpool: necesita `raw_today`. PVPC: necesita `price_00h` … `price_23h`. CKW: necesita el atributo `prices` con una lista de franjas. EPEX: necesita el atributo `data` con una lista de franjas. ENTSO-e: necesita el atributo `prices_today` con una lista de franjas."
+      "no_price_data": "El sensor seleccionado no tiene los atributos de precio esperados. Nordpool: necesita `raw_today`. PVPC: necesita `price_00h` … `price_23h`. CKW: necesita el atributo `prices` con una lista de franjas. EPEX: necesita el atributo `data` con una lista de franjas. ENTSO-e: necesita el atributo `prices_today` con una lista de franjas.",
+      "tibber_unavailable": "La integración Tibber no está instalada, o su servicio `tibber.get_prices` no está disponible. Instala y configura Tibber primero."
     }
   },
   "selector": {
@@ -915,7 +917,8 @@
         "pvpc": "PVPC (España – ESIOS REE)",
         "ckw": "CKW (Suiza)",
         "epex": "EPEX Spot (p. ej. aWATTar)",
-        "entsoe": "ENTSO-e (Plataforma de Transparencia)"
+        "entsoe": "ENTSO-e (Plataforma de Transparencia)",
+        "tibber": "Tibber (basado en servicio)"
       }
     }
   },

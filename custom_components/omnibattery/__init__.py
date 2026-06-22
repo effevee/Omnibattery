@@ -518,6 +518,10 @@ class ChargeDischargeController:
         self.max_price_threshold = config_entry.data.get(CONF_MAX_PRICE_THRESHOLD, None)
         self.dp_price_discharge_control: bool = config_entry.data.get(CONF_DP_PRICE_DISCHARGE_CONTROL, False)
         self._dp_daily_avg_price: Optional[float] = None  # Computed from price slots in _evaluate_dynamic_pricing
+        # Tibber is service-based (no price sensor): the engine polls tibber.get_prices
+        # and caches the parsed slots here.
+        self._tibber_price_slots: list = []
+        self._tibber_prices_fetched_at: Optional[datetime] = None
 
         # Price-based discharge control flag (set each cycle by pricing handlers, consumed by PD section)
         self._price_based_discharge_blocked: bool = False

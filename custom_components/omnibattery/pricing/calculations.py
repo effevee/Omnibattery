@@ -197,6 +197,66 @@ def parse_entsoe_prices(attrs: dict) -> list:
     return slots
 
 
+def parse_tibber_prices(prices_by_home: dict) -> list:
+    """Parse the response of the ``tibber.get_prices`` service.
+
+    Unlike the other providers, Tibber prices are not exposed as sensor
+    attributes — they come from the ``tibber.get_prices`` service response:
+        {"<home name>": [{"start_time": "2026-06-11T00:00:00.000+02:00",
+                          "price": 0.3561}, ...]}
+    Slots are typically 15-minute. Each slot's end is inferred from the next
+    slot's start; the last slot inherits the previous delta (falling back to
+    15 minutes). Tomorrow's slots are appended by Tibber after ~13:00.
+    Returns list[PriceSlot] in local naive time, chronologically sorted.
+    """
+    from homeassistant.util import dt as dt_util
+    from datetime import datetime as _dt, timedelta as _td
+
+    if not prices_by_home:
+        return []
+
+    # Single home is the common case; pick it. With multiple homes Tibber keys
+    # each by name and there is no configured selection, so use the first and
+    # warn rather than merging conflicting timelines.
+    home_names = list(prices_by_home.keys())
+    if len(home_names) > 1:
+        _LOGGER.warning(
+            "Dynamic pricing: Tibber returned %d homes %s — using '%s'",
+            len(home_names), home_names, home_names[0],
+        )
+    entries = prices_by_home.get(home_names[0]) or []
+
+    raw = []
+    for entry in entries:
+        try:
+            start = entry.get("start_time")
+            price_val = entry.get("price")
+            if start is None or price_val is None:
+                continue
+            if isinstance(start, str):
+                start = _dt.fromisoformat(start)
+            if hasattr(start, "tzinfo") and start.tzinfo is not None:
+                start = dt_util.as_local(start).replace(tzinfo=None)
+            raw.append((start, float(price_val)))
+        except Exception as exc:
+            _LOGGER.debug("Dynamic pricing: failed to parse Tibber entry %s: %s", entry, exc)
+
+    if not raw:
+        return []
+
+    raw.sort(key=lambda x: x[0])
+    slots = []
+    for i, (start, price) in enumerate(raw):
+        if i + 1 < len(raw):
+            end = raw[i + 1][0]
+        elif i > 0:
+            end = start + (raw[i][0] - raw[i - 1][0])
+        else:
+            end = start + _td(minutes=15)
+        slots.append(PriceSlot(start=start, end=end, price=price))
+    return slots
+
+
 def calculate_charging_hours_needed(deficit_kwh: float, max_contracted_power: float, max_charge_capacity: float) -> float:
     """Calculate how many hours of charging are needed to cover deficit.
 

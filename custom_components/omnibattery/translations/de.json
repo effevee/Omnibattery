@@ -915,7 +915,8 @@
         "pvpc": "PVPC (Spanien – ESIOS REE)",
         "ckw": "CKW (Schweiz)",
         "epex": "EPEX Spot (z. B. aWATTar)",
-        "entsoe": "ENTSO-e (Transparency-Plattform)"
+        "entsoe": "ENTSO-e (Transparency-Plattform)",
+        "tibber": "Tibber (dienstbasiert)"
       }
     }
   },

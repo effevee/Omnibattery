@@ -97,6 +97,7 @@ from .const import (
     PRICE_INTEGRATION_CKW,
     PRICE_INTEGRATION_EPEX,
     PRICE_INTEGRATION_ENTSOE,
+    PRICE_INTEGRATION_TIBBER,
     CONF_METER_INVERTED,
     CONF_PREDICTIVE_SAFETY_MARGIN_KWH,
     DEFAULT_PREDICTIVE_SAFETY_MARGIN_KWH,
@@ -1089,32 +1090,40 @@ class MarstekVenusConfigFlow(LegacyDomainMigrationMixin, ConfigFlow, domain=DOMA
         if user_input is not None:
             try:
                 integration_type = user_input[CONF_PRICE_INTEGRATION_TYPE]
-                price_sensor = user_input[CONF_PRICE_SENSOR]
+                price_sensor = user_input.get(CONF_PRICE_SENSOR)
 
-                # Validate price sensor has expected attributes
-                price_state = self.hass.states.get(price_sensor)
-                if price_state is None:
+                # Tibber has no price sensor — it polls the tibber.get_prices service.
+                if integration_type == PRICE_INTEGRATION_TIBBER:
+                    price_sensor = None
+                    if not self.hass.services.has_service("tibber", "get_prices"):
+                        errors[CONF_PRICE_INTEGRATION_TYPE] = "tibber_unavailable"
+                elif not price_sensor:
                     errors[CONF_PRICE_SENSOR] = "sensor_not_found"
                 else:
-                    attrs = price_state.attributes
-                    if integration_type == PRICE_INTEGRATION_PVPC:
-                        if not any(f"price_{h:02d}h" in attrs for h in range(24)):
-                            errors[CONF_PRICE_SENSOR] = "no_price_data"
-                    elif integration_type == PRICE_INTEGRATION_CKW:
-                        prices = attrs.get("prices")
-                        if not prices or not isinstance(prices, (list, tuple)) or len(prices) == 0:
-                            errors[CONF_PRICE_SENSOR] = "no_price_data"
-                    elif integration_type == PRICE_INTEGRATION_EPEX:
-                        data = attrs.get("data")
-                        if not data or not isinstance(data, (list, tuple)) or len(data) == 0:
-                            errors[CONF_PRICE_SENSOR] = "no_price_data"
-                    elif integration_type == PRICE_INTEGRATION_ENTSOE:
-                        prices = attrs.get("prices_today")
-                        if not prices or not isinstance(prices, (list, tuple)) or len(prices) == 0:
-                            errors[CONF_PRICE_SENSOR] = "no_price_data"
-                    else:  # Nordpool
-                        if "raw_today" not in attrs:
-                            errors[CONF_PRICE_SENSOR] = "no_price_data"
+                    # Validate price sensor has expected attributes
+                    price_state = self.hass.states.get(price_sensor)
+                    if price_state is None:
+                        errors[CONF_PRICE_SENSOR] = "sensor_not_found"
+                    else:
+                        attrs = price_state.attributes
+                        if integration_type == PRICE_INTEGRATION_PVPC:
+                            if not any(f"price_{h:02d}h" in attrs for h in range(24)):
+                                errors[CONF_PRICE_SENSOR] = "no_price_data"
+                        elif integration_type == PRICE_INTEGRATION_CKW:
+                            prices = attrs.get("prices")
+                            if not prices or not isinstance(prices, (list, tuple)) or len(prices) == 0:
+                                errors[CONF_PRICE_SENSOR] = "no_price_data"
+                        elif integration_type == PRICE_INTEGRATION_EPEX:
+                            data = attrs.get("data")
+                            if not data or not isinstance(data, (list, tuple)) or len(data) == 0:
+                                errors[CONF_PRICE_SENSOR] = "no_price_data"
+                        elif integration_type == PRICE_INTEGRATION_ENTSOE:
+                            prices = attrs.get("prices_today")
+                            if not prices or not isinstance(prices, (list, tuple)) or len(prices) == 0:
+                                errors[CONF_PRICE_SENSOR] = "no_price_data"
+                        else:  # Nordpool
+                            if "raw_today" not in attrs:
+                                errors[CONF_PRICE_SENSOR] = "no_price_data"
 
                 # Validate solar forecast sensor if not global
                 if has_global_sensor:
@@ -1160,12 +1169,14 @@ class MarstekVenusConfigFlow(LegacyDomainMigrationMixin, ConfigFlow, domain=DOMA
                             PRICE_INTEGRATION_CKW,
                             PRICE_INTEGRATION_EPEX,
                             PRICE_INTEGRATION_ENTSOE,
+                            PRICE_INTEGRATION_TIBBER,
                         ],
                         translation_key="price_integration_type",
                         mode=SelectSelectorMode.DROPDOWN,
                     )
                 ),
-            vol.Required(CONF_PRICE_SENSOR):
+            # Optional: not used by Tibber, which polls the tibber.get_prices service.
+            vol.Optional(CONF_PRICE_SENSOR):
                 EntitySelector(EntitySelectorConfig(domain="sensor")),
             vol.Optional(CONF_MAX_PRICE_THRESHOLD):
                 TextSelector(TextSelectorConfig(type=TextSelectorType.TEXT)),
@@ -2776,31 +2787,39 @@ class OptionsFlowHandler(OptionsFlow):
         if user_input is not None:
             try:
                 integration_type = user_input[CONF_PRICE_INTEGRATION_TYPE]
-                price_sensor = user_input[CONF_PRICE_SENSOR]
+                price_sensor = user_input.get(CONF_PRICE_SENSOR)
 
-                price_state = self.hass.states.get(price_sensor)
-                if price_state is None:
+                # Tibber has no price sensor — it polls the tibber.get_prices service.
+                if integration_type == PRICE_INTEGRATION_TIBBER:
+                    price_sensor = None
+                    if not self.hass.services.has_service("tibber", "get_prices"):
+                        errors[CONF_PRICE_INTEGRATION_TYPE] = "tibber_unavailable"
+                elif not price_sensor:
                     errors[CONF_PRICE_SENSOR] = "sensor_not_found"
                 else:
-                    attrs = price_state.attributes
-                    if integration_type == PRICE_INTEGRATION_PVPC:
-                        if not any(f"price_{h:02d}h" in attrs for h in range(24)):
-                            errors[CONF_PRICE_SENSOR] = "no_price_data"
-                    elif integration_type == PRICE_INTEGRATION_CKW:
-                        prices = attrs.get("prices")
-                        if not prices or not isinstance(prices, (list, tuple)) or len(prices) == 0:
-                            errors[CONF_PRICE_SENSOR] = "no_price_data"
-                    elif integration_type == PRICE_INTEGRATION_EPEX:
-                        data = attrs.get("data")
-                        if not data or not isinstance(data, (list, tuple)) or len(data) == 0:
-                            errors[CONF_PRICE_SENSOR] = "no_price_data"
-                    elif integration_type == PRICE_INTEGRATION_ENTSOE:
-                        prices = attrs.get("prices_today")
-                        if not prices or not isinstance(prices, (list, tuple)) or len(prices) == 0:
-                            errors[CONF_PRICE_SENSOR] = "no_price_data"
-                    else:  # Nordpool
-                        if "raw_today" not in attrs:
-                            errors[CONF_PRICE_SENSOR] = "no_price_data"
+                    price_state = self.hass.states.get(price_sensor)
+                    if price_state is None:
+                        errors[CONF_PRICE_SENSOR] = "sensor_not_found"
+                    else:
+                        attrs = price_state.attributes
+                        if integration_type == PRICE_INTEGRATION_PVPC:
+                            if not any(f"price_{h:02d}h" in attrs for h in range(24)):
+                                errors[CONF_PRICE_SENSOR] = "no_price_data"
+                        elif integration_type == PRICE_INTEGRATION_CKW:
+                            prices = attrs.get("prices")
+                            if not prices or not isinstance(prices, (list, tuple)) or len(prices) == 0:
+                                errors[CONF_PRICE_SENSOR] = "no_price_data"
+                        elif integration_type == PRICE_INTEGRATION_EPEX:
+                            data = attrs.get("data")
+                            if not data or not isinstance(data, (list, tuple)) or len(data) == 0:
+                                errors[CONF_PRICE_SENSOR] = "no_price_data"
+                        elif integration_type == PRICE_INTEGRATION_ENTSOE:
+                            prices = attrs.get("prices_today")
+                            if not prices or not isinstance(prices, (list, tuple)) or len(prices) == 0:
+                                errors[CONF_PRICE_SENSOR] = "no_price_data"
+                        else:  # Nordpool
+                            if "raw_today" not in attrs:
+                                errors[CONF_PRICE_SENSOR] = "no_price_data"
 
                 if has_global_sensor:
                     forecast_sensor = self.config_entry.data[CONF_SOLAR_FORECAST_SENSOR]
@@ -2852,12 +2871,14 @@ class OptionsFlowHandler(OptionsFlow):
                             PRICE_INTEGRATION_CKW,
                             PRICE_INTEGRATION_EPEX,
                             PRICE_INTEGRATION_ENTSOE,
+                            PRICE_INTEGRATION_TIBBER,
                         ],
                         translation_key="price_integration_type",
                         mode=SelectSelectorMode.DROPDOWN,
                     )
                 ),
-            vol.Required(CONF_PRICE_SENSOR, default=default_sensor if default_sensor else vol.UNDEFINED):
+            # Optional: not used by Tibber, which polls the tibber.get_prices service.
+            vol.Optional(CONF_PRICE_SENSOR, default=default_sensor if default_sensor else vol.UNDEFINED):
                 EntitySelector(EntitySelectorConfig(domain="sensor")),
             vol.Optional(
                 CONF_MAX_PRICE_THRESHOLD,

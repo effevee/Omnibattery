@@ -175,6 +175,34 @@ def test_parse_epex():
     assert len(slots) == 1 and slots[0].price == 0.14
 
 
+def test_parse_tibber_infers_15min_end():
+    prices_by_home = {
+        "myHome": [
+            {"start_time": "2999-01-01T00:00:00", "price": 0.3561},
+            {"start_time": "2999-01-01T00:15:00", "price": 0.3486},
+        ]
+    }
+    slots = calculations.parse_tibber_prices(prices_by_home)
+    assert [s.price for s in slots] == [0.3561, 0.3486]
+    # first slot's end inferred from the second slot's start
+    assert slots[0].end == slots[1].start
+    # last slot inherits the previous 15-min delta
+    assert (slots[1].end - slots[1].start) == timedelta(minutes=15)
+
+
+def test_parse_tibber_empty():
+    assert calculations.parse_tibber_prices({}) == []
+
+
+def test_parse_tibber_multi_home_uses_first():
+    prices_by_home = {
+        "home_a": [{"start_time": "2999-01-01T00:00:00", "price": 0.10}],
+        "home_b": [{"start_time": "2999-01-01T00:00:00", "price": 0.99}],
+    }
+    slots = calculations.parse_tibber_prices(prices_by_home)
+    assert [s.price for s in slots] == [0.10]
+
+
 def test_parse_entsoe_infers_end_from_next_start():
     attrs = {
         "prices_today": [

@@ -438,6 +438,11 @@ PRICE_INTEGRATION_PVPC = "pvpc"
 PRICE_INTEGRATION_CKW = "ckw"
 PRICE_INTEGRATION_EPEX = "epex"
 PRICE_INTEGRATION_ENTSOE = "entsoe"
+PRICE_INTEGRATION_TIBBER = "tibber"
+
+# Tibber is service-based (tibber.get_prices) rather than sensor-based: the engine
+# polls the service and caches the slots. How stale the cache may get before a refresh.
+TIBBER_REFRESH_MINUTES = 60
 
 # Configuration Number Definitions (for config entities exposed in the UI)
 CONFIG_NUMBER_DEFINITIONS = [

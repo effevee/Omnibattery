@@ -24,6 +24,8 @@ from ..const import (
     PRICE_INTEGRATION_CKW,
     PRICE_INTEGRATION_EPEX,
     PRICE_INTEGRATION_ENTSOE,
+    PRICE_INTEGRATION_TIBBER,
+    TIBBER_REFRESH_MINUTES,
     PREDICTIVE_MODE_DYNAMIC_PRICING,
     PREDICTIVE_MODE_REALTIME_PRICE,
     NOTIFICATION_ID_PREFIX,
@@ -103,6 +105,14 @@ class PricingManager:
 
     def _get_current_price(self) -> Optional[float]:
         """Return the current period price from the configured price sensor."""
+        # Tibber is service-based: read the cached slots, not a sensor.
+        if self._controller.price_integration_type == PRICE_INTEGRATION_TIBBER:
+            now = datetime.now()
+            for slot in self._controller._tibber_price_slots:
+                if slot.start <= now < slot.end:
+                    return slot.price
+            return None
+
         if not self._controller.price_sensor:
             return None
 
@@ -133,6 +143,47 @@ class PricingManager:
         except (ValueError, TypeError):
             return None
 
+    async def _maybe_refresh_tibber_prices(self, *, force: bool = False) -> None:
+        """Poll ``tibber.get_prices`` and cache the slots when stale.
+
+        Tibber has no price sensor; the service returns today's slots and, after
+        ~13:00, tomorrow's. Refreshes when the cache is empty, older than
+        ``TIBBER_REFRESH_MINUTES``, or when ``force`` (before each evaluation).
+        No-op for every other integration type.
+        """
+        if self._controller.price_integration_type != PRICE_INTEGRATION_TIBBER:
+            return
+
+        now = datetime.now()
+        fetched = self._controller._tibber_prices_fetched_at
+        if (
+            not force
+            and self._controller._tibber_price_slots
+            and fetched is not None
+            and (now - fetched) < timedelta(minutes=TIBBER_REFRESH_MINUTES)
+        ):
+            return
+
+        if not self._hass.services.has_service("tibber", "get_prices"):
+            _LOGGER.warning("Dynamic pricing: tibber.get_prices service not available")
+            return
+
+        try:
+            response = await self._hass.services.async_call(
+                "tibber", "get_prices", {}, blocking=True, return_response=True
+            )
+        except Exception as exc:
+            _LOGGER.warning("Dynamic pricing: tibber.get_prices call failed: %s", exc)
+            return
+
+        slots = calculations.parse_tibber_prices((response or {}).get("prices") or {})
+        if slots:
+            self._controller._tibber_price_slots = slots
+            self._controller._tibber_prices_fetched_at = now
+            _LOGGER.info("Dynamic pricing: refreshed %d Tibber price slots", len(slots))
+        else:
+            _LOGGER.warning("Dynamic pricing: tibber.get_prices returned no usable slots")
+
     def _parse_price_data(self, *, horizon_end=None) -> list:
         """Read price sensor and return list[PriceSlot] for remaining slots up to horizon_end.
 
@@ -140,37 +191,44 @@ class PricingManager:
         When horizon_end is None, defaults to end of current day (today 23:59:59).
         Returns empty list on error.
         """
-        if not self._controller.price_sensor:
+        if self._controller.price_integration_type == PRICE_INTEGRATION_TIBBER:
+            # Service-based: use the cached slots refreshed by _maybe_refresh_tibber_prices.
+            raw_slots = list(self._controller._tibber_price_slots)
+            if not raw_slots:
+                _LOGGER.warning("Dynamic pricing: no Tibber price data cached")
+                self._controller._price_data_status = "no_slots"
+                return []
+        elif not self._controller.price_sensor:
             _LOGGER.warning("Dynamic pricing: no price sensor configured")
             self._controller._price_data_status = "no_sensor"
             return []
-
-        state = self._hass.states.get(self._controller.price_sensor)
-        if state is None or state.state in ("unknown", "unavailable"):
-            _LOGGER.warning("Dynamic pricing: price sensor %s unavailable", self._controller.price_sensor)
-            self._controller._price_data_status = "sensor_unavailable"
-            return []
-
-        attrs = state.attributes
-        if self._controller.price_integration_type == PRICE_INTEGRATION_PVPC:
-            raw_slots = calculations.parse_pvpc_prices(attrs)
-        elif self._controller.price_integration_type == PRICE_INTEGRATION_CKW:
-            raw_slots = calculations.parse_ckw_prices(attrs)
-        elif self._controller.price_integration_type == PRICE_INTEGRATION_EPEX:
-            raw_slots = calculations.parse_epex_prices(attrs)
-        elif self._controller.price_integration_type == PRICE_INTEGRATION_ENTSOE:
-            raw_slots = calculations.parse_entsoe_prices(attrs)
         else:
-            # Nordpool
-            raw_slots = calculations.parse_nordpool_prices(attrs)
+            state = self._hass.states.get(self._controller.price_sensor)
+            if state is None or state.state in ("unknown", "unavailable"):
+                _LOGGER.warning("Dynamic pricing: price sensor %s unavailable", self._controller.price_sensor)
+                self._controller._price_data_status = "sensor_unavailable"
+                return []
 
-        if not raw_slots:
-            _LOGGER.warning(
-                "Dynamic pricing: no price data parsed from %s (integration=%s)",
-                self._controller.price_sensor, self._controller.price_integration_type
-            )
-            self._controller._price_data_status = "no_slots"
-            return []
+            attrs = state.attributes
+            if self._controller.price_integration_type == PRICE_INTEGRATION_PVPC:
+                raw_slots = calculations.parse_pvpc_prices(attrs)
+            elif self._controller.price_integration_type == PRICE_INTEGRATION_CKW:
+                raw_slots = calculations.parse_ckw_prices(attrs)
+            elif self._controller.price_integration_type == PRICE_INTEGRATION_EPEX:
+                raw_slots = calculations.parse_epex_prices(attrs)
+            elif self._controller.price_integration_type == PRICE_INTEGRATION_ENTSOE:
+                raw_slots = calculations.parse_entsoe_prices(attrs)
+            else:
+                # Nordpool
+                raw_slots = calculations.parse_nordpool_prices(attrs)
+
+            if not raw_slots:
+                _LOGGER.warning(
+                    "Dynamic pricing: no price data parsed from %s (integration=%s)",
+                    self._controller.price_sensor, self._controller.price_integration_type
+                )
+                self._controller._price_data_status = "no_slots"
+                return []
 
         # Filter to remaining slots within the requested horizon.
         # Default (horizon_end=None) keeps today-only semantics so mid-day restarts
@@ -204,6 +262,9 @@ class PricingManager:
         today = now.date()
 
         _LOGGER.info("Dynamic pricing: running evaluation at %s", now.strftime("%H:%M"))
+
+        # Ensure Tibber slots are current before evaluating (no-op otherwise)
+        await self._maybe_refresh_tibber_prices(force=True)
 
         # Step 1: Energy balance
         decision_data = await self._controller._should_activate_grid_charging()
@@ -451,6 +512,9 @@ class PricingManager:
 
         _LOGGER.info("Dynamic pricing: running evening re-evaluation at %s", now.strftime("%H:%M"))
 
+        # Ensure Tibber slots are current (tomorrow's appear after ~13:00; no-op otherwise)
+        await self._maybe_refresh_tibber_prices(force=True)
+
         # --- Battery state ---
         coordinators_with_data = [c for c in self._controller.coordinators if c.data]
         if not coordinators_with_data:
@@ -608,6 +672,9 @@ class PricingManager:
     async def handle_dynamic_pricing_predictive_charging(self) -> None:
         """Handle predictive charging in dynamic pricing mode (called every 2.5s)."""
         now = datetime.now()
+
+        # Phase 0: Keep the Tibber cache fresh (no-op for sensor-based providers)
+        await self._maybe_refresh_tibber_prices()
 
         # Phase 2: Retry if prices weren't available at 00:05 (e.g. sensor update delay)
         if (
@@ -963,8 +1030,13 @@ class PricingManager:
         """
         mode = self._controller.predictive_charging_mode
 
+        # Tibber has no price sensor (service-based); treat it as a valid price source.
+        has_price_source = bool(self._controller.price_sensor) or (
+            self._controller.price_integration_type == PRICE_INTEGRATION_TIBBER
+        )
+
         if mode == PREDICTIVE_MODE_DYNAMIC_PRICING:
-            if not self._controller.dp_price_discharge_control or not self._controller.price_sensor:
+            if not self._controller.dp_price_discharge_control or not has_price_source:
                 self._controller.remove_discharge_block("price_discharge")
                 return
         elif mode == PREDICTIVE_MODE_REALTIME_PRICE:
