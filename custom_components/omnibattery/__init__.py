@@ -319,10 +319,12 @@ class ChargeDischargeController:
         self.direction_hysteresis = config_entry.data.get(CONF_PD_DIRECTION_HYSTERESIS, DEFAULT_PD_DIRECTION_HYSTERESIS)
         self.min_charge_power = config_entry.data.get(CONF_PD_MIN_CHARGE_POWER, DEFAULT_PD_MIN_CHARGE_POWER)
         self.min_discharge_power = config_entry.data.get(CONF_PD_MIN_DISCHARGE_POWER, DEFAULT_PD_MIN_DISCHARGE_POWER)
-        # Relay anti-chatter (minimum-ON dwell). _relay_engage_since is set when the
-        # battery transitions idle->active; the dwell blocks the active->idle return.
+        # Relay anti-chatter (shut-off dwell). _relay_shutoff_since is stamped the
+        # moment the controller first asks the battery to return to idle; the dwell
+        # keeps it engaged at minimum power until _relay_cooldown_s elapses from that
+        # instant, so the relay doesn't click off as soon as demand falls.
         self._relay_cooldown_s = config_entry.data.get(CONF_PD_RELAY_COOLDOWN, DEFAULT_PD_RELAY_COOLDOWN)
-        self._relay_engage_since = None
+        self._relay_shutoff_since = None
         # Event-driven cycle rate limit: drop grid-sensor triggers that arrive
         # closer together than this, so fast meters can't flood the Modbus bridge.
         self._min_cycle_interval_s = config_entry.data.get(CONF_PD_MIN_CYCLE_INTERVAL, DEFAULT_PD_MIN_CYCLE_INTERVAL)
@@ -3701,6 +3703,57 @@ class ChargeDischargeController:
                               error, P, D, pd_adjustment, new_power)
         return new_power
 
+    def _apply_relay_dwell(self, new_power, error):
+        """RELAY ANTI-CHATTER (shut-off dwell).
+
+        When the controller decides to send the battery back to idle, keep it
+        engaged at minimum power for at least ``_relay_cooldown_s`` seconds first, so
+        the relay doesn't click off the moment demand falls and back on when it
+        returns. The dwell is timed from the instant idle was FIRST requested
+        (``_relay_shutoff_since``), not from when the battery engaged, so it always
+        delivers the full hold even after a long active run.
+
+        Only the active->idle transition is gated; charge<->discharge flips keep the
+        relay engaged anyway. A large imbalance bypasses the hold (cost-capped: we
+        only hold while the over/under-shoot stays small, ~3x deadband), so a sudden
+        real load isn't left on the grid. The cap measures imbalance BEYOND the power
+        the battery was already handling: at shut-off the grid swings by
+        ~previous_power (the battery's own delivery now reads as grid export/import),
+        so comparing raw error would trip the cap on every shut-off above ~3x deadband
+        and skip the hold entirely.
+
+        Returns the (possibly held) power and manages the dwell timer as a side effect.
+        """
+        wants_idle = (
+            self._relay_cooldown_s > 0
+            and new_power == 0
+            and self.previous_power != 0
+            and abs(error) - abs(self.previous_power) < max(self.deadband * 3, RELAY_COOLDOWN_HOLD_POWER)
+        )
+        if not wants_idle:
+            # Battery is active (or a large imbalance bypassed the hold): re-arm.
+            self._relay_shutoff_since = None
+            return new_power
+
+        if self._relay_shutoff_since is None:
+            self._relay_shutoff_since = dt_util.utcnow()
+        held_s = (dt_util.utcnow() - self._relay_shutoff_since).total_seconds()
+        if held_s >= self._relay_cooldown_s:
+            # Dwell satisfied; let the battery fall to idle and re-arm for next time.
+            self._relay_shutoff_since = None
+            return new_power
+
+        if self.previous_power > 0:
+            held_power = self.min_charge_power or RELAY_COOLDOWN_HOLD_POWER
+        else:
+            held_power = -(self.min_discharge_power or RELAY_COOLDOWN_HOLD_POWER)
+        _LOGGER.debug(
+            "Relay cooldown: holding %s engaged at %.0fW (%.0fs/%.0fs elapsed)",
+            "charge" if held_power > 0 else "discharge",
+            abs(held_power), held_s, self._relay_cooldown_s,
+        )
+        return held_power
+
     async def _run_control_cycle(self, now=None):
         """Update the charge/discharge power of the batteries."""
         if DEBUG_CONTROL_LOOP_DETAIL:
@@ -4139,37 +4192,9 @@ class ChargeDischargeController:
                           abs(new_power), min_discharge)
             new_power = 0
 
-        # RELAY ANTI-CHATTER (minimum-ON dwell): once the battery has engaged, keep
-        # the relay engaged for at least `_relay_cooldown_s` seconds before letting it
-        # fall back to idle. Stops the relay toggling on/off when the grid signal
-        # hovers at the deadband edge during solar ramp-up/down. Only the active->idle
-        # transition is gated; charge<->discharge flips keep the relay engaged anyway.
-        # A large imbalance bypasses the hold (cost-capped: we only hold while the
-        # over/under-shoot stays small, ~3x deadband), so a sudden real load isn't
-        # left on the grid. The cap measures imbalance BEYOND the power the battery was
-        # already handling: at shut-off the grid swings by ~previous_power (the battery's
-        # own delivery now reads as grid export/import), so comparing raw error would
-        # trip the cap on every shut-off above ~3x deadband and skip the hold entirely.
-        if (
-            self._relay_cooldown_s > 0
-            and new_power == 0
-            and self.previous_power != 0
-            and self._relay_engage_since is not None
-            and abs(error) - abs(self.previous_power) < max(self.deadband * 3, RELAY_COOLDOWN_HOLD_POWER)
-        ):
-            held_s = (dt_util.utcnow() - self._relay_engage_since).total_seconds()
-            if 0 <= held_s < self._relay_cooldown_s:
-                if self.previous_power > 0:
-                    new_power = self.min_charge_power or RELAY_COOLDOWN_HOLD_POWER
-                else:
-                    new_power = -(self.min_discharge_power or RELAY_COOLDOWN_HOLD_POWER)
-                _LOGGER.debug(
-                    "Relay cooldown: holding %s engaged at %.0fW (%.0fs/%.0fs elapsed)",
-                    "charge" if new_power > 0 else "discharge",
-                    abs(new_power), held_s, self._relay_cooldown_s,
-                )
+        new_power = self._apply_relay_dwell(new_power, error)
 
-        
+
         # Determine if charging or discharging (before applying restrictions)
         is_charging = new_power > 0
         
@@ -4365,11 +4390,6 @@ class ChargeDischargeController:
                 await self._set_battery_power(coordinator, 0, 0)
         
         # Update state for next cycle
-        # Stamp the idle->active transition so the relay cooldown can measure dwell.
-        if new_power != 0 and self.previous_power == 0:
-            self._relay_engage_since = dt_util.utcnow()
-        elif new_power == 0:
-            self._relay_engage_since = None
         self.previous_power = new_power
         self.previous_sensor = sensor_actual
         
