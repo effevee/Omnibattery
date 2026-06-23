@@ -2616,9 +2616,6 @@ class ChargeDischargeController:
         if not coordinators_with_data:
             return None
 
-        solar_forecast_kwh = decision_data.get("solar_forecast_kwh") or 0.0
-        avg_consumption_kwh = decision_data.get("avg_consumption_kwh", 0.0)
-
         # Per-battery gap to max_soc (kWh)
         gaps: dict = {}
         for c in coordinators_with_data:
@@ -2630,12 +2627,16 @@ class ChargeDischargeController:
         if total_gap_kwh <= 0:
             return None
 
-        solar_surplus_kwh = max(0.0, solar_forecast_kwh - avg_consumption_kwh)
-        margin_factor = 1.0 + self._predictive_grid_charge_margin_pct / 100.0
-        grid_charge_kwh = min(
-            total_gap_kwh,
-            max(0.0, total_gap_kwh - solar_surplus_kwh) * margin_factor,
-        )
+        # Charge only the calculated grid-energy shortfall — the same
+        # ``energy_deficit_kwh`` the scheduler used to size the cheap slots
+        # (engine: hours_needed = deficit / power). Sizing the stop-SOC off the
+        # raw gap-to-max instead made the target collapse to max_soc whenever
+        # there was no solar surplus (consumption ≥ solar: winter/cloudy/
+        # overnight), so charging filled the battery for the whole slot instead
+        # of stopping at the deficit. The deficit already nets out solar and the
+        # additive safety margin, so no further solar/margin term is applied. #409
+        energy_deficit_kwh = max(0.0, decision_data.get("energy_deficit_kwh", 0.0))
+        grid_charge_kwh = min(total_gap_kwh, energy_deficit_kwh)
 
         targets: dict = {}
         for c in coordinators_with_data:
@@ -2650,8 +2651,8 @@ class ChargeDischargeController:
 
         _LOGGER.info(
             "Predictive charging: per-battery grid-only targets "
-            "(solar_surplus=%.2f kWh, grid_charge=%.2f kWh / total_gap=%.2f kWh): %s",
-            solar_surplus_kwh, grid_charge_kwh, total_gap_kwh,
+            "(deficit=%.2f kWh, grid_charge=%.2f kWh / total_gap=%.2f kWh): %s",
+            energy_deficit_kwh, grid_charge_kwh, total_gap_kwh,
             {c.name: f"{v:.1f}%" for c, v in targets.items()},
         )
         return targets

@@ -488,6 +488,26 @@ class PricingManager:
 
         return now_h >= trigger_h
 
+    @staticmethod
+    def _project_remaining_consumption(
+        now_h: float, consumed_today_kwh: float, avg_daily_kwh: float
+    ) -> tuple[float, float]:
+        """Estimate house consumption from now until midnight, plus the rate used.
+
+        Projects *today's actual* consumption rate onto the hours left, rather
+        than ``average − consumed_today`` (which inverts: a heavy day, having
+        already spent its daily average, would charge less exactly when it needs
+        more). Falls back to the daily-average rate when the today-so-far
+        accumulator is cold (e.g. just after a restart). Returns
+        ``(remaining_kwh, rate_kwh_per_h)``.
+        """
+        hours_to_midnight = max(0.0, 24.0 - now_h)
+        if now_h >= 1.0 and consumed_today_kwh > 0:
+            rate = consumed_today_kwh / now_h
+        else:
+            rate = avg_daily_kwh / 24.0
+        return rate * hours_to_midnight, rate
+
     async def _evaluate_evening_recharge(self) -> None:
         """Late-day re-evaluation: charge batteries cheaply if solar fell short.
 
@@ -521,7 +541,8 @@ class PricingManager:
             _LOGGER.info("Evening recharge: no battery data, skipping")
             return
 
-        # Energy needed to bring all batteries to their max_soc
+        # Room to each battery's max_soc — the physical cap on how much the
+        # evening top-up can add.
         energy_to_full_kwh = sum(
             max(0.0, (c.max_soc - (c.data.get("battery_soc", c.max_soc) or 0)) / 100.0
                 * (c.data.get("battery_total_energy", 0) or 0))
@@ -530,12 +551,12 @@ class PricingManager:
 
         if energy_to_full_kwh <= EVENING_DEFICIT_THRESHOLD_KWH:
             _LOGGER.info(
-                "Evening recharge: batteries essentially full (%.2f kWh to target), skipping",
+                "Evening recharge: batteries essentially full (%.2f kWh to max SOC), skipping",
                 energy_to_full_kwh,
             )
             return
 
-        # --- Remaining solar estimate ---
+        # --- Remaining solar expected today (raw generation, before consumption) ---
         now_h = now.hour + now.minute / 60.0
         remaining_solar_kwh = 0.0
 
@@ -553,37 +574,47 @@ class PricingManager:
                 except (ValueError, TypeError):
                     pass
 
-        # Subtract remaining house consumption from remaining solar (solar not available for battery)
-        if self._controller._solar_t_start is not None:
-            t_end = self._controller._consumption_tracker.estimate_t_end()
-            daylight_h = max(0.0, t_end - self._controller._solar_t_start)
-            hours_to_t_end = max(0.0, t_end - now_h)
-            if daylight_h > 0:
-                avg_consumption_kwh = self._controller._consumption_tracker.get_avg_daily_consumption()
-                remaining_consumption_kwh = (avg_consumption_kwh / daylight_h) * hours_to_t_end
-                remaining_solar_kwh = max(0.0, remaining_solar_kwh - remaining_consumption_kwh)
+        # --- Remaining house consumption until midnight (handoff to the 00:05
+        # eval, which re-plans the next day). Project *today's actual* rate onto
+        # the hours left rather than "average − consumed_today": the latter
+        # inverts — a heavy day, having already spent its daily average, would
+        # charge less exactly when it needs more. Rate projection tracks the day:
+        # heavy day → high rate → charge more; light day → low rate → less. ---
+        consumed_today_kwh = getattr(self._controller, "_daily_home_energy_kwh", 0.0) or 0.0
+        avg_daily_kwh = self._controller._consumption_tracker.get_avg_daily_consumption()
+        remaining_consumption_kwh, consumption_rate_kwh_h = self._project_remaining_consumption(
+            now_h, consumed_today_kwh, avg_daily_kwh
+        )
+        hours_to_midnight = max(0.0, 24.0 - now_h)
 
-        # --- Net deficit ---
-        # Apply the configurable grid-charge margin so optimistic solar forecasts
-        # are hedged by booking extra cheap grid slots. Capped at energy_to_full.
-        margin_factor = 1.0 + self._controller._predictive_grid_charge_margin_pct / 100.0
+        # Battery energy available above the discharge floor right now.
+        usable_now_kwh = sum(
+            max(0.0, ((c.data.get("battery_soc", 0) or 0) - c.min_soc) / 100.0
+                * (c.data.get("battery_total_energy", 0) or 0))
+            for c in coordinators_with_data
+        )
+
+        # --- Net deficit: grid energy still needed to cover tonight, after what
+        # the battery already holds and the solar still to come. Capped at the
+        # room to max_soc. ---
         evening_deficit_kwh = min(
             energy_to_full_kwh,
-            max(0.0, energy_to_full_kwh - remaining_solar_kwh) * margin_factor,
+            max(0.0, remaining_consumption_kwh - usable_now_kwh - remaining_solar_kwh),
         )
 
         if evening_deficit_kwh < EVENING_DEFICIT_THRESHOLD_KWH:
             _LOGGER.info(
-                "Evening recharge: remaining solar sufficient "
-                "(to_full=%.2f kWh, solar_remaining=%.2f kWh) — no action",
-                energy_to_full_kwh, remaining_solar_kwh,
+                "Evening recharge: battery + solar cover tonight "
+                "(need=%.2f, usable=%.2f, solar=%.2f kWh) — no action",
+                remaining_consumption_kwh, usable_now_kwh, remaining_solar_kwh,
             )
             return
 
         _LOGGER.info(
-            "Evening recharge: deficit %.2f kWh (to_full=%.2f, solar_remaining=%.2f) "
-            "— searching for cheap slots",
-            evening_deficit_kwh, energy_to_full_kwh, remaining_solar_kwh,
+            "Evening recharge: deficit %.2f kWh (need=%.2f, usable=%.2f, solar=%.2f, "
+            "rate=%.2f kWh/h × %.1fh) — searching for cheap slots",
+            evening_deficit_kwh, remaining_consumption_kwh, usable_now_kwh,
+            remaining_solar_kwh, consumption_rate_kwh_h, hours_to_midnight,
         )
 
         # --- Find cheap slots (extended horizon: now + 12h to capture cheap overnight slots) ---
@@ -634,6 +665,16 @@ class PricingManager:
                 charging_needed=True,
             )
             self._controller._dynamic_pricing_evaluated_date = max(s.start.date() for s in selected)
+
+        # Publish the evening target so the predictive enforcer charges to *this*
+        # plan, not the stale 00:05 morning deficit (which assumed the solar that
+        # just fell short). The morning evaluation overwrites this dict at 00:05,
+        # so the override only lasts through tonight. #409
+        decision = self._controller._last_decision_data
+        if not isinstance(decision, dict):
+            decision = {}
+        decision["energy_deficit_kwh"] = evening_deficit_kwh
+        self._controller._last_decision_data = decision
 
         _LOGGER.info(
             "Evening recharge: scheduled %d slot(s) (%.1fh) for %.2f kWh deficit",

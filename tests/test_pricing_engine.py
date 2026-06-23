@@ -119,6 +119,37 @@ def test_evening_reeval_false_when_already_done_today():
 
 
 # ----------------------------------------------------------------------
+# _project_remaining_consumption (evening recharge deficit, #409)
+# ----------------------------------------------------------------------
+
+def test_remaining_consumption_projects_todays_rate():
+    # 18:00, 12 kWh used so far → 0.667 kWh/h × 6h left = 4.0 kWh.
+    remaining, rate = PricingManager._project_remaining_consumption(18.0, 12.0, 20.0)
+    assert round(rate, 3) == 0.667
+    assert round(remaining, 2) == 4.0
+
+
+def test_remaining_consumption_heavy_day_charges_more_than_light():
+    # Same hour: a heavy day so far projects a larger remaining need than a
+    # light day — the property "avg − consumed" got backwards.
+    heavy, _ = PricingManager._project_remaining_consumption(18.0, 18.0, 17.0)
+    light, _ = PricingManager._project_remaining_consumption(18.0, 6.0, 17.0)
+    assert heavy > light
+
+
+def test_remaining_consumption_cold_accumulator_uses_avg_rate():
+    # consumed_today = 0 (e.g. just after restart) → fall back to avg/24 rate.
+    remaining, rate = PricingManager._project_remaining_consumption(18.0, 0.0, 24.0)
+    assert rate == 1.0                  # 24 kWh / 24 h
+    assert round(remaining, 2) == 6.0   # 1.0 × 6 h
+
+
+def test_remaining_consumption_zero_at_midnight():
+    remaining, _ = PricingManager._project_remaining_consumption(24.0, 20.0, 20.0)
+    assert remaining == 0.0
+
+
+# ----------------------------------------------------------------------
 # apply_price_discharge_block — early-return branches (no hass touched)
 # ----------------------------------------------------------------------
 

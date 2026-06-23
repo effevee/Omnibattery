@@ -443,7 +443,8 @@
       "midnight_crossing": "L'hora d'inici ha de ser anterior a l'hora de fi. Per a períodes nocturns, crea dues franges separades (ex: 22:00-23:59 i 00:00-06:00).",
       "slot_does_nothing": "La franja ha de permetre almenys una direcció (càrrega o descàrrega).",
       "manual_requires_power": "El mode manual requereix activar el control de potència.",
-      "no_price_data": "El sensor seleccionat no té els atributs de preu esperats. Nordpool: necessita `raw_today`. PVPC: necessita `price_00h` … `price_23h`. CKW: necessita l'atribut `prices` amb una llista de franges. EPEX: necessita l'atribut `data` amb una llista de franges. ENTSO-e: necessita l'atribut `prices_today` amb una llista de franges."
+      "no_price_data": "El sensor seleccionat no té els atributs de preu esperats. Nordpool: necessita `raw_today`. PVPC: necessita `price_00h` … `price_23h`. CKW: necessita l'atribut `prices` amb una llista de franges. EPEX: necessita l'atribut `data` amb una llista de franges. ENTSO-e: necessita l'atribut `prices_today` amb una llista de franges.",
+      "tibber_unavailable": "La integració Tibber no està instal·lada, o el seu servei `tibber.get_prices` no està disponible. Instal·la i configura Tibber primer."
     },
     "abort": {
       "already_configured": "Aquesta integració ja està configurada.",
@@ -876,7 +877,8 @@
       "midnight_crossing": "L'hora d'inici ha de ser anterior a l'hora de fi. Per a períodes nocturns, crea dues franges separades (ex: 22:00-23:59 i 00:00-06:00).",
       "slot_does_nothing": "La franja ha de permetre almenys una direcció (càrrega o descàrrega).",
       "manual_requires_power": "El mode manual requereix activar el control de potència.",
-      "no_price_data": "El sensor seleccionat no té els atributs de preu esperats. Nordpool: necessita `raw_today`. PVPC: necessita `price_00h` … `price_23h`. CKW: necessita l'atribut `prices` amb una llista de franges. EPEX: necessita l'atribut `data` amb una llista de franges. ENTSO-e: necessita l'atribut `prices_today` amb una llista de franges."
+      "no_price_data": "El sensor seleccionat no té els atributs de preu esperats. Nordpool: necessita `raw_today`. PVPC: necessita `price_00h` … `price_23h`. CKW: necessita l'atribut `prices` amb una llista de franges. EPEX: necessita l'atribut `data` amb una llista de franges. ENTSO-e: necessita l'atribut `prices_today` amb una llista de franges.",
+      "tibber_unavailable": "La integració Tibber no està instal·lada, o el seu servei `tibber.get_prices` no està disponible. Instal·la i configura Tibber primer."
     }
   },
   "selector": {
@@ -969,6 +971,9 @@
       },
       "hourly_balance": {
         "name": "Balanç Net"
+      },
+      "lamp_switch": {
+        "name": "LEDs d'estat"
       }
     },
     "time": {

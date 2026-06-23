@@ -443,7 +443,8 @@
       "midnight_crossing": "De starttijd moet vóór de eindtijd liggen. Maak voor nachtperiodes twee aparte tijdslots aan (bijv. 22:00-23:59 en 00:00-06:00).",
       "slot_does_nothing": "Het slot moet ten minste één richting toestaan (laden of ontladen).",
       "manual_requires_power": "Handmatige modus vereist dat vermogenscontrole is ingeschakeld.",
-      "no_price_data": "De geselecteerde sensor heeft niet de verwachte prijsattributen. Nordpool: heeft `raw_today` nodig. PVPC: heeft `price_00h` … `price_23h` nodig. CKW: heeft het attribuut `prices` met een lijst van slots nodig. EPEX: heeft het attribuut `data` met een lijst van slots nodig. ENTSO-e: heeft het attribuut `prices_today` met een lijst van slots nodig."
+      "no_price_data": "De geselecteerde sensor heeft niet de verwachte prijsattributen. Nordpool: heeft `raw_today` nodig. PVPC: heeft `price_00h` … `price_23h` nodig. CKW: heeft het attribuut `prices` met een lijst van slots nodig. EPEX: heeft het attribuut `data` met een lijst van slots nodig. ENTSO-e: heeft het attribuut `prices_today` met een lijst van slots nodig.",
+      "tibber_unavailable": "De Tibber-integratie is niet geïnstalleerd, of de service `tibber.get_prices` is niet beschikbaar. Installeer en configureer eerst Tibber."
     },
     "abort": {
       "already_configured": "Deze integratie is al geconfigureerd.",
@@ -876,7 +877,8 @@
       "midnight_crossing": "De starttijd moet vóór de eindtijd liggen. Maak voor nachtperiodes twee aparte tijdslots aan (bijv. 22:00-23:59 en 00:00-06:00).",
       "slot_does_nothing": "Het slot moet ten minste één richting toestaan (laden of ontladen).",
       "manual_requires_power": "Handmatige modus vereist dat vermogenscontrole is ingeschakeld.",
-      "no_price_data": "De geselecteerde sensor heeft niet de verwachte prijsattributen. Nordpool: heeft `raw_today` nodig. PVPC: heeft `price_00h` … `price_23h` nodig. CKW: heeft het attribuut `prices` met een lijst van slots nodig. EPEX: heeft het attribuut `data` met een lijst van slots nodig. ENTSO-e: heeft het attribuut `prices_today` met een lijst van slots nodig."
+      "no_price_data": "De geselecteerde sensor heeft niet de verwachte prijsattributen. Nordpool: heeft `raw_today` nodig. PVPC: heeft `price_00h` … `price_23h` nodig. CKW: heeft het attribuut `prices` met een lijst van slots nodig. EPEX: heeft het attribuut `data` met een lijst van slots nodig. ENTSO-e: heeft het attribuut `prices_today` met een lijst van slots nodig.",
+      "tibber_unavailable": "De Tibber-integratie is niet geïnstalleerd, of de service `tibber.get_prices` is niet beschikbaar. Installeer en configureer eerst Tibber."
     }
   },
   "selector": {
@@ -969,6 +971,9 @@
       },
       "hourly_balance": {
         "name": "Nettosaldo"
+      },
+      "lamp_switch": {
+        "name": "Status-leds"
       }
     },
     "time": {

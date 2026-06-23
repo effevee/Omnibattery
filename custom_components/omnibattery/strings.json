@@ -971,6 +971,9 @@
       },
       "hourly_balance": {
         "name": "Net Balance"
+      },
+      "lamp_switch": {
+        "name": "Status LEDs"
       }
     },
     "time": {

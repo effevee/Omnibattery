@@ -924,6 +924,9 @@
   },
   "entity": {
     "switch": {
+      "lamp_switch": {
+        "name": "Status LEDs"
+      },
       "manual_mode": {
         "name": "Manual Mode"
       },

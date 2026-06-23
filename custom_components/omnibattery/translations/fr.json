@@ -443,7 +443,8 @@
       "midnight_crossing": "L'heure de début doit être antérieure à l'heure de fin. Pour les périodes nocturnes, créez deux créneaux séparés (ex: 22:00-23:59 et 00:00-06:00).",
       "slot_does_nothing": "Le créneau doit autoriser au moins une direction (charge ou décharge).",
       "manual_requires_power": "Le mode manuel nécessite l'activation du contrôle de puissance.",
-      "no_price_data": "Le capteur sélectionné ne possède pas les attributs de prix attendus. Nordpool : nécessite `raw_today`. PVPC : nécessite `price_00h` … `price_23h`. CKW : nécessite l'attribut `prices` avec une liste de créneaux. EPEX : nécessite l'attribut `data` avec une liste de créneaux. ENTSO-e : nécessite l'attribut `prices_today` avec une liste de créneaux."
+      "no_price_data": "Le capteur sélectionné ne possède pas les attributs de prix attendus. Nordpool : nécessite `raw_today`. PVPC : nécessite `price_00h` … `price_23h`. CKW : nécessite l'attribut `prices` avec une liste de créneaux. EPEX : nécessite l'attribut `data` avec une liste de créneaux. ENTSO-e : nécessite l'attribut `prices_today` avec une liste de créneaux.",
+      "tibber_unavailable": "L'intégration Tibber n'est pas installée, ou son service `tibber.get_prices` est indisponible. Installez et configurez d'abord Tibber."
     },
     "abort": {
       "already_configured": "Cette intégration est déjà configurée.",
@@ -876,7 +877,8 @@
       "midnight_crossing": "L'heure de début doit être antérieure à l'heure de fin. Pour les périodes nocturnes, créez deux créneaux séparés (ex: 22:00-23:59 et 00:00-06:00).",
       "slot_does_nothing": "Le créneau doit autoriser au moins une direction (charge ou décharge).",
       "manual_requires_power": "Le mode manuel nécessite l'activation du contrôle de puissance.",
-      "no_price_data": "Le capteur sélectionné ne possède pas les attributs de prix attendus. Nordpool : nécessite `raw_today`. PVPC : nécessite `price_00h` … `price_23h`. CKW : nécessite l'attribut `prices` avec une liste de créneaux. EPEX : nécessite l'attribut `data` avec une liste de créneaux. ENTSO-e : nécessite l'attribut `prices_today` avec une liste de créneaux."
+      "no_price_data": "Le capteur sélectionné ne possède pas les attributs de prix attendus. Nordpool : nécessite `raw_today`. PVPC : nécessite `price_00h` … `price_23h`. CKW : nécessite l'attribut `prices` avec une liste de créneaux. EPEX : nécessite l'attribut `data` avec une liste de créneaux. ENTSO-e : nécessite l'attribut `prices_today` avec une liste de créneaux.",
+      "tibber_unavailable": "L'intégration Tibber n'est pas installée, ou son service `tibber.get_prices` est indisponible. Installez et configurez d'abord Tibber."
     }
   },
   "selector": {
@@ -969,6 +971,9 @@
       },
       "hourly_balance": {
         "name": "Bilan Net"
+      },
+      "lamp_switch": {
+        "name": "LED d'état"
       }
     },
     "time": {

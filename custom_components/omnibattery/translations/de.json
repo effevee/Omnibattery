@@ -443,7 +443,8 @@
       "midnight_crossing": "Die Startzeit muss vor der Endzeit liegen. Für Nachtperioden erstellen Sie zwei separate Zeitfenster (z.B. 22:00-23:59 und 00:00-06:00).",
       "slot_does_nothing": "Das Zeitfenster muss mindestens eine Richtung erlauben (Laden oder Entladen).",
       "manual_requires_power": "Manueller Modus benötigt aktivierte Leistungssteuerung.",
-      "no_price_data": "Keine Preisdaten vom Sensor verfügbar. Nordpool: benötigt `raw_today`. PVPC: benötigt `price_00h` … `price_23h`. CKW: benötigt das Attribut `prices` mit einer Slot-Liste. EPEX: benötigt das Attribut `data` mit einer Slot-Liste. ENTSO-e: benötigt das Attribut `prices_today` mit einer Slot-Liste."
+      "no_price_data": "Keine Preisdaten vom Sensor verfügbar. Nordpool: benötigt `raw_today`. PVPC: benötigt `price_00h` … `price_23h`. CKW: benötigt das Attribut `prices` mit einer Slot-Liste. EPEX: benötigt das Attribut `data` mit einer Slot-Liste. ENTSO-e: benötigt das Attribut `prices_today` mit einer Slot-Liste.",
+      "tibber_unavailable": "Die Tibber-Integration ist nicht installiert oder ihr Dienst `tibber.get_prices` ist nicht verfügbar. Installiere und konfiguriere zuerst Tibber."
     },
     "abort": {
       "already_configured": "Diese Integration ist bereits konfiguriert.",
@@ -876,7 +877,8 @@
       "midnight_crossing": "Die Startzeit muss vor der Endzeit liegen. Für Nachtperioden erstellen Sie zwei separate Zeitfenster (z.B. 22:00-23:59 und 00:00-06:00).",
       "slot_does_nothing": "Das Zeitfenster muss mindestens eine Richtung erlauben (Laden oder Entladen).",
       "manual_requires_power": "Manueller Modus benötigt aktivierte Leistungssteuerung.",
-      "no_price_data": "Keine Preisdaten vom Sensor verfügbar. Nordpool: benötigt `raw_today`. PVPC: benötigt `price_00h` … `price_23h`. CKW: benötigt das Attribut `prices` mit einer Slot-Liste. EPEX: benötigt das Attribut `data` mit einer Slot-Liste. ENTSO-e: benötigt das Attribut `prices_today` mit einer Slot-Liste."
+      "no_price_data": "Keine Preisdaten vom Sensor verfügbar. Nordpool: benötigt `raw_today`. PVPC: benötigt `price_00h` … `price_23h`. CKW: benötigt das Attribut `prices` mit einer Slot-Liste. EPEX: benötigt das Attribut `data` mit einer Slot-Liste. ENTSO-e: benötigt das Attribut `prices_today` mit einer Slot-Liste.",
+      "tibber_unavailable": "Die Tibber-Integration ist nicht installiert oder ihr Dienst `tibber.get_prices` ist nicht verfügbar. Installiere und konfiguriere zuerst Tibber."
     }
   },
   "selector": {
@@ -969,6 +971,9 @@
       },
       "hourly_balance": {
         "name": "Netto-Balance"
+      },
+      "lamp_switch": {
+        "name": "Status-LEDs"
       }
     },
     "time": {
