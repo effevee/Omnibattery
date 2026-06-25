@@ -37,12 +37,14 @@ def _state(value, unit="W"):
     return SimpleNamespace(state=str(value), attributes={"unit_of_measurement": unit})
 
 
-def _controller(excluded_devices, states=None, previous_power=0.0, solar_production_sensor=None):
+def _controller(excluded_devices, states=None, previous_power=0.0,
+                solar_production_sensor=None, home_consumption_sensor=None):
     controller_stub = SimpleNamespace(
         previous_power=previous_power,
         _excluded_included_adjustment=None,
         _solar_surplus_discharge_blocked=False,
         solar_production_sensor=solar_production_sensor,
+        home_consumption_sensor=home_consumption_sensor,
         _ev_charging_states={},
         _ev_pause_until={},
     )
@@ -167,60 +169,88 @@ def test_adjustment_solar_surplus_no_solar_sensor_kw_sensor_converted():
     assert loads._controller._solar_surplus_discharge_blocked is True
 
 
-def test_adjustment_solar_surplus_with_solar_sensor_device_exceeds_solar():
-    # device=4500 W, solar=1000 W → adjustment = 3500 W (device-over-solar portion)
-    # Battery discharges for home deficit; never for device's grid share.
-    loads = _controller(
-        [_device(included_in_consumption=True, allow_solar_surplus=True)],
-        {"sensor.dev": _state(4500), "sensor.solar": _state(1000)},
+# PV-surplus priority (#421/#415): surplus = max(0, solar − home_base_load),
+# home_base_load = home_consumption − excluded devices. For a single device,
+# base_load = home − device; the device is offset by the surplus first, the
+# battery only excludes the grid portion it must import.
+
+def _surplus_loads(device_w, solar_w, home_w, **device_overrides):
+    return _controller(
+        [_device(included_in_consumption=True, allow_solar_surplus=True, **device_overrides)],
+        {"sensor.dev": _state(device_w), "sensor.solar": _state(solar_w),
+         "sensor.home": _state(home_w)},
         solar_production_sensor="sensor.solar",
+        home_consumption_sensor="sensor.home",
     )
-    assert loads.calculate_adjustment() == pytest.approx(3500.0)
-    assert loads._controller._excluded_included_adjustment == pytest.approx(3500.0)
+
+
+def test_adjustment_pv_priority_partial_surplus_offsets_device():
+    # Discussion #421 numbers: EV=3419 W, solar=2000 W, home=4438 W (base 1019).
+    # surplus = 2000 − 1019 = 981 → exclude 3419 − 981 = 2438 W; battery idle.
+    loads = _surplus_loads(3419, 2000, 4438)
+    assert loads.calculate_adjustment() == pytest.approx(2438.0)
+    assert loads._controller._excluded_included_adjustment == pytest.approx(2438.0)
     assert loads._controller._solar_surplus_discharge_blocked is False
 
 
-def test_adjustment_solar_surplus_with_solar_sensor_solar_exceeds_device():
-    # device=500 W, solar=3000 W → adjustment = 0 (solar covers device entirely)
-    # PD sees real grid (likely export) → battery charges from surplus.
-    loads = _controller(
-        [_device(included_in_consumption=True, allow_solar_surplus=True)],
-        {"sensor.dev": _state(500), "sensor.solar": _state(3000)},
-        solar_production_sensor="sensor.solar",
-    )
+def test_adjustment_pv_priority_surplus_covers_device_battery_charges_rest():
+    # device=1000, solar=3000, home=2000 (base 1000) → surplus=2000 ≥ device.
+    # Device fully offset → adjustment 0; PD sees export → battery charges leftover.
+    loads = _surplus_loads(1000, 3000, 2000)
     assert loads.calculate_adjustment() == pytest.approx(0.0)
     assert loads._controller._solar_surplus_discharge_blocked is False
 
 
-def test_adjustment_solar_surplus_with_solar_sensor_equal():
-    # device == solar → adjustment = 0
-    loads = _controller(
-        [_device(included_in_consumption=True, allow_solar_surplus=True)],
-        {"sensor.dev": _state(1000), "sensor.solar": _state(1000)},
-        solar_production_sensor="sensor.solar",
-    )
-    assert loads.calculate_adjustment() == pytest.approx(0.0)
+def test_adjustment_pv_priority_no_surplus_full_exclusion():
+    # solar ≤ base load → no surplus for the device → full exclusion.
+    # device=1500, solar=800, home=2300 (base 800) → surplus=0 → exclude 1500.
+    loads = _surplus_loads(1500, 800, 2300)
+    assert loads.calculate_adjustment() == pytest.approx(1500.0)
 
 
-def test_adjustment_solar_surplus_with_solar_sensor_unavailable_fallback():
-    # Solar sensor unavailable → treat solar as 0 → full exclusion (device_power subtracted)
+def test_adjustment_pv_priority_home_consumption_unavailable_full_exclusion():
+    # Home Consumption sensor down → conservative full exclusion (battery never
+    # powers the device), regardless of solar.
     loads = _controller(
         [_device(included_in_consumption=True, allow_solar_surplus=True)],
-        {"sensor.dev": _state(1000), "sensor.solar": _state("unavailable")},
+        {"sensor.dev": _state(1000), "sensor.solar": _state(3000),
+         "sensor.home": _state("unavailable")},
         solar_production_sensor="sensor.solar",
+        home_consumption_sensor="sensor.home",
     )
     assert loads.calculate_adjustment() == pytest.approx(1000.0)
     assert loads._controller._solar_surplus_discharge_blocked is False
 
 
-def test_adjustment_solar_surplus_with_solar_sensor_kw_units():
-    # Both sensors in kW → correct conversion: device=4.5 kW, solar=1.0 kW → 3500 W
+def test_adjustment_pv_priority_kw_units():
+    # All sensors in kW: device=4.5, solar=2.0, home=5.0 (base 0.5 kW).
+    # surplus = 2.0 − 0.5 = 1.5 kW → exclude 4.5 − 1.5 = 3.0 kW = 3000 W.
     loads = _controller(
         [_device(included_in_consumption=True, allow_solar_surplus=True)],
-        {"sensor.dev": _state(4.5, unit="kW"), "sensor.solar": _state(1.0, unit="kW")},
+        {"sensor.dev": _state(4.5, unit="kW"), "sensor.solar": _state(2.0, unit="kW"),
+         "sensor.home": _state(5.0, unit="kW")},
         solar_production_sensor="sensor.solar",
+        home_consumption_sensor="sensor.home",
     )
-    assert loads.calculate_adjustment() == pytest.approx(3500.0)
+    assert loads.calculate_adjustment() == pytest.approx(3000.0)
+
+
+def test_adjustment_pv_priority_shared_budget_across_two_devices():
+    # Two surplus devices share one budget: base = home − (devA+devB).
+    # home=4000, devA=1500, devB=1000 → base=1500; solar=2500 → surplus=1000.
+    # Loop order: A takes min(1500,1000)=1000 → exclude 500; B sees 0 left → exclude 1000.
+    devices = [
+        _device(power_sensor="sensor.a", allow_solar_surplus=True),
+        _device(power_sensor="sensor.b", allow_solar_surplus=True),
+    ]
+    loads = _controller(
+        devices,
+        {"sensor.a": _state(1500), "sensor.b": _state(1000),
+         "sensor.solar": _state(2500), "sensor.home": _state(4000)},
+        solar_production_sensor="sensor.solar",
+        home_consumption_sensor="sensor.home",
+    )
+    assert loads.calculate_adjustment() == pytest.approx(1500.0)  # 500 + 1000
 
 
 def test_adjustment_included_no_surplus_kw_sensor_converted_correctly():
@@ -273,13 +303,10 @@ def test_exclusion_pct_zero_means_no_exclusion():
 
 
 def test_exclusion_pct_scales_solar_surplus_grid_portion():
-    # device=4500, solar=1000 → over-solar portion 3500 W, scaled by 50% → 1750 W
-    loads = _controller(
-        [_device(included_in_consumption=True, allow_solar_surplus=True, exclusion_pct=50)],
-        {"sensor.dev": _state(4500), "sensor.solar": _state(1000)},
-        solar_production_sensor="sensor.solar",
-    )
-    assert loads.calculate_adjustment() == pytest.approx(1750.0)
+    # device=4500, solar=2000, home=5000 (base 500) → surplus 1500, grid portion
+    # 4500 − 1500 = 3000 W, scaled by 50% → 1500 W.
+    loads = _surplus_loads(4500, 2000, 5000, exclusion_pct=50)
+    assert loads.calculate_adjustment() == pytest.approx(1500.0)
 
 
 def test_exclusion_pct_default_is_full_exclusion():

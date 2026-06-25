@@ -112,12 +112,18 @@ class ExternalLoads:
         Logic:
         - included_in_consumption=True, allow_solar_surplus=False:
           → SUBTRACT device power (battery must not power this device)
-        - included_in_consumption=True, allow_solar_surplus=True, solar sensor configured:
-          → SUBTRACT max(0, device_power - solar_power_w): only the portion of device
-             demand that exceeds solar production. Battery covers home deficit normally
-             and charges from true solar surplus; it never discharges for the device.
-             Stable for all ratios of device_power to solar_power (no sign-dependent
-             discontinuity, no oscillation).
+        - included_in_consumption=True, allow_solar_surplus=True, solar sensor +
+          Home Consumption available:
+          → SUBTRACT max(0, device_power - surplus), where surplus = max(0, solar -
+             home_base_load) and home_base_load = home_consumption - excluded devices.
+             PV surplus offsets the device BEFORE the battery charges it (#421): the
+             battery covers the home deficit and charges only the surplus the device
+             cannot absorb, never discharging for the device and never exporting.
+             Crediting only the real surplus (not raw PV) is what fixes #415.
+             The surplus is a shared budget across solar-surplus devices.
+        - included_in_consumption=True, allow_solar_surplus=True, solar sensor but
+          Home Consumption unavailable:
+          → full exclusion (battery never powers the device); conservative fallback.
         - included_in_consumption=True, allow_solar_surplus=True, no solar sensor:
           → NO adjustment + sets _solar_surplus_discharge_blocked so the PD section
              clamps new_power >= 0 while the device is active (>10 W). Fallback when
@@ -136,6 +142,20 @@ class ExternalLoads:
 
         solar_surplus_blocks_discharge = False
         solar_sensor_id = getattr(self._controller, "solar_production_sensor", None)
+
+        # PV-surplus priority (#421/#415): the solar that may offset an excluded
+        # device is only what's left AFTER the genuine home load, not the raw PV.
+        # base_load = home_consumption − Σ(in-home excluded devices); the surplus
+        # is a shared budget so multiple surplus devices don't each claim it all.
+        # None = Home Consumption unavailable → conservative full exclusion below.
+        surplus_remaining: float | None = None
+        if solar_sensor_id:
+            home_w = self._read_sensor_w_opt(
+                getattr(self._controller, "home_consumption_sensor", None)
+            )
+            if home_w is not None:
+                base_load = max(0.0, home_w - self._included_device_power_w())
+                surplus_remaining = max(0.0, self._read_sensor_w(solar_sensor_id) - base_load)
 
         total_adjustment = 0.0
         included_adjustment = 0.0  # Track included_in_consumption portion separately
@@ -168,17 +188,24 @@ class ExternalLoads:
                 if included_in_consumption:
                     if allow_solar_surplus:
                         if solar_sensor_id:
-                            # Exclude only the portion of device demand that exceeds solar.
-                            # sensor_actual = grid − adjustment = home ± battery_net, so the
-                            # PD drives battery to cover home deficit and charge solar surplus
-                            # without ever discharging for the device.
-                            solar_power_w = self._read_sensor_w(solar_sensor_id)
-                            grid_portion = max(0.0, device_power - solar_power_w) * factor
+                            # PV-surplus priority: hand the real surplus to the device
+                            # first, then exclude only the grid portion it must import.
+                            # The battery covers the home deficit and charges any surplus
+                            # the device can't absorb, never discharging for the device.
+                            if surplus_remaining is None:
+                                # Home Consumption unavailable → exclude fully (battery
+                                # never powers the device; conservative fallback).
+                                grid_portion = device_power * factor
+                            else:
+                                offset = min(device_power, surplus_remaining)
+                                surplus_remaining -= offset
+                                grid_portion = (device_power - offset) * factor
                             total_adjustment += grid_portion
                             included_adjustment += grid_portion
                             _LOGGER.debug(
-                                "Excluded device %s consuming %.1fW, solar=%.1fW → excluding %.1fW (device-over-solar portion)",
-                                power_sensor, device_power, solar_power_w, grid_portion,
+                                "Excluded device %s consuming %.1fW → excluding %.1fW "
+                                "(PV-surplus priority, surplus_left=%s)",
+                                power_sensor, device_power, grid_portion, surplus_remaining,
                             )
                         else:
                             # No solar sensor: block discharge instead (battery idle while device active)
@@ -217,6 +244,40 @@ class ExternalLoads:
             return raw if unit == "W" else raw * 1000.0
         except (ValueError, TypeError):
             return 0.0
+
+    def _read_sensor_w_opt(self, entity_id: str | None) -> float | None:
+        """Like _read_sensor_w but returns None (not 0.0) when the sensor is
+        missing/unavailable, so a genuine 0 W reading is distinguishable from a
+        missing sensor (needed to decide the PV-surplus fallback)."""
+        if not entity_id:
+            return None
+        state = self._hass.states.get(entity_id)
+        if state is None or state.state in ("unknown", "unavailable"):
+            return None
+        try:
+            raw = float(state.state)
+        except (ValueError, TypeError):
+            return None
+        unit = state.attributes.get("unit_of_measurement", "W")
+        return raw if unit == "W" else raw * 1000.0
+
+    def _included_device_power_w(self) -> float:
+        """Σ power (W) of the enabled, telemetry, in-home-sensor excluded devices.
+
+        These are the loads the battery does NOT serve; subtracting them from
+        Home Consumption yields the home base load the battery targets, and thus
+        the true PV surplus available to offset excluded devices.
+        """
+        total = 0.0
+        for device in self._config_entry.data.get("excluded_devices", []):
+            if not device.get("enabled", True):
+                continue
+            if device.get("ev_charger_no_telemetry", False):
+                continue
+            if not device.get("included_in_consumption", True):
+                continue
+            total += self._read_sensor_w(device.get("power_sensor"))
+        return total
 
     def check_ev_charger_state(self) -> tuple[bool, bool]:
         """Check state of EV chargers configured with no-telemetry mode.

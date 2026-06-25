@@ -494,6 +494,12 @@ class ChargeDischargeController:
         self.solar_production_sensor = config_entry.data.get(CONF_SOLAR_PRODUCTION_SENSOR, None)
         self.max_contracted_power = config_entry.data.get(CONF_MAX_CONTRACTED_POWER, 7000)
 
+        # Derived Home Consumption sensor (our own aggregate). Resolved lazily by
+        # stable unique_id once the entity exists, and used by ExternalLoads for
+        # PV-surplus accounting (#421/#415). Survives a user "recreate entity IDs"
+        # rename because the unique_id never changes.
+        self.home_consumption_sensor: Optional[str] = None
+
         # Home consumption accumulator (integration of derived home power over the
         # solar+battery window). Owned by ConsumptionTracker (see consumption_tracker.py);
         # these public attrs remain on the controller so binary_sensor.py and
@@ -3501,6 +3507,20 @@ class ChargeDischargeController:
                 return False
         return True
 
+    def _resolve_home_consumption_sensor(self) -> Optional[str]:
+        """Resolve & cache the derived Home Consumption entity_id by stable unique_id.
+
+        Resolved lazily because the aggregate entity is created after the
+        controller is constructed; retries each cycle until it appears, then
+        caches. Used by ExternalLoads for PV-surplus accounting (#421/#415).
+        """
+        if not self.home_consumption_sensor:
+            from homeassistant.helpers import entity_registry as er
+            self.home_consumption_sensor = er.async_get(self.hass).async_get_entity_id(
+                "sensor", DOMAIN, "marstek_venus_system_home_consumption"
+            )
+        return self.home_consumption_sensor
+
     def _filter_grid_sample(self, sensor_raw, elapsed_s):
         """Time-constant EMA on the grid sample (replaces the fixed 2-sample average).
 
@@ -4091,6 +4111,7 @@ class ChargeDischargeController:
         # Adjust for excluded/additional devices before dynamic setpoint decisions.
         # Positive adjustment = reduce battery discharge (excluded devices)
         # Negative adjustment = increase battery discharge (additional devices not in home sensor)
+        self._resolve_home_consumption_sensor()
         excluded_adjustment = self._external_loads.calculate_adjustment()
         if excluded_adjustment != 0:
             if excluded_adjustment > 0:
