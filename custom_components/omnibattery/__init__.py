@@ -307,17 +307,6 @@ class ChargeDischargeController:
         self.consumption_sensor = consumption_sensor
         self.config_entry = config_entry
 
-        # Slowest actuator in the fleet sets the loop pace: the shared control loop
-        # cannot correct faster than the slowest battery can absorb a setpoint without
-        # the dead-time oscillation of firing several corrections before the first
-        # lands. Drives the grid-filter time constant (_apply_no_pd_overrides), the
-        # effective min cycle interval below, the hot-path readback gate and the
-        # measured-power feedforward gate (_feedforward_base).
-        self._actuator_latency_s = max(
-            (c.capabilities.actuator_latency_s for c in coordinators),
-            default=0.5,
-        )
-
         # State tracking
         self.previous_sensor = None
         self.previous_power = 0
@@ -342,11 +331,11 @@ class ChargeDischargeController:
         self._relay_shutoff_since = None
         # Event-driven cycle rate limit: drop grid-sensor triggers that arrive
         # closer together than this, so fast meters can't flood the Modbus bridge.
+        # NOT raised to the slowest actuator's latency: a slow battery (Zendure HTTP)
+        # must not throttle the shared loop for the whole fleet — the fast batteries
+        # (Marstek) need to track the grid meter's full cadence. Slow-actuator pacing
+        # belongs per-battery in the power distribution, not in the loop cadence.
         self._min_cycle_interval_s = config_entry.data.get(CONF_PD_MIN_CYCLE_INTERVAL, DEFAULT_PD_MIN_CYCLE_INTERVAL)
-        # Never cycle faster than the slowest actuator can respond, even if the user
-        # lowered the interval for a fast meter — a slow actuator driven at the sensor
-        # cadence hunts (see _actuator_latency_s).
-        self._effective_min_cycle_interval_s = max(self._min_cycle_interval_s, self._actuator_latency_s)
         self._last_cycle_monotonic = 0.0
         self.target_grid_power = config_entry.data.get(CONF_TARGET_GRID_POWER, DEFAULT_TARGET_GRID_POWER)
         # No-PD direct-tracking mode (opt-in): see _apply_no_pd_overrides. Overrides
@@ -994,13 +983,10 @@ class ChargeDischargeController:
         Idempotent: called after every parameter (re)load in __init__ and
         update_pd_parameters, so toggling the mode flips behaviour cleanly.
         """
-        # A slow actuator gets a longer smoothing constant: a filter τ ≈ the actuator
-        # dead time slows the loop's response to match the plant, so even a 2 s safety
-        # tick moves the command only slightly each cycle and the loop stops hunting.
-        self._grid_filter_tau = (
-            0.0 if self.no_pd_mode_enabled
-            else max(DEFAULT_GRID_FILTER_TAU, self._actuator_latency_s)
-        )
+        # The grid filter is a SHARED signal feeding one loop, so it is NOT widened
+        # to the slowest actuator: doing so smooths the spike away for the fast
+        # batteries too. Slow-actuator pacing belongs per-battery in distribution.
+        self._grid_filter_tau = 0.0 if self.no_pd_mode_enabled else DEFAULT_GRID_FILTER_TAU
 
     def update_pd_parameters(self):
         """Re-read PD controller parameters from config_entry.data (hot-reload)."""
@@ -1031,7 +1017,6 @@ class ChargeDischargeController:
         self.min_discharge_power = self.config_entry.data.get(CONF_PD_MIN_DISCHARGE_POWER, DEFAULT_PD_MIN_DISCHARGE_POWER)
         self._relay_cooldown_s = self.config_entry.data.get(CONF_PD_RELAY_COOLDOWN, DEFAULT_PD_RELAY_COOLDOWN)
         self._min_cycle_interval_s = self.config_entry.data.get(CONF_PD_MIN_CYCLE_INTERVAL, DEFAULT_PD_MIN_CYCLE_INTERVAL)
-        self._effective_min_cycle_interval_s = max(self._min_cycle_interval_s, self._actuator_latency_s)
         self.target_grid_power = self.config_entry.data.get(CONF_TARGET_GRID_POWER, DEFAULT_TARGET_GRID_POWER)
         self.enable_system_power_limits = self.config_entry.data.get(
             CONF_ENABLE_SYSTEM_POWER_LIMITS,
@@ -3559,13 +3544,13 @@ class ChargeDischargeController:
         # bursts. The periodic safety timer (now is a datetime) is never gated:
         # it keeps the time-based subsystems running and forces a recalc within
         # its own period. 0 = disabled.
-        if now is None and self._effective_min_cycle_interval_s > 0:
+        if now is None and self._min_cycle_interval_s > 0:
             elapsed = time.monotonic() - self._last_cycle_monotonic
-            if elapsed < self._effective_min_cycle_interval_s:
+            if elapsed < self._min_cycle_interval_s:
                 if DEBUG_CONTROL_LOOP_DETAIL:
                     _LOGGER.debug(
                         "Event trigger throttled: %.2fs since last cycle < %.2fs min interval",
-                        elapsed, self._effective_min_cycle_interval_s,
+                        elapsed, self._min_cycle_interval_s,
                     )
                 return
         if self._control_lock.locked():
@@ -3626,30 +3611,6 @@ class ChargeDischargeController:
         measured = self._measured_battery_power()
         base = measured if measured is not None else self.previous_power
         return base - error
-
-    def _feedforward_base(self, measured_power):
-        """Incremental-control base: the last command, or measured power on drift.
-
-        The PD increments from previous_power assuming the battery already delivers
-        it. For a FAST actuator (register batteries reach the setpoint within one
-        poll) that holds, so the clean command base is kept at steady state. But when
-        measured power has drifted from the command by more than the deadband — the
-        load shifted and the loop has not re-commanded yet — re-anchor to the measured
-        reality so the correction tracks the change in one step instead of integrating
-        up from a stale assumption, which also removes the command-drift windup. SLOW
-        HTTP/MQTT actuators are EXCLUDED: their telemetry lags the command by seconds,
-        so anchoring mid-ramp would repeatedly under-command and stall (same reason the
-        anti-windup re-anchor is gated). Falls back to previous_power when no battery
-        reports power yet, or when command and reality already agree (avoids injecting
-        measurement noise while tracking well).
-        """
-        if (
-            self._actuator_latency_s <= FAST_ACTUATOR_MAX_LATENCY_S
-            and measured_power is not None
-            and abs(measured_power - self.previous_power) > self.deadband
-        ):
-            return measured_power
-        return self.previous_power
 
     def _compute_pd_new_power(self, error, sensor_elapsed_s, stale_safety_recalc):
         """Incremental PD control law: anti-windup re-anchor, optional integral,
@@ -3804,7 +3765,7 @@ class ChargeDischargeController:
         pd_adjustment = P + I + D
         
         # Apply adjustment to previous power to get new target
-        new_power_raw = self._feedforward_base(measured_power) - pd_adjustment  # Minus because we're correcting the imbalance
+        new_power_raw = self.previous_power - pd_adjustment  # Minus because we're correcting the imbalance
         
         # RATE LIMITER: Prevent abrupt changes that cause overshoot. The configured
         # value is a per-cycle cap calibrated for the nominal dt; scale by real elapsed
