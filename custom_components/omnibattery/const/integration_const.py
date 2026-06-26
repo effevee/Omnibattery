@@ -166,8 +166,12 @@ BALANCE_NOTIFY_COOLDOWN_DAYS = 7    # min days between cell-imbalance notificati
 # cells enter the top voltage range. This is voltage-only; SOC is intentionally
 # ignored because some batteries report it unreliably near the top.
 NORMAL_BALANCE_TAPER_CELL_VOLTAGE = 3.48
+# Hysteresis: taper latch releases only after cell drops this far below entry.
+# Prevents oscillation: at 95 W the cell relaxes slightly below 3.48 V but not
+# to 3.44 V, so the latch stays active until the battery is meaningfully discharged.
+NORMAL_BALANCE_TAPER_EXIT_CELL_VOLTAGE = 3.44
 NORMAL_BALANCE_PAUSE_CELL_VOLTAGE = 3.58
-NORMAL_BALANCE_CHARGE_POWER_W = 95
+NORMAL_BALANCE_CHARGE_POWER_W = 200
 NORMAL_BALANCE_MEASURE_WAIT_SECONDS = 60
 # Once the top voltage is reached the taper stops charging and latches. It does
 # NOT re-trickle when the cell relaxes (that would pin the cell at the top

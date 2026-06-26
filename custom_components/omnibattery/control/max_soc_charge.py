@@ -36,6 +36,7 @@ from ..const import (
     NORMAL_BALANCE_RECAL_SOC_THRESHOLD,
     NORMAL_BALANCE_RESUME_SOC_DROP,
     NORMAL_BALANCE_TAPER_CELL_VOLTAGE,
+    NORMAL_BALANCE_TAPER_EXIT_CELL_VOLTAGE,
 )
 
 if TYPE_CHECKING:
@@ -202,8 +203,17 @@ class MaxSocChargeManager:
                 continue
 
             in_zone = self._zone_active(coordinator)
-            if not in_zone:
+            vmax_raw = (coordinator.data or {}).get("max_cell_voltage")
+            try:
+                vmax_now = float(vmax_raw) if vmax_raw is not None else None
+            except (TypeError, ValueError):
+                vmax_now = None
+            # Hysteresis: only clear the taper latch once the cell has dropped to the
+            # exit threshold (below entry), not the moment it slips under 3.48 V at
+            # low charge power. This prevents 1250 W ↔ 95 W oscillation.
+            if not in_zone and (vmax_now is None or vmax_now < NORMAL_BALANCE_TAPER_EXIT_CELL_VOLTAGE):
                 c._normal_balance_voltage_tapered.pop(coordinator, None)
+            if not in_zone:
                 # Battery has dropped out of the top zone: end any recal session so
                 # a later full charge can recalibrate again.
                 self._clear_recal_state(coordinator)
@@ -323,7 +333,7 @@ class MaxSocChargeManager:
                 if max_cell_voltage_f >= NORMAL_BALANCE_TAPER_CELL_VOLTAGE:
                     voltage_taper_latched = True
                     voltage_tapered[coordinator] = True
-                elif not self._zone_active(coordinator):
+                elif max_cell_voltage_f < NORMAL_BALANCE_TAPER_EXIT_CELL_VOLTAGE:
                     voltage_tapered.pop(coordinator, None)
                     voltage_taper_latched = False
                 if voltage_taper_latched:

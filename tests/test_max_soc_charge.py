@@ -190,9 +190,20 @@ def test_apply_charge_taper_unlatches_when_dropping_out_of_zone():
     ctrl = _controller([c])
     m = _mgr(ctrl)
     m.apply_charge_taper(c, 800)  # latch
-    c.data["max_cell_voltage"] = 3.40  # below taper zone
+    c.data["max_cell_voltage"] = 3.40  # below exit threshold (3.44 V)
     assert m.apply_charge_taper(c, 800) == 800
     assert c not in ctrl._normal_balance_voltage_tapered
+
+
+def test_apply_charge_taper_stays_latched_in_hysteresis_band():
+    # Cell relaxes to 3.46 V (below 3.48 entry but above 3.44 exit) — taper must hold.
+    c = _Coord(data={"max_cell_voltage": 3.50})
+    ctrl = _controller([c])
+    m = _mgr(ctrl)
+    m.apply_charge_taper(c, 800)  # latch at 3.50 V
+    c.data["max_cell_voltage"] = 3.46  # in hysteresis band
+    assert m.apply_charge_taper(c, 800) == NORMAL_BALANCE_CHARGE_POWER_W
+    assert ctrl._normal_balance_voltage_tapered.get(c) is True
 
 
 # ----------------------------------------------------------------------
