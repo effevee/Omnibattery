@@ -5,6 +5,8 @@
 > ### ⚠️ Major change — the integration is now “Omnibattery”
 > Renamed from *Marstek Venus Energy Manager*; it is multi-brand now (Marstek + Zendure). The HA domain changed (`marstek_venus_energy_manager` → `omnibattery`), so the upgrade needs **one manual step**. **Everything is preserved** — configuration, entity IDs (they stay `marstek_venus_*`), recorder history, long-term statistics, dashboards and automations.
 >
+> Because the directory under `custom_components/` is renamed with the domain, HACS may refuse to download the new version (`No manifest.json file found 'custom_components/marstek_venus_energy_manager/manifest.json'`) — it still has the old folder name cached. If that happens, **remove the integration from HACS and add it again** (it stays in the store, no data is lost); the re-add re-scans and downloads the new `omnibattery` folder. Do this *before* the steps below.
+>
 > **After updating via HACS:**
 > 1. The old integration stops loading / disappears from the list — this is expected, your data is safe.
 > 2. Go to **Settings → Devices & Services → Add Integration → Omnibattery**.
