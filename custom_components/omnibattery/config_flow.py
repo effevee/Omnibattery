@@ -32,6 +32,11 @@ from .migration_flow import (
     LegacyDomainMigrationMixin,
     async_has_legacy_entries,
 )
+from .config_backup import (
+    async_has_config_backup,
+    async_load_config_backup,
+    async_restore_config_backup,
+)
 from .const import (
     DOMAIN,
     CONF_ENABLE_PREDICTIVE_CHARGING,
@@ -499,6 +504,7 @@ class MarstekVenusConfigFlow(LegacyDomainMigrationMixin, ConfigFlow, domain=DOMA
         self.excluded_devices = []
         self._current_battery_data = {}  # Stores connection data between battery steps
         self._pending_slot_step_a: dict | None = None  # Buffer between slot step A and step B
+        self._restore_declined = False  # Set when user skips the config-backup restore
 
     async def _test_connection(
         self,
@@ -533,6 +539,17 @@ class MarstekVenusConfigFlow(LegacyDomainMigrationMixin, ConfigFlow, domain=DOMA
         # exposes — route to the seamless migration before any fresh setup.
         if async_has_legacy_entries(self.hass):
             return await self.async_step_migrate_legacy()
+
+        # Full-delete recovery: if the integration was removed entirely (no legacy
+        # and no current entries) but a config backup survived, offer to restore
+        # it before falling through to a from-scratch setup.
+        if (
+            user_input is None
+            and not self._restore_declined
+            and not self._async_current_entries()
+            and await async_has_config_backup(self.hass)
+        ):
+            return await self.async_step_restore_backup()
 
         errors = {}
 
@@ -588,6 +605,40 @@ class MarstekVenusConfigFlow(LegacyDomainMigrationMixin, ConfigFlow, domain=DOMA
                 }
             ),
             errors=errors if errors else None,
+        )
+
+    async def async_step_restore_backup(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Offer to restore a previous configuration after a full delete.
+
+        Reached from ``async_step_user`` only when nothing is left to migrate but
+        a config backup survived the deletion. Restoring recreates the entry with
+        its original data + options; entities reclaim their entity_ids (and the
+        recorder history keyed by them). Declining falls through to fresh setup.
+        """
+        records = await async_load_config_backup(self.hass)
+        if not records:
+            self._restore_declined = True
+            return await self.async_step_user()
+
+        if user_input is None:
+            return self.async_show_form(
+                step_id="restore_backup",
+                data_schema=vol.Schema(
+                    {vol.Required("restore", default=True): BooleanSelector()}
+                ),
+                description_placeholders={"count": str(len(records))},
+            )
+
+        if not user_input["restore"]:
+            self._restore_declined = True
+            return await self.async_step_user()
+
+        restored = await async_restore_config_backup(self.hass)
+        return self.async_abort(
+            reason="restore_successful",
+            description_placeholders={"count": str(len(restored))},
         )
 
     async def async_step_batteries(

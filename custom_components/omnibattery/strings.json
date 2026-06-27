@@ -443,6 +443,13 @@
           "host": "New IP address of the Zendure SolarFlow on your local network",
           "port": "HTTP port (default 80)"
         }
+      },
+      "restore_backup": {
+        "title": "Restore previous configuration",
+        "description": "Found a saved backup of {count} previous configuration(s) (connection, options and tuning). Restore it to recover everything without setting it up again? Your entities and history reconnect automatically.",
+        "data": {
+          "restore": "Restore previous configuration"
+        }
       }
     },
     "error": {
@@ -462,7 +469,8 @@
       "already_configured": "This integration is already configured.",
       "reconfigure_successful": "Battery connection settings updated successfully.",
       "no_legacy_entries": "No legacy Marstek Venus configuration was found to migrate.",
-      "migration_successful": "Migrated {count} configuration(s) to Omnibattery. Your entities, history and settings were preserved."
+      "migration_successful": "Migrated {count} configuration(s) to Omnibattery. Your entities, history and settings were preserved.",
+      "restore_successful": "Restored {count} configuration(s). Your entities, history and settings were recovered."
     }
   },
   "options": {

@@ -76,6 +76,11 @@ def _migrate_storage_files(
         if not old_path.is_file():
             continue
         name = old_path.name
+        # The config backup (config_backup.py) is intentionally domain-stable:
+        # its filename is the literal legacy domain so both builds read one file.
+        # Never rename it into the new domain or the new build can't find it.
+        if name.endswith(".config_backup"):
+            continue
         if not (
             name == old_domain
             or name.startswith(f"{old_domain}.")
