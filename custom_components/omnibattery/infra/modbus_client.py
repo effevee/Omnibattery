@@ -4,7 +4,7 @@ Provides an abstraction for reading and writing registers from
 a Marstek Venus battery system asynchronously.
 """
 
-from pymodbus.client import AsyncModbusTcpClient
+from pymodbus.client import AsyncModbusTcpClient, AsyncModbusSerialClient
 from pymodbus.exceptions import ConnectionException, ModbusIOException
 import asyncio
 import inspect
@@ -12,7 +12,7 @@ from typing import Optional
 
 import logging
 
-from ..const import DEBUG_RAW_MODBUS_READS
+from ..const import DEBUG_RAW_MODBUS_READS, SERIAL_BAUDRATE
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -111,7 +111,7 @@ class MarstekModbusClient:
     for async reading/writing and interpreting common data types.
     """
 
-    def __init__(self, host: str, port: int = 502, message_wait_ms: int = 50, timeout: int = 10, is_v3: bool = False, slave_id: int = 1):
+    def __init__(self, host: str, port: int = 502, message_wait_ms: int = 50, timeout: int = 10, is_v3: bool = False, slave_id: int = 1, serial_port: Optional[str] = None):
         """
         Initialize Modbus client with host, port, message wait time, and timeout.
 
@@ -122,6 +122,10 @@ class MarstekModbusClient:
             timeout (int): Connection timeout in seconds.
             is_v3 (bool): If True, enable v3 firmware packet correction.
             slave_id (int): Modbus slave/unit id to address (default 1).
+            serial_port (Optional[str]): Serial device path (e.g. "/dev/ttyUSB0").
+                When set, communication uses Modbus RTU over serial instead of
+                TCP and ``host``/``port`` are ignored for the link (discussion
+                #350). None = Modbus TCP (default, unchanged behaviour).
         """
         self.host = host
         self.port = port
@@ -131,35 +135,54 @@ class MarstekModbusClient:
         self._port = port
         self._timeout = timeout
         self._is_v3 = is_v3
+        self._serial_port = serial_port
         # pymodbus has no inter-message delay for TCP (message_wait_milliseconds
         # is a Home Assistant modbus-integration concept that pymodbus never
         # implemented), so we enforce the spacing ourselves after every request.
         self._message_wait_sec = max(0.0, message_wait_ms / 1000.0)
 
-        # Create pymodbus async TCP client instance with auto-reconnect disabled.
-        # We manage reconnection ourselves by creating fresh client instances,
-        # which avoids pymodbus's internal reconnect_delay growing up to 300s.
-        # retries=0: our _read_raw loop already owns retries+backoff. pymodbus's
-        # default 3 internal retries each fire a NEW transaction_id, which is what
-        # surfaces as the "transaction_id mismatch" cascade on the weak v3 MCU
-        # (issue #361). Letting our loop be the sole retry layer cuts frames and
-        # transaction_ids in flight.
-        self.client = AsyncModbusTcpClient(
-            host=host,
-            port=port,
-            timeout=timeout,
-            retries=0,
-            reconnect_delay=0,
-            reconnect_delay_max=0,
-        )
+        self.client = self._make_client()
 
-        # Set v3 packet correction as attribute (compatible across all pymodbus 3.x)
-        if is_v3:
+        # v3 packet correction repairs the TCP MBAP length byte; RTU framing has
+        # no MBAP header (CRC instead), so it only applies to the TCP transport.
+        if is_v3 and serial_port is None:
             self.client.trace_packet = _marstek_v3_packet_correction
 
         self.unit_id = slave_id  # Modbus slave/unit id for this battery
         self._slave_kwarg = _detect_slave_kwarg(self.client)  # "slave" or "device_id"
         self._is_shutting_down = False  # Flag to suppress errors during shutdown
+
+    def _make_client(self):
+        """Build a fresh pymodbus async client for this connection.
+
+        Auto-reconnect is disabled: we manage reconnection ourselves by creating
+        fresh client instances, which avoids pymodbus's internal reconnect_delay
+        growing up to 300s. retries=0 because our _read_raw loop already owns
+        retries+backoff; pymodbus's default 3 internal retries each fire a NEW
+        transaction_id, which surfaces as the "transaction_id mismatch" cascade on
+        the weak v3 MCU (issue #361).
+
+        Serial uses RTU framing at a fixed 115200 8N1 — the rate Marstek's RS485
+        link runs at (discussion #350); these are hardware-fixed, not tunable.
+        """
+        if self._serial_port is not None:
+            return AsyncModbusSerialClient(
+                port=self._serial_port,
+                baudrate=SERIAL_BAUDRATE,
+                bytesize=8,
+                parity="N",
+                stopbits=1,
+                timeout=self._timeout,
+                retries=0,
+            )
+        return AsyncModbusTcpClient(
+            host=self._host,
+            port=self._port,
+            timeout=self._timeout,
+            retries=0,
+            reconnect_delay=0,
+            reconnect_delay_max=0,
+        )
 
     def set_shutting_down(self, value: bool) -> None:
         """
@@ -201,22 +224,15 @@ class MarstekModbusClient:
                 # v3 firmware exposes a single TCP slot and does not free it
                 # instantly on close. Reopening immediately gets refused, so the
                 # battery never recovers. Give it time to release the old socket
-                # before we open a new one.
-                if self._is_v3:
+                # before we open a new one. Serial has no socket slot, so skip it.
+                if self._is_v3 and self._serial_port is None:
                     await asyncio.sleep(1.0)
 
             # Create a fresh client instance (no corrupted state, no backoff)
-            self.client = AsyncModbusTcpClient(
-                host=self._host,
-                port=self._port,
-                timeout=self._timeout,
-                retries=0,
-                reconnect_delay=0,
-                reconnect_delay_max=0,
-            )
+            self.client = self._make_client()
 
-            # Restore v3 packet correction
-            if self._is_v3:
+            # Restore v3 packet correction (TCP transport only — see __init__)
+            if self._is_v3 and self._serial_port is None:
                 self.client.trace_packet = _marstek_v3_packet_correction
 
             connected = await self.client.connect()

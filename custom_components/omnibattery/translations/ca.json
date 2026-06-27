@@ -48,14 +48,16 @@
           "host": "Adreça IP",
           "port": "Port Modbus",
           "slave_id": "ID d'esclau Modbus",
-          "battery_version": "Model de bateria"
+          "battery_version": "Model de bateria",
+          "serial_port": "Port sèrie (Modbus RTU)"
         },
         "data_description": {
           "name": "Nom descriptiu per identificar aquesta bateria",
-          "host": "Adreça IP de la bateria a la teva xarxa local",
+          "host": "Adreça IP de la bateria a la teva xarxa local. Deixa-ho buit si utilitzes un port sèrie.",
           "port": "Port Modbus (normalment 502)",
           "slave_id": "ID d'esclau/unitat Modbus (per defecte 1). Canvia'l només si un proxy Modbus exposa diverses bateries a una mateixa IP:port amb IDs d'esclau diferents.",
-          "battery_version": "Selecciona la versió del model de la teva bateria. Ev2 per a models antics, Ev3 per a models nous amb mapa de registres actualitzat, A (Venus A) o D (Venus D) per a models d'inversor híbrid"
+          "battery_version": "Selecciona la versió del model de la teva bateria. Ev2 per a models antics, Ev3 per a models nous amb mapa de registres actualitzat, A (Venus A) o D (Venus D) per a models d'inversor híbrid",
+          "serial_port": "Ruta de l'adaptador USB-RS485, p. ex. /dev/ttyUSB0 o COM3. Omple-ho en lloc de l'adreça IP per utilitzar Modbus RTU per sèrie; deixa-ho buit per a TCP."
         }
       },
       "battery_connection_zendure": {
@@ -418,14 +420,16 @@
           "host": "Adreça IP",
           "port": "Port Modbus",
           "slave_id": "ID d'esclau Modbus",
-          "battery_version": "Model de bateria"
+          "battery_version": "Model de bateria",
+          "serial_port": "Port sèrie (Modbus RTU)"
         },
         "data_description": {
           "name": "Nom descriptiu per identificar aquesta bateria",
-          "host": "Nova adreça IP de la bateria a la xarxa local",
+          "host": "Nova adreça IP de la bateria a la xarxa local. Deixa-ho buit si utilitzes un port sèrie.",
           "port": "Port Modbus (normalment 502)",
           "slave_id": "ID d'esclau/unitat Modbus (per defecte 1). Canvia'l només si un proxy Modbus exposa diverses bateries a una mateixa IP:port amb IDs d'esclau diferents.",
-          "battery_version": "Selecciona la versió del teu model de bateria"
+          "battery_version": "Selecciona la versió del teu model de bateria",
+          "serial_port": "Ruta de l'adaptador USB-RS485, p. ex. /dev/ttyUSB0 o COM3. Omple-ho en lloc de l'adreça IP per utilitzar Modbus RTU per sèrie; deixa-ho buit per a TCP."
         }
       },
       "reconfigure_battery_zendure": {
@@ -454,7 +458,8 @@
       "manual_requires_power": "El mode manual requereix activar el control de potència.",
       "no_price_data": "El sensor seleccionat no té els atributs de preu esperats. Nordpool: necessita `raw_today`. PVPC: necessita `price_00h` … `price_23h`. CKW: necessita l'atribut `prices` amb una llista de franges. EPEX: necessita l'atribut `data` amb una llista de franges. ENTSO-e: necessita l'atribut `prices_today` amb una llista de franges.",
       "tibber_unavailable": "La integració Tibber no està instal·lada, o el seu servei `tibber.get_prices` no està disponible. Instal·la i configura Tibber primer.",
-      "discharge_below_charge": "El preu mínim de descàrrega no pot ser inferior al preu màxim (de càrrega). Posa'l igual o superior, o deixa'l buit per reutilitzar el llindar de càrrega."
+      "discharge_below_charge": "El preu mínim de descàrrega no pot ser inferior al preu màxim (de càrrega). Posa'l igual o superior, o deixa'l buit per reutilitzar el llindar de càrrega.",
+      "host_or_serial_required": "Introdueix una adreça IP (TCP) o la ruta d'un port sèrie (Modbus RTU)."
     },
     "abort": {
       "already_configured": "Aquesta integració ja està configurada.",
@@ -524,14 +529,16 @@
           "host": "Adreça IP",
           "port": "Port Modbus",
           "slave_id": "ID d'esclau Modbus",
-          "battery_version": "Model de bateria"
+          "battery_version": "Model de bateria",
+          "serial_port": "Port sèrie (Modbus RTU)"
         },
         "data_description": {
           "name": "Nom descriptiu per identificar aquesta bateria",
-          "host": "Adreça IP de la bateria a la teva xarxa local",
+          "host": "Adreça IP de la bateria a la teva xarxa local. Deixa-ho buit si utilitzes un port sèrie.",
           "port": "Port Modbus (normalment 502)",
           "slave_id": "ID d'esclau/unitat Modbus (per defecte 1). Canvia'l només si un proxy Modbus exposa diverses bateries a una mateixa IP:port amb IDs d'esclau diferents.",
-          "battery_version": "Selecciona la versió del model de la teva bateria. Ev2 per a models antics, Ev3 per a models nous amb mapa de registres actualitzat, A (Venus A) o D (Venus D) per a models d'inversor híbrid"
+          "battery_version": "Selecciona la versió del model de la teva bateria. Ev2 per a models antics, Ev3 per a models nous amb mapa de registres actualitzat, A (Venus A) o D (Venus D) per a models d'inversor híbrid",
+          "serial_port": "Ruta de l'adaptador USB-RS485, p. ex. /dev/ttyUSB0 o COM3. Omple-ho en lloc de l'adreça IP per utilitzar Modbus RTU per sèrie; deixa-ho buit per a TCP."
         }
       },
       "battery_connection_zendure": {
@@ -898,7 +905,8 @@
       "manual_requires_power": "El mode manual requereix activar el control de potència.",
       "no_price_data": "El sensor seleccionat no té els atributs de preu esperats. Nordpool: necessita `raw_today`. PVPC: necessita `price_00h` … `price_23h`. CKW: necessita l'atribut `prices` amb una llista de franges. EPEX: necessita l'atribut `data` amb una llista de franges. ENTSO-e: necessita l'atribut `prices_today` amb una llista de franges.",
       "tibber_unavailable": "La integració Tibber no està instal·lada, o el seu servei `tibber.get_prices` no està disponible. Instal·la i configura Tibber primer.",
-      "discharge_below_charge": "El preu mínim de descàrrega no pot ser inferior al preu màxim (de càrrega). Posa'l igual o superior, o deixa'l buit per reutilitzar el llindar de càrrega."
+      "discharge_below_charge": "El preu mínim de descàrrega no pot ser inferior al preu màxim (de càrrega). Posa'l igual o superior, o deixa'l buit per reutilitzar el llindar de càrrega.",
+      "host_or_serial_required": "Introdueix una adreça IP (TCP) o la ruta d'un port sèrie (Modbus RTU)."
     }
   },
   "selector": {

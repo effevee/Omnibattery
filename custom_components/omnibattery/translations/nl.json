@@ -48,14 +48,16 @@
           "host": "IP-adres",
           "port": "Modbus-poort",
           "battery_version": "Batterijmodel",
-          "slave_id": "Modbus slave-ID"
+          "slave_id": "Modbus slave-ID",
+          "serial_port": "Seriële poort (Modbus RTU)"
         },
         "data_description": {
           "name": "Beschrijvende naam om deze batterij te identificeren",
-          "host": "IP-adres van de batterij op uw lokale netwerk",
+          "host": "IP-adres van de batterij op uw lokale netwerk. Laat leeg als je een seriële poort gebruikt.",
           "port": "Modbus-poort (meestal 502)",
           "battery_version": "Selecteer de modelversie van uw batterij. Ev2 voor oudere modellen, Ev3 voor nieuwere modellen met bijgewerkte registerkaart, A (Venus A) of D (Venus D) voor hybride omvormermodellen",
-          "slave_id": "Modbus slave-/unit-id (standaard 1). Wijzig dit alleen wanneer een Modbus-proxy meerdere batterijen op één IP:poort koppelt met verschillende slave-id's."
+          "slave_id": "Modbus slave-/unit-id (standaard 1). Wijzig dit alleen wanneer een Modbus-proxy meerdere batterijen op één IP:poort koppelt met verschillende slave-id's.",
+          "serial_port": "Pad van de USB-RS485-adapter, bijv. /dev/ttyUSB0 of COM3. Vul dit in plaats van het IP-adres in om Modbus RTU via serieel te gebruiken; laat leeg voor TCP."
         }
       },
       "battery_connection_zendure": {
@@ -418,14 +420,16 @@
           "host": "IP-adres",
           "port": "Modbus-poort",
           "battery_version": "Batterijmodel",
-          "slave_id": "Modbus slave-ID"
+          "slave_id": "Modbus slave-ID",
+          "serial_port": "Seriële poort (Modbus RTU)"
         },
         "data_description": {
           "name": "Beschrijvende naam om deze batterij te identificeren",
-          "host": "Nieuw IP-adres van de batterij op het lokale netwerk",
+          "host": "Nieuw IP-adres van de batterij op het lokale netwerk. Laat leeg als je een seriële poort gebruikt.",
           "port": "Modbus-poort (gewoonlijk 502)",
           "battery_version": "Selecteer uw batterijmodelversie",
-          "slave_id": "Modbus slave-/unit-id (standaard 1). Wijzig dit alleen wanneer een Modbus-proxy meerdere batterijen op één IP:poort koppelt met verschillende slave-id's."
+          "slave_id": "Modbus slave-/unit-id (standaard 1). Wijzig dit alleen wanneer een Modbus-proxy meerdere batterijen op één IP:poort koppelt met verschillende slave-id's.",
+          "serial_port": "Pad van de USB-RS485-adapter, bijv. /dev/ttyUSB0 of COM3. Vul dit in plaats van het IP-adres in om Modbus RTU via serieel te gebruiken; laat leeg voor TCP."
         }
       },
       "reconfigure_battery_zendure": {
@@ -454,7 +458,8 @@
       "manual_requires_power": "Handmatige modus vereist dat vermogenscontrole is ingeschakeld.",
       "no_price_data": "De geselecteerde sensor heeft niet de verwachte prijsattributen. Nordpool: heeft `raw_today` nodig. PVPC: heeft `price_00h` … `price_23h` nodig. CKW: heeft het attribuut `prices` met een lijst van slots nodig. EPEX: heeft het attribuut `data` met een lijst van slots nodig. ENTSO-e: heeft het attribuut `prices_today` met een lijst van slots nodig.",
       "tibber_unavailable": "De Tibber-integratie is niet geïnstalleerd, of de service `tibber.get_prices` is niet beschikbaar. Installeer en configureer eerst Tibber.",
-      "discharge_below_charge": "De ontlaad-prijsondergrens mag niet lager zijn dan de maximale (laad)prijsdrempel. Stel deze gelijk of hoger in, of laat leeg om de laaddrempel te hergebruiken."
+      "discharge_below_charge": "De ontlaad-prijsondergrens mag niet lager zijn dan de maximale (laad)prijsdrempel. Stel deze gelijk of hoger in, of laat leeg om de laaddrempel te hergebruiken.",
+      "host_or_serial_required": "Voer een IP-adres (TCP) of een pad naar een seriële poort (Modbus RTU) in."
     },
     "abort": {
       "already_configured": "Deze integratie is al geconfigureerd.",
@@ -524,14 +529,16 @@
           "host": "IP-adres",
           "port": "Modbus-poort",
           "battery_version": "Batterijmodel",
-          "slave_id": "Modbus slave-ID"
+          "slave_id": "Modbus slave-ID",
+          "serial_port": "Seriële poort (Modbus RTU)"
         },
         "data_description": {
           "name": "Beschrijvende naam om deze batterij te identificeren",
-          "host": "IP-adres van de batterij op uw lokale netwerk",
+          "host": "IP-adres van de batterij op uw lokale netwerk. Laat leeg als je een seriële poort gebruikt.",
           "port": "Modbus-poort (meestal 502)",
           "battery_version": "Selecteer de modelversie van uw batterij. Ev2 voor oudere modellen, Ev3 voor nieuwere modellen met bijgewerkte registerkaart, A (Venus A) of D (Venus D) voor hybride omvormermodellen",
-          "slave_id": "Modbus slave-/unit-id (standaard 1). Wijzig dit alleen wanneer een Modbus-proxy meerdere batterijen op één IP:poort koppelt met verschillende slave-id's."
+          "slave_id": "Modbus slave-/unit-id (standaard 1). Wijzig dit alleen wanneer een Modbus-proxy meerdere batterijen op één IP:poort koppelt met verschillende slave-id's.",
+          "serial_port": "Pad van de USB-RS485-adapter, bijv. /dev/ttyUSB0 of COM3. Vul dit in plaats van het IP-adres in om Modbus RTU via serieel te gebruiken; laat leeg voor TCP."
         }
       },
       "battery_connection_zendure": {
@@ -898,7 +905,8 @@
       "manual_requires_power": "Handmatige modus vereist dat vermogenscontrole is ingeschakeld.",
       "no_price_data": "De geselecteerde sensor heeft niet de verwachte prijsattributen. Nordpool: heeft `raw_today` nodig. PVPC: heeft `price_00h` … `price_23h` nodig. CKW: heeft het attribuut `prices` met een lijst van slots nodig. EPEX: heeft het attribuut `data` met een lijst van slots nodig. ENTSO-e: heeft het attribuut `prices_today` met een lijst van slots nodig.",
       "tibber_unavailable": "De Tibber-integratie is niet geïnstalleerd, of de service `tibber.get_prices` is niet beschikbaar. Installeer en configureer eerst Tibber.",
-      "discharge_below_charge": "De ontlaad-prijsondergrens mag niet lager zijn dan de maximale (laad)prijsdrempel. Stel deze gelijk of hoger in, of laat leeg om de laaddrempel te hergebruiken."
+      "discharge_below_charge": "De ontlaad-prijsondergrens mag niet lager zijn dan de maximale (laad)prijsdrempel. Stel deze gelijk of hoger in, of laat leeg om de laaddrempel te hergebruiken.",
+      "host_or_serial_required": "Voer een IP-adres (TCP) of een pad naar een seriële poort (Modbus RTU) in."
     }
   },
   "selector": {

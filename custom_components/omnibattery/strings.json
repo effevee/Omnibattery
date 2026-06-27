@@ -48,14 +48,16 @@
           "host": "IP Address",
           "port": "Modbus Port",
           "slave_id": "Modbus Slave ID",
-          "battery_version": "Battery Model"
+          "battery_version": "Battery Model",
+          "serial_port": "Serial port (Modbus RTU)"
         },
         "data_description": {
           "name": "Descriptive name to identify this battery",
-          "host": "IP address of the battery on your local network",
+          "host": "IP address of the battery on your local network. Leave empty if you use a serial port.",
           "port": "Modbus port (usually 502)",
           "slave_id": "Modbus slave/unit id (default 1). Change only when a Modbus proxy maps several batteries to one IP:port using distinct slave ids.",
-          "battery_version": "Select your battery model version. Ev2 for older models, Ev3 for newer models with updated register map, A (Venus A) or D (Venus D) for hybrid inverter models"
+          "battery_version": "Select your battery model version. Ev2 for older models, Ev3 for newer models with updated register map, A (Venus A) or D (Venus D) for hybrid inverter models",
+          "serial_port": "USB-RS485 adapter path, e.g. /dev/ttyUSB0 or COM3. Fill this instead of the IP address to use Modbus RTU over serial; leave empty for TCP."
         }
       },
       "battery_connection_zendure": {
@@ -416,14 +418,16 @@
           "host": "IP Address",
           "port": "Modbus Port",
           "slave_id": "Modbus Slave ID",
-          "battery_version": "Battery Model"
+          "battery_version": "Battery Model",
+          "serial_port": "Serial port (Modbus RTU)"
         },
         "data_description": {
           "name": "Descriptive name to identify this battery",
-          "host": "New IP address of the battery on your local network",
+          "host": "New IP address of the battery on your local network. Leave empty if you use a serial port.",
           "port": "Modbus port (usually 502)",
           "slave_id": "Modbus slave/unit id (default 1). Change only when a Modbus proxy maps several batteries to one IP:port using distinct slave ids.",
-          "battery_version": "Select your battery model version"
+          "battery_version": "Select your battery model version",
+          "serial_port": "USB-RS485 adapter path, e.g. /dev/ttyUSB0 or COM3. Fill this instead of the IP address to use Modbus RTU over serial; leave empty for TCP."
         }
       },
       "reconfigure_battery_zendure": {
@@ -451,7 +455,8 @@
       "slot_does_nothing": "The slot must allow at least one direction (charge or discharge).",
       "manual_requires_power": "Manual mode requires the power override tick to be enabled.",
       "no_price_data": "Selected sensor does not have the expected price attributes. Nordpool: needs `raw_today` attribute. PVPC: needs `price_00h` … `price_23h` attributes. CKW: needs `prices` attribute with a list of slots. EPEX: needs `data` attribute with a list of slots. ENTSO-e: needs `prices_today` attribute with a list of slots.",
-      "tibber_unavailable": "The Tibber integration is not installed, or its `tibber.get_prices` service is unavailable. Install and configure Tibber first."
+      "tibber_unavailable": "The Tibber integration is not installed, or its `tibber.get_prices` service is unavailable. Install and configure Tibber first.",
+      "host_or_serial_required": "Enter either an IP address (TCP) or a serial port path (Modbus RTU)."
     },
     "abort": {
       "already_configured": "This integration is already configured.",
@@ -521,14 +526,16 @@
           "host": "IP Address",
           "port": "Modbus Port",
           "slave_id": "Modbus Slave ID",
-          "battery_version": "Battery Model"
+          "battery_version": "Battery Model",
+          "serial_port": "Serial port (Modbus RTU)"
         },
         "data_description": {
           "name": "Descriptive name to identify this battery",
-          "host": "IP address of the battery on your local network",
+          "host": "IP address of the battery on your local network. Leave empty if you use a serial port.",
           "port": "Modbus port (usually 502)",
           "slave_id": "Modbus slave/unit id (default 1). Change only when a Modbus proxy maps several batteries to one IP:port using distinct slave ids.",
-          "battery_version": "Select your battery model version. Ev2 for older models, Ev3 for newer models with updated register map, A (Venus A) or D (Venus D) for hybrid inverter models"
+          "battery_version": "Select your battery model version. Ev2 for older models, Ev3 for newer models with updated register map, A (Venus A) or D (Venus D) for hybrid inverter models",
+          "serial_port": "USB-RS485 adapter path, e.g. /dev/ttyUSB0 or COM3. Fill this instead of the IP address to use Modbus RTU over serial; leave empty for TCP."
         }
       },
       "battery_connection_zendure": {
@@ -892,7 +899,8 @@
       "slot_does_nothing": "The slot must allow at least one direction (charge or discharge).",
       "manual_requires_power": "Manual mode requires the power override tick to be enabled.",
       "no_price_data": "Selected sensor does not have the expected price attributes. Nordpool: needs `raw_today` attribute. PVPC: needs `price_00h` … `price_23h` attributes. CKW: needs `prices` attribute with a list of slots. EPEX: needs `data` attribute with a list of slots. ENTSO-e: needs `prices_today` attribute with a list of slots.",
-      "tibber_unavailable": "The Tibber integration is not installed, or its `tibber.get_prices` service is unavailable. Install and configure Tibber first."
+      "tibber_unavailable": "The Tibber integration is not installed, or its `tibber.get_prices` service is unavailable. Install and configure Tibber first.",
+      "host_or_serial_required": "Enter either an IP address (TCP) or a serial port path (Modbus RTU)."
     }
   },
   "selector": {

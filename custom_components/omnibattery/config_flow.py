@@ -53,6 +53,7 @@ from .const import (
     CONF_BATTERY_VERSION,
     CONF_SLAVE_ID,
     DEFAULT_SLAVE_ID,
+    CONF_SERIAL_PORT,
     DEFAULT_VERSION,
     MAX_POWER_BY_VERSION,
     CONF_PD_KP,
@@ -506,11 +507,15 @@ class MarstekVenusConfigFlow(LegacyDomainMigrationMixin, ConfigFlow, domain=DOMA
         version: str = "v2",
         slave_id: int = DEFAULT_SLAVE_ID,
         brand: str = "marstek",
+        serial_port: str | None = None,
     ) -> bool:
         """Test connection to a battery."""
         if brand == "zendure":
             _LOGGER.info("Probing Zendure device at %s:%s", host, port)
             result, _ = await ZendureLocalDriver.probe(host, port)
+        elif serial_port:
+            _LOGGER.info("Probing Marstek %s over serial %s slave %s", version, serial_port, slave_id)
+            result = await MarstekModbusDriver.probe(host, port, version, slave_id, serial_port=serial_port)
         else:
             _LOGGER.info("Probing Marstek %s at %s:%s slave %s", version, host, port, slave_id)
             result = await MarstekModbusDriver.probe(host, port, version, slave_id)
@@ -646,33 +651,52 @@ class MarstekVenusConfigFlow(LegacyDomainMigrationMixin, ConfigFlow, domain=DOMA
         if user_input is not None:
             battery_version = user_input.get(CONF_BATTERY_VERSION, DEFAULT_VERSION)
             slave_id = user_input.get(CONF_SLAVE_ID, DEFAULT_SLAVE_ID)
-            connection_result = await self._test_connection(
-                user_input[CONF_HOST],
-                user_input[CONF_PORT],
-                battery_version,
-                slave_id,
-                brand="marstek",
-            )
-            if not connection_result:
-                errors["base"] = "cannot_connect"
+            serial_port = (user_input.get(CONF_SERIAL_PORT) or "").strip()
+            host = (user_input.get(CONF_HOST) or "").strip()
+            is_serial = bool(serial_port)
+
+            if not is_serial and not host:
+                # No IP and no serial port: nothing to connect to.
+                errors["base"] = "host_or_serial_required"
             else:
-                self._current_battery_data.update({
-                    CONF_NAME: user_input[CONF_NAME],
-                    CONF_HOST: user_input[CONF_HOST],
-                    CONF_PORT: user_input[CONF_PORT],
-                    CONF_SLAVE_ID: slave_id,
-                    CONF_BATTERY_VERSION: battery_version,
-                    "brand": "marstek",
-                })
-                return await self.async_step_battery_limits()
+                if is_serial:
+                    # Serial has no IP:port; the path doubles as the battery's
+                    # identity (device_key, naming). port stays a placeholder.
+                    host = serial_port
+                    port = user_input.get(CONF_PORT, 502)
+                else:
+                    port = user_input[CONF_PORT]
+
+                connection_result = await self._test_connection(
+                    host,
+                    port,
+                    battery_version,
+                    slave_id,
+                    brand="marstek",
+                    serial_port=serial_port or None,
+                )
+                if not connection_result:
+                    errors["base"] = "cannot_connect"
+                else:
+                    self._current_battery_data.update({
+                        CONF_NAME: user_input[CONF_NAME],
+                        CONF_HOST: host,
+                        CONF_PORT: port,
+                        CONF_SERIAL_PORT: serial_port,
+                        CONF_SLAVE_ID: slave_id,
+                        CONF_BATTERY_VERSION: battery_version,
+                        "brand": "marstek",
+                    })
+                    return await self.async_step_battery_limits()
 
         return self.async_show_form(
             step_id="battery_connection",
             data_schema=vol.Schema(
                 {
                     vol.Required(CONF_NAME, default=f"Marstek Venus {battery_num}"): str,
-                    vol.Required(CONF_HOST): str,
-                    vol.Required(CONF_PORT, default=502): int,
+                    vol.Optional(CONF_HOST): str,
+                    vol.Optional(CONF_PORT, default=502): int,
+                    vol.Optional(CONF_SERIAL_PORT): str,
                     vol.Required(CONF_SLAVE_ID, default=DEFAULT_SLAVE_ID):
                         vol.All(NumberSelector(NumberSelectorConfig(min=1, max=247, step=1, mode=NumberSelectorMode.BOX)), vol.Coerce(int)),
                     vol.Required(CONF_BATTERY_VERSION, default=DEFAULT_VERSION):
@@ -1840,16 +1864,27 @@ class MarstekVenusConfigFlow(LegacyDomainMigrationMixin, ConfigFlow, domain=DOMA
         if user_input is not None:
             battery_version = user_input.get(CONF_BATTERY_VERSION, DEFAULT_VERSION)
             slave_id = user_input.get(CONF_SLAVE_ID, DEFAULT_SLAVE_ID)
-            if not await self._test_connection(
-                user_input[CONF_HOST], user_input[CONF_PORT], battery_version, slave_id
+            serial_port = (user_input.get(CONF_SERIAL_PORT) or "").strip()
+            new_host = (user_input.get(CONF_HOST) or "").strip()
+            is_serial = bool(serial_port)
+
+            if is_serial:
+                new_host = serial_port  # path doubles as identity (see add flow)
+                new_port = user_input.get(CONF_PORT, 502)
+            else:
+                new_port = user_input.get(CONF_PORT, 502)
+
+            if not is_serial and not new_host:
+                errors["base"] = "host_or_serial_required"
+            elif not await self._test_connection(
+                new_host, new_port, battery_version, slave_id,
+                serial_port=serial_port or None,
             ):
                 errors["base"] = "cannot_connect"
             else:
                 old_host = current.get(CONF_HOST)
                 old_port = current.get(CONF_PORT)
                 old_slave = current.get(CONF_SLAVE_ID, DEFAULT_SLAVE_ID)
-                new_host = user_input[CONF_HOST]
-                new_port = user_input[CONF_PORT]
 
                 if (
                     old_host
@@ -1864,6 +1899,7 @@ class MarstekVenusConfigFlow(LegacyDomainMigrationMixin, ConfigFlow, domain=DOMA
                 updated[CONF_NAME] = user_input[CONF_NAME]
                 updated[CONF_HOST] = new_host
                 updated[CONF_PORT] = new_port
+                updated[CONF_SERIAL_PORT] = serial_port
                 updated[CONF_SLAVE_ID] = slave_id
                 updated[CONF_BATTERY_VERSION] = battery_version
                 self._reconfigure_batteries.append(updated)
@@ -1880,17 +1916,22 @@ class MarstekVenusConfigFlow(LegacyDomainMigrationMixin, ConfigFlow, domain=DOMA
             CONF_NAME: current.get(CONF_NAME, f"Marstek Venus {battery_num}"),
             CONF_HOST: current.get(CONF_HOST, ""),
             CONF_PORT: current.get(CONF_PORT, 502),
+            CONF_SERIAL_PORT: current.get(CONF_SERIAL_PORT, ""),
             CONF_SLAVE_ID: current.get(CONF_SLAVE_ID, DEFAULT_SLAVE_ID),
             CONF_BATTERY_VERSION: current.get(CONF_BATTERY_VERSION, DEFAULT_VERSION),
         }
+        # A serial battery stores its path in CONF_HOST too; don't prefill the IP
+        # field with the device path.
+        host_default = "" if defaults[CONF_SERIAL_PORT] else defaults[CONF_HOST]
 
         return self.async_show_form(
             step_id="reconfigure_battery",
             data_schema=vol.Schema(
                 {
                     vol.Required(CONF_NAME, default=defaults[CONF_NAME]): str,
-                    vol.Required(CONF_HOST, default=defaults[CONF_HOST]): str,
-                    vol.Required(CONF_PORT, default=defaults[CONF_PORT]): int,
+                    vol.Optional(CONF_HOST, default=host_default): str,
+                    vol.Optional(CONF_PORT, default=defaults[CONF_PORT]): int,
+                    vol.Optional(CONF_SERIAL_PORT, default=defaults[CONF_SERIAL_PORT]): str,
                     vol.Required(CONF_SLAVE_ID, default=defaults[CONF_SLAVE_ID]):
                         vol.All(NumberSelector(NumberSelectorConfig(min=1, max=247, step=1, mode=NumberSelectorMode.BOX)), vol.Coerce(int)),
                     vol.Required(
@@ -2002,12 +2043,14 @@ class OptionsFlowHandler(OptionsFlow):
         version: str = "v2",
         slave_id: int = DEFAULT_SLAVE_ID,
         brand: str = "marstek",
+        serial_port: str | None = None,
     ) -> bool:
         """Test connection to a battery.
 
         For Zendure: simple HTTP probe (no single-slot constraint).
         For Marstek: temporarily closes any existing coordinator connection to
-        free the single Modbus TCP slot, probes, then reconnects.
+        free the single Modbus TCP slot (or the serial port), probes, then
+        reconnects. ``serial_port`` probes over Modbus RTU instead of TCP (#350).
         """
         if brand == "zendure":
             _LOGGER.info("Probing Zendure device at %s:%s", host, port)
@@ -2031,7 +2074,7 @@ class OptionsFlowHandler(OptionsFlow):
             async with existing_coordinator.lock:
                 await existing_coordinator.driver.close()
                 await asyncio.sleep(0.5)
-                result = await MarstekModbusDriver.probe(host, port, version, slave_id)
+                result = await MarstekModbusDriver.probe(host, port, version, slave_id, serial_port=serial_port)
                 await asyncio.sleep(0.3)
                 await existing_coordinator.driver.connect()
                 if result:
@@ -2041,7 +2084,7 @@ class OptionsFlowHandler(OptionsFlow):
                 return result
         else:
             _LOGGER.info("No existing coordinator for %s - opening new connection", host)
-            return await MarstekModbusDriver.probe(host, port, version, slave_id)
+            return await MarstekModbusDriver.probe(host, port, version, slave_id, serial_port=serial_port)
 
     async def _save_and_finish(self) -> FlowResult:
         """Merge config_data into existing entry data, save, and reload."""
@@ -2213,20 +2256,30 @@ class OptionsFlowHandler(OptionsFlow):
             if user_input is not None:
                 battery_version = user_input.get(CONF_BATTERY_VERSION, DEFAULT_VERSION)
                 slave_id = user_input.get(CONF_SLAVE_ID, DEFAULT_SLAVE_ID)
-                connection_result = await self._test_connection(
-                    user_input[CONF_HOST],
-                    user_input[CONF_PORT],
-                    battery_version,
-                    slave_id,
-                    brand="marstek",
-                )
-                if not connection_result:
+                serial_port = (user_input.get(CONF_SERIAL_PORT) or "").strip()
+                host = (user_input.get(CONF_HOST) or "").strip()
+                is_serial = bool(serial_port)
+
+                if is_serial:
+                    # Serial has no IP:port; the path doubles as identity (see add flow).
+                    host = serial_port
+                    port = user_input.get(CONF_PORT, 502)
+                else:
+                    port = user_input.get(CONF_PORT, 502)
+
+                if not is_serial and not host:
+                    errors["base"] = "host_or_serial_required"
+                elif not await self._test_connection(
+                    host, port, battery_version, slave_id,
+                    brand="marstek", serial_port=serial_port or None,
+                ):
                     errors["base"] = "cannot_connect"
                 else:
                     self._current_battery_data.update({
                         CONF_NAME: user_input[CONF_NAME],
-                        CONF_HOST: user_input[CONF_HOST],
-                        CONF_PORT: user_input[CONF_PORT],
+                        CONF_HOST: host,
+                        CONF_PORT: port,
+                        CONF_SERIAL_PORT: serial_port,
                         CONF_SLAVE_ID: slave_id,
                         CONF_BATTERY_VERSION: battery_version,
                         "brand": "marstek",
@@ -2239,6 +2292,7 @@ class OptionsFlowHandler(OptionsFlow):
                     CONF_NAME: current_battery.get(CONF_NAME, f"Marstek Venus {battery_num}"),
                     CONF_HOST: current_battery.get(CONF_HOST, ""),
                     CONF_PORT: current_battery.get(CONF_PORT, 502),
+                    CONF_SERIAL_PORT: current_battery.get(CONF_SERIAL_PORT, ""),
                     CONF_SLAVE_ID: current_battery.get(CONF_SLAVE_ID, DEFAULT_SLAVE_ID),
                     CONF_BATTERY_VERSION: current_battery.get(CONF_BATTERY_VERSION, DEFAULT_VERSION),
                 }
@@ -2247,6 +2301,7 @@ class OptionsFlowHandler(OptionsFlow):
                     CONF_NAME: f"Marstek Venus {battery_num}",
                     CONF_HOST: "",
                     CONF_PORT: 502,
+                    CONF_SERIAL_PORT: "",
                     CONF_SLAVE_ID: DEFAULT_SLAVE_ID,
                     CONF_BATTERY_VERSION: DEFAULT_VERSION,
                 }
@@ -2254,13 +2309,18 @@ class OptionsFlowHandler(OptionsFlow):
             _LOGGER.error("Error in options flow battery_connection step: %s", e, exc_info=True)
             return self.async_abort(reason="unknown_error")
 
+        # A serial battery stores its path in CONF_HOST too; don't prefill the IP
+        # field with the device path.
+        host_default = "" if defaults[CONF_SERIAL_PORT] else defaults[CONF_HOST]
+
         return self.async_show_form(
             step_id="battery_connection",
             data_schema=vol.Schema(
                 {
                     vol.Required(CONF_NAME, default=defaults[CONF_NAME]): str,
-                    vol.Required(CONF_HOST, default=defaults[CONF_HOST]): str,
-                    vol.Required(CONF_PORT, default=defaults[CONF_PORT]): int,
+                    vol.Optional(CONF_HOST, default=host_default): str,
+                    vol.Optional(CONF_PORT, default=defaults[CONF_PORT]): int,
+                    vol.Optional(CONF_SERIAL_PORT, default=defaults[CONF_SERIAL_PORT]): str,
                     vol.Required(CONF_SLAVE_ID, default=defaults[CONF_SLAVE_ID]):
                         vol.All(NumberSelector(NumberSelectorConfig(min=1, max=247, step=1, mode=NumberSelectorMode.BOX)), vol.Coerce(int)),
                     vol.Required(CONF_BATTERY_VERSION, default=defaults[CONF_BATTERY_VERSION]):

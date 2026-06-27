@@ -48,14 +48,16 @@
           "host": "IP-Adresse",
           "port": "Modbus-Port",
           "battery_version": "Batteriemodell",
-          "slave_id": "Modbus-Slave-ID"
+          "slave_id": "Modbus-Slave-ID",
+          "serial_port": "Serieller Port (Modbus RTU)"
         },
         "data_description": {
           "name": "Beschreibender Name zur Identifizierung dieser Batterie",
-          "host": "IP-Adresse der Batterie in Ihrem lokalen Netzwerk",
+          "host": "IP-Adresse der Batterie in Ihrem lokalen Netzwerk. Leer lassen, wenn ein serieller Port verwendet wird.",
           "port": "Modbus-Port (normalerweise 502)",
           "battery_version": "Wählen Sie die Modellversion Ihrer Batterie. Ev2 für ältere Modelle, Ev3 für neuere Modelle mit aktualisierter Registerkarte, A (Venus A) oder D (Venus D) für Hybrid-Wechselrichter-Modelle",
-          "slave_id": "Modbus Slave-/Unit-ID (Standard 1). Nur ändern, wenn ein Modbus-Proxy mehrere Batterien über dieselbe IP:Port mit unterschiedlichen Slave-IDs abbildet."
+          "slave_id": "Modbus Slave-/Unit-ID (Standard 1). Nur ändern, wenn ein Modbus-Proxy mehrere Batterien über dieselbe IP:Port mit unterschiedlichen Slave-IDs abbildet.",
+          "serial_port": "Pfad des USB-RS485-Adapters, z. B. /dev/ttyUSB0 oder COM3. Statt der IP-Adresse ausfüllen, um Modbus RTU über die serielle Schnittstelle zu nutzen; für TCP leer lassen."
         }
       },
       "battery_connection_zendure": {
@@ -418,14 +420,16 @@
           "host": "IP-Adresse",
           "port": "Modbus-Port",
           "battery_version": "Batteriemodell",
-          "slave_id": "Modbus-Slave-ID"
+          "slave_id": "Modbus-Slave-ID",
+          "serial_port": "Serieller Port (Modbus RTU)"
         },
         "data_description": {
           "name": "Beschreibender Name zur Identifikation dieser Batterie",
-          "host": "Neue IP-Adresse der Batterie im lokalen Netzwerk",
+          "host": "Neue IP-Adresse der Batterie im lokalen Netzwerk. Leer lassen, wenn ein serieller Port verwendet wird.",
           "port": "Modbus-Port (normalerweise 502)",
           "battery_version": "Wählen Sie Ihre Batteriemodellversion",
-          "slave_id": "Modbus Slave-/Unit-ID (Standard 1). Nur ändern, wenn ein Modbus-Proxy mehrere Batterien über dieselbe IP:Port mit unterschiedlichen Slave-IDs abbildet."
+          "slave_id": "Modbus Slave-/Unit-ID (Standard 1). Nur ändern, wenn ein Modbus-Proxy mehrere Batterien über dieselbe IP:Port mit unterschiedlichen Slave-IDs abbildet.",
+          "serial_port": "Pfad des USB-RS485-Adapters, z. B. /dev/ttyUSB0 oder COM3. Statt der IP-Adresse ausfüllen, um Modbus RTU über die serielle Schnittstelle zu nutzen; für TCP leer lassen."
         }
       },
       "reconfigure_battery_zendure": {
@@ -454,7 +458,8 @@
       "manual_requires_power": "Manueller Modus benötigt aktivierte Leistungssteuerung.",
       "no_price_data": "Keine Preisdaten vom Sensor verfügbar. Nordpool: benötigt `raw_today`. PVPC: benötigt `price_00h` … `price_23h`. CKW: benötigt das Attribut `prices` mit einer Slot-Liste. EPEX: benötigt das Attribut `data` mit einer Slot-Liste. ENTSO-e: benötigt das Attribut `prices_today` mit einer Slot-Liste.",
       "tibber_unavailable": "Die Tibber-Integration ist nicht installiert oder ihr Dienst `tibber.get_prices` ist nicht verfügbar. Installiere und konfiguriere zuerst Tibber.",
-      "discharge_below_charge": "Die Entlade-Preisuntergrenze darf nicht unter dem maximalen (Lade-)Preis liegen. Setze sie gleich oder höher oder lass sie leer, um den Ladeschwellenwert wiederzuverwenden."
+      "discharge_below_charge": "Die Entlade-Preisuntergrenze darf nicht unter dem maximalen (Lade-)Preis liegen. Setze sie gleich oder höher oder lass sie leer, um den Ladeschwellenwert wiederzuverwenden.",
+      "host_or_serial_required": "Gib entweder eine IP-Adresse (TCP) oder einen seriellen Port-Pfad (Modbus RTU) ein."
     },
     "abort": {
       "already_configured": "Diese Integration ist bereits konfiguriert.",
@@ -524,14 +529,16 @@
           "host": "IP-Adresse",
           "port": "Modbus-Port",
           "battery_version": "Batteriemodell",
-          "slave_id": "Modbus-Slave-ID"
+          "slave_id": "Modbus-Slave-ID",
+          "serial_port": "Serieller Port (Modbus RTU)"
         },
         "data_description": {
           "name": "Beschreibender Name zur Identifizierung dieser Batterie",
-          "host": "IP-Adresse der Batterie in Ihrem lokalen Netzwerk",
+          "host": "IP-Adresse der Batterie in Ihrem lokalen Netzwerk. Leer lassen, wenn ein serieller Port verwendet wird.",
           "port": "Modbus-Port (normalerweise 502)",
           "battery_version": "Wählen Sie die Modellversion Ihrer Batterie. Ev2 für ältere Modelle, Ev3 für neuere Modelle mit aktualisierter Registerkarte, A (Venus A) oder D (Venus D) für Hybrid-Wechselrichter-Modelle",
-          "slave_id": "Modbus Slave-/Unit-ID (Standard 1). Nur ändern, wenn ein Modbus-Proxy mehrere Batterien über dieselbe IP:Port mit unterschiedlichen Slave-IDs abbildet."
+          "slave_id": "Modbus Slave-/Unit-ID (Standard 1). Nur ändern, wenn ein Modbus-Proxy mehrere Batterien über dieselbe IP:Port mit unterschiedlichen Slave-IDs abbildet.",
+          "serial_port": "Pfad des USB-RS485-Adapters, z. B. /dev/ttyUSB0 oder COM3. Statt der IP-Adresse ausfüllen, um Modbus RTU über die serielle Schnittstelle zu nutzen; für TCP leer lassen."
         }
       },
       "battery_connection_zendure": {
@@ -898,7 +905,8 @@
       "manual_requires_power": "Manueller Modus benötigt aktivierte Leistungssteuerung.",
       "no_price_data": "Keine Preisdaten vom Sensor verfügbar. Nordpool: benötigt `raw_today`. PVPC: benötigt `price_00h` … `price_23h`. CKW: benötigt das Attribut `prices` mit einer Slot-Liste. EPEX: benötigt das Attribut `data` mit einer Slot-Liste. ENTSO-e: benötigt das Attribut `prices_today` mit einer Slot-Liste.",
       "tibber_unavailable": "Die Tibber-Integration ist nicht installiert oder ihr Dienst `tibber.get_prices` ist nicht verfügbar. Installiere und konfiguriere zuerst Tibber.",
-      "discharge_below_charge": "Die Entlade-Preisuntergrenze darf nicht unter dem maximalen (Lade-)Preis liegen. Setze sie gleich oder höher oder lass sie leer, um den Ladeschwellenwert wiederzuverwenden."
+      "discharge_below_charge": "Die Entlade-Preisuntergrenze darf nicht unter dem maximalen (Lade-)Preis liegen. Setze sie gleich oder höher oder lass sie leer, um den Ladeschwellenwert wiederzuverwenden.",
+      "host_or_serial_required": "Gib entweder eine IP-Adresse (TCP) oder einen seriellen Port-Pfad (Modbus RTU) ein."
     }
   },
   "selector": {

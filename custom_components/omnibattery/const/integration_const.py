@@ -32,6 +32,13 @@ SUPPORTED_VERSIONS = ["v2", "v3", "vA", "vD"]
 CONF_SLAVE_ID = "slave_id"
 DEFAULT_SLAVE_ID = 1
 
+# Serial / Modbus-RTU connection. When set, the battery is reached over a serial
+# port (USB-RS485 adapter) instead of Modbus TCP (discussion #350). Path string
+# such as "/dev/ttyUSB0" or "COM3"; empty/absent means TCP. Marstek's RTU link is
+# fixed at 115200 8N1 by the hardware, so only the port path is configurable.
+CONF_SERIAL_PORT = "serial_port"
+SERIAL_BAUDRATE = 115200
+
 # Maximum power (W) per battery version — used by config_flow to set slider limits
 MAX_POWER_BY_VERSION = {
     "v2": 2500,

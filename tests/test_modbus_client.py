@@ -7,9 +7,15 @@ block offsets against the real v3 register addresses.
 """
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
-from custom_components.omnibattery.infra.modbus_client import decode_registers
+from custom_components.omnibattery.infra.modbus_client import (
+    decode_registers,
+    MarstekModbusClient,
+)
+from pymodbus.client import AsyncModbusTcpClient, AsyncModbusSerialClient
 from custom_components.omnibattery.const import (
     REGISTER_BLOCKS_V3,
     REGISTER_BLOCKS_V2,
@@ -174,3 +180,33 @@ def test_block_members_are_not_total_increasing():
             for member in block["members"]:
                 defn = by_key.get(member["key"], {})
                 assert defn.get("state_class") != "total_increasing"
+
+
+# ----------------------------------------------------------------------
+# Transport selection: TCP vs serial / Modbus RTU (discussion #350)
+# ----------------------------------------------------------------------
+def _make_client(**kwargs):
+    """Build a client inside an event loop (pymodbus needs a running loop)."""
+    async def _build():
+        return MarstekModbusClient(**kwargs)
+    return asyncio.run(_build())
+
+
+def test_default_transport_is_tcp():
+    """No serial_port -> TCP client, unchanged behaviour."""
+    c = _make_client(host="192.168.1.50", port=502)
+    assert isinstance(c.client, AsyncModbusTcpClient)
+
+
+def test_serial_port_selects_serial_client():
+    """serial_port set -> RTU serial client built instead of TCP."""
+    c = _make_client(host="/dev/ttyUSB0", port=502, serial_port="/dev/ttyUSB0")
+    assert isinstance(c.client, AsyncModbusSerialClient)
+
+
+def test_serial_skips_v3_packet_correction():
+    """The v3 MBAP fix is TCP-framing only; serial must not install it."""
+    serial = _make_client(host="/dev/ttyUSB0", port=502, is_v3=True, serial_port="/dev/ttyUSB0")
+    tcp = _make_client(host="192.168.1.50", port=502, is_v3=True)
+    assert getattr(serial.client, "trace_packet", None) is None
+    assert tcp.client.trace_packet is not None

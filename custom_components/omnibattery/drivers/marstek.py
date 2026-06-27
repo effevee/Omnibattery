@@ -151,6 +151,7 @@ class MarstekModbusDriver(BatteryDriver):
         max_discharge_power_w: int = 2500,
         definitions: Optional[list[dict]] = None,
         client: Optional[MarstekModbusClient] = None,
+        serial_port: Optional[str] = None,
     ) -> None:
         """Build the driver.
 
@@ -175,6 +176,7 @@ class MarstekModbusDriver(BatteryDriver):
                 timeout=READ_TIMEOUT_S.get(version, 10),
                 is_v3=self._is_v3_family,
                 slave_id=slave_id,
+                serial_port=serial_port,
             )
         self._client = client
 
@@ -642,13 +644,14 @@ class MarstekModbusDriver(BatteryDriver):
         )
 
     @classmethod
-    async def probe(cls, host: str, port: int, version: str, slave_id: int = 1) -> bool:
-        """Test whether a Marstek battery responds at host:port for this version.
+    async def probe(cls, host: str, port: int, version: str, slave_id: int = 1, serial_port: Optional[str] = None) -> bool:
+        """Test whether a Marstek battery responds for this version.
 
         Creates a temporary client, reads the SOC register, then tears it down.
         Returns True if a value was read, False on any failure (bad version,
         connection refused, read timeout, etc.). Used by the config / options flow
-        to validate host/port/version before committing them.
+        to validate host/port/version before committing them. ``serial_port``, when
+        set, probes over Modbus RTU instead of TCP (discussion #350).
         """
         soc_register = REGISTER_MAP.get(version, {}).get("battery_soc")
         if soc_register is None:
@@ -659,6 +662,7 @@ class MarstekModbusDriver(BatteryDriver):
             timeout=READ_TIMEOUT_S.get(version, 10),
             is_v3=version in _V3_FAMILY,
             slave_id=slave_id,
+            serial_port=serial_port,
         )
         try:
             if not await client.async_connect():

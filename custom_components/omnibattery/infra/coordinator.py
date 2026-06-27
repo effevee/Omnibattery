@@ -37,7 +37,8 @@ class MarstekVenusDataUpdateCoordinator(DataUpdateCoordinator):
                  active_balance_mode_enabled: bool = False,
                  full_charge_voltage_taper_enabled: bool = DEFAULT_FULL_CHARGE_VOLTAGE_TAPER_ENABLED,
                  brand: str = "marstek",
-                 zendure_model: str = ZENDURE_MODEL_2400AC_PRO) -> None:
+                 zendure_model: str = ZENDURE_MODEL_2400AC_PRO,
+                 serial_port: str | None = None) -> None:
         """Initialize the data update coordinator."""
         super().__init__(
             hass,
@@ -49,6 +50,10 @@ class MarstekVenusDataUpdateCoordinator(DataUpdateCoordinator):
         self.host = host
         self.port = port
         self.slave_id = slave_id
+        # Serial device path when the battery is reached over Modbus RTU instead
+        # of TCP (discussion #350); None = TCP. host/port still identify the
+        # battery (device_key, naming); the link uses this path. Marstek only.
+        self.serial_port = serial_port
         self.consumption_sensor = consumption_sensor
         self.brand = brand
         if self.brand == "zendure":
@@ -167,6 +172,7 @@ class MarstekVenusDataUpdateCoordinator(DataUpdateCoordinator):
                 self.host, self.port, self.battery_version, self.slave_id,
                 max_charge_power_w=self.max_charge_power,
                 max_discharge_power_w=self.max_discharge_power,
+                serial_port=self.serial_port,
             )
 
         # Fast key -> definition lookup so the poll loop can scale each raw value by
