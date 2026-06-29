@@ -1,11 +1,13 @@
 # Omnibattery for Home Assistant
 
-**Omnibattery** a comprehensive Home Assistant integration designed to monitor and control pluggable solar batteries:
+![Logo](assets/logo-github.png)
 
- - Marstek Venus E and C (v2 and v3), Venus D and Venus A via Modbus TCP
- - Zendure Solarflow 2400 AC+, Solarflow 2400 Pro (Local API) 
+**Omnibattery** is your one stop Home Assistant integration designed to monitor and control pluggable solar batteries, as of today, the following ones are supported:
 
- It provides advanced energy management features including predictive grid charging, customizable time slots for discharge control, and device load exclusion logic.
+- Marstek Venus E and C (v2 and v3), Venus D and Venus A via Modbus TCP
+- Zendure Solarflow 2400 AC+, Solarflow 2400 Pro (Local API) 
+
+It provides advanced energy management features including predictive grid charging, customizable time slots for discharge control, and device load exclusion logic.
 
 > [!CAUTION]
 > **LIABILITY DISCLAIMER:**
