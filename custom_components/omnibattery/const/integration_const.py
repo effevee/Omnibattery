@@ -300,6 +300,9 @@ EXTERNAL_NET_BALANCE_CANDIDATES: list[str] = ["sensor.balance_neto"]
 # Weekly Full Charge Delay Constants
 CHARGE_EFFICIENCY = 0.85  # Conservative factor for charge power estimation
 DELAY_SAFETY_FACTOR = 1.3  # 30% margin on energy balance
+DELAY_BALANCE_DEADBAND_KWH = 0.5  # Deadband on the binary "grid needed today?" gate
+#   so a near-balanced day (raw forecast ~= consumption) does not flip into a false
+#   pre-dawn deficit unlock. See ChargeDelayManager._should_delay_charge (#4).
 LOW_FORECAST_THRESHOLD_FACTOR = 1.5  # forecast < 1.5 × capacity → bad solar day
 T_START_THRESHOLD_KWH = 0.1  # Threshold to detect solar production start
 T_START_FALLBACK_HOUR = 11  # If no T_start by 11:00, unlock immediately
