@@ -73,6 +73,7 @@
 - **Daily/predictive home consumption inflated with an inverted grid meter**: the exact daily home-energy total and the predictive-charging consumption estimate read the grid sensor raw, skipping the `meter_inverted` sign correction the live power sensor already applied. With an inverted meter, exported solar was added instead of subtracted, inflating both figures roughly in proportion to how much was exported that day. [`tracking/consumption_tracker.py`](custom_components/omnibattery/tracking/consumption_tracker.py).
 
 ### Added
+- **More controls moved to the dashboard** (less setup config): weekly full charge on/off switch, price-based discharge switch (dynamic/real-time pricing), and the four hourly-balance tuning sliders (target, max offset, deadband, hysteresis) are now live entities on the dashboard with translations. [`switch.py`](custom_components/omnibattery/switch.py), [`number.py`](custom_components/omnibattery/number.py).
 - **Charge Delay Balance Deadband slider** (kWh, default 0.5): runtime tolerance on the charge-delay energy balance — the delay only unlocks once the solar+stored shortfall exceeds it. [`number.py`](custom_components/omnibattery/number.py).
 - **Synthetic energy totals survive a delete + re-add (Zendure)**: lifetime charge/discharge kWh are now backed up keyed by device serial in a delete-proof Store, so re-adding a battery reclaims its totals instead of restarting at 0. [`synthetic_energy_backup.py`](custom_components/omnibattery/synthetic_energy_backup.py).
 
