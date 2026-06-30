@@ -28,6 +28,7 @@ from homeassistant.util import dt as dt_util
 
 from ..const import (
     CHARGE_EFFICIENCY,
+    DELAY_BALANCE_DEADBAND_KWH,
     DELAY_SAFETY_FACTOR,
     DELAY_SOC_SETPOINT_HYSTERESIS,
     DOMAIN,
@@ -355,21 +356,34 @@ class ChargeDelayManager:
             usable_energy_kwh = max(0, ((avg_soc - min_soc) / 100) * total_capacity_kwh)
             avg_consumption_kwh = ctrl._consumption_tracker.get_avg_daily_consumption()
             prev_cache = ctrl._charge_delay_forecast_cache
+            # Binary "is grid needed today?" gate. Use the RAW forecast, not the
+            # 0.85 haircut applied below: the haircut is a conservatism for the
+            # energy SCHEDULING math, but on this all-or-nothing gate it turns a
+            # balanced day (raw forecast ~= consumption) into a false deficit and a
+            # latched pre-dawn unlock (#4). A small deadband absorbs sensor noise so
+            # a near-balanced day still holds for the cheap window.
             ctrl._charge_delay_balance_needs_charge = (
-                (usable_energy_kwh + forecast_today) < avg_consumption_kwh
+                (usable_energy_kwh + raw_forecast)
+                < (avg_consumption_kwh - DELAY_BALANCE_DEADBAND_KWH)
             )
             ctrl._charge_delay_forecast_cache = forecast_today
             _LOGGER.info(
-                "Charge Delay: Forecast %s (%.2f → %.2f kWh) → "
-                "balance: %.2f usable + %.2f solar = %.2f kWh vs %.2f kWh consumption → %s",
+                "Charge Delay: Forecast %s (raw %.2f, scheduling %.2f kWh) → "
+                "balance: %.2f usable + %.2f solar = %.2f kWh vs %.2f kWh consumption "
+                "(deadband %.2f) → %s",
                 "initialised" if prev_cache is None else "changed",
-                prev_cache if prev_cache is not None else 0.0, forecast_today,
-                usable_energy_kwh, forecast_today, usable_energy_kwh + forecast_today,
-                avg_consumption_kwh,
+                raw_forecast, forecast_today,
+                usable_energy_kwh, raw_forecast, usable_energy_kwh + raw_forecast,
+                avg_consumption_kwh, DELAY_BALANCE_DEADBAND_KWH,
                 "grid needed (unlock delay)" if ctrl._charge_delay_balance_needs_charge else "solar sufficient (keep delay)",
             )
 
         if ctrl._charge_delay_balance_needs_charge:
+            # Genuine grid-deficit day: rather than unlocking immediately (often a
+            # pre-dawn price peak), hold until the cheapest import hour before solar
+            # is due, so the unavoidable grid charge lands in the cheap window (#4).
+            if self._low_forecast_price_release(now_h):
+                return True
             return _unlock("low_forecast")
 
         # --- Exception 3: No T_start detected ---
@@ -576,6 +590,33 @@ class ChargeDelayManager:
         if cur_price is not None and cur_price <= best_p + eps:
             return now_h
         return best_h
+
+    def _low_forecast_price_release(self, now_h: float) -> bool:
+        """Hold a genuine grid-deficit day until its cheapest import hour.
+
+        On a balanced/low-forecast day the battery must take some grid charge, but
+        unlocking the moment the deficit is detected (often pre-dawn) charges at a
+        price peak. Instead, hold until the cheapest price slot in the window before
+        solar production is expected, so the unavoidable import lands in the cheap
+        window (#4). Reuses :meth:`_price_optimal_release_h` (min-price slot in a
+        feasible window — the same selection serves cheapest-import here as it does
+        cheapest-export for the PV-surplus hold).
+
+        Returns True to keep holding, False to unlock now: when the current hour is
+        already the cheapest, when no price data is available (legacy immediate
+        unlock preserved), or when there is no pre-solar slack left.
+        """
+        ctrl = self._controller
+        edge_h = ctrl._solar_t_start if ctrl._solar_t_start is not None else T_START_FALLBACK_HOUR
+        if edge_h <= now_h:
+            return False  # solar already due/past — no cheap pre-solar window
+        release_h = self._price_optimal_release_h(now_h, edge_h)
+        if release_h is None or now_h + 1e-6 >= release_h:
+            return False  # no price data, or now is the cheapest feasible hour
+        hhmm = ctrl._consumption_tracker.h_to_hhmm(release_h)
+        ctrl._charge_delay_status["estimated_unlock_time"] = hhmm
+        ctrl._charge_delay_status["state"] = f"Delayed (cheap import {hhmm} est.)"
+        return True
 
     def _estimate_energy_balance_unlock_h(
         self,
