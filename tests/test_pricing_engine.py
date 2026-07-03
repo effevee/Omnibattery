@@ -190,6 +190,54 @@ def test_remaining_consumption_zero_at_midnight():
 
 
 # ----------------------------------------------------------------------
+# _remaining_solar_today_kwh (evening/SOC-drop recharge, pre-dawn blind spot)
+# ----------------------------------------------------------------------
+
+def _solar_ctrl(forecast="40.0", produced=0.0, t_start=None):
+    hass = SimpleNamespace(states=SimpleNamespace(get=lambda eid: SimpleNamespace(state=forecast) if forecast is not None else None))
+    ctrl = _controller(
+        solar_forecast_sensor="sensor.solcast_today",
+        _daily_solar_energy_kwh=produced,
+        _solar_t_start=t_start,
+        _consumption_tracker=SimpleNamespace(
+            estimate_t_end=lambda: 21.0,
+            get_solar_fraction_done=lambda now_h, t_start, t_end: 0.5,
+        ),
+    )
+    return PricingManager(hass, ctrl)
+
+
+def test_remaining_solar_predawn_uses_full_forecast():
+    # #411 regression: SOC-drop re-eval fires pre-dawn (accumulator 0, no
+    # T_start) → the whole forecast is still to come, not 0.
+    assert _solar_ctrl()._remaining_solar_today_kwh(6.0) == 40.0 * 0.85
+
+
+def test_remaining_solar_zero_when_no_production_after_fallback_hour():
+    # Past T_START_FALLBACK_HOUR with nothing produced: solar sensor likely
+    # broken — keep the conservative 0 so the evening top-up still books slots.
+    assert _solar_ctrl()._remaining_solar_today_kwh(16.0) == 0.0
+
+
+def test_remaining_solar_subtracts_produced_when_accumulator_warm():
+    assert _solar_ctrl(produced=10.0)._remaining_solar_today_kwh(12.0) == 40.0 * 0.85 - 10.0
+
+
+def test_remaining_solar_uses_fraction_when_t_start_known():
+    # Accumulator cold but production started → sinusoidal fraction (stub: 50%).
+    assert _solar_ctrl(t_start=8.0)._remaining_solar_today_kwh(14.0) == 40.0 * 0.85 * 0.5
+
+
+def test_remaining_solar_zero_when_forecast_unavailable():
+    assert _solar_ctrl(forecast="unavailable")._remaining_solar_today_kwh(6.0) == 0.0
+
+
+def test_remaining_solar_zero_when_no_sensor_configured():
+    ctrl = _controller(solar_forecast_sensor=None)
+    assert PricingManager(SimpleNamespace(), ctrl)._remaining_solar_today_kwh(6.0) == 0.0
+
+
+# ----------------------------------------------------------------------
 # apply_price_discharge_block — early-return branches (no hass touched)
 # ----------------------------------------------------------------------
 

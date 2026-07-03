@@ -33,6 +33,7 @@ from ..const import (
     EVENING_REEVAL_HOURS_BEFORE_TEND,
     EVENING_REEVAL_FALLBACK_HOUR,
     EVENING_DEFICIT_THRESHOLD_KWH,
+    T_START_FALLBACK_HOUR,
     FLOOR_HYSTERESIS_PCT,
 )
 from . import PriceSlot, DynamicPricingSchedule, calculations, notifications
@@ -557,6 +558,38 @@ class PricingManager:
             rate = avg_daily_kwh / 24.0
         return rate * hours_to_midnight, rate
 
+    def _remaining_solar_today_kwh(self, now_h: float) -> float:
+        """Solar generation still expected today (kWh), from the forecast sensor.
+
+        Three progressively weaker sources: actual accumulator (forecast −
+        produced-so-far), sinusoidal fraction (when production started but the
+        accumulator is cold), or — before production could plausibly have
+        started — the full forecast. The last branch matters for the SOC-drop
+        re-evaluation (#411), which can fire pre-dawn when both accumulator and
+        T_start are empty: without it the day's entire forecast was treated as
+        0 kWh, booking cheap grid slots for a "deficit" that solar covers.
+        After the cutoff hour with no production seen, keep the conservative
+        0 (solar sensor likely broken; better to book the slots than run dry).
+        """
+        if not self._controller.solar_forecast_sensor:
+            return 0.0
+        forecast_state = self._hass.states.get(self._controller.solar_forecast_sensor)
+        if not forecast_state or forecast_state.state in ("unknown", "unavailable"):
+            return 0.0
+        try:
+            forecast_today = float(forecast_state.state) * 0.85
+            if self._controller._daily_solar_energy_kwh > 0:
+                return max(0.0, forecast_today - self._controller._daily_solar_energy_kwh)
+            if self._controller._solar_t_start is not None:
+                t_end = self._controller._consumption_tracker.estimate_t_end()
+                fraction_done = self._controller._consumption_tracker.get_solar_fraction_done(now_h, self._controller._solar_t_start, t_end)
+                return forecast_today * (1.0 - fraction_done)
+            if now_h < T_START_FALLBACK_HOUR:
+                return forecast_today
+        except (ValueError, TypeError):
+            pass
+        return 0.0
+
     async def _evaluate_evening_recharge(self) -> None:
         """Late-day re-evaluation: charge batteries cheaply if solar fell short.
 
@@ -615,21 +648,7 @@ class PricingManager:
 
         # --- Remaining solar expected today (raw generation, before consumption) ---
         now_h = now.hour + now.minute / 60.0
-        remaining_solar_kwh = 0.0
-
-        if self._controller.solar_forecast_sensor:
-            forecast_state = self._hass.states.get(self._controller.solar_forecast_sensor)
-            if forecast_state and forecast_state.state not in ("unknown", "unavailable"):
-                try:
-                    forecast_today = float(forecast_state.state) * 0.85
-                    if self._controller._daily_solar_energy_kwh > 0:
-                        remaining_solar_kwh = max(0.0, forecast_today - self._controller._daily_solar_energy_kwh)
-                    elif self._controller._solar_t_start is not None:
-                        t_end = self._controller._consumption_tracker.estimate_t_end()
-                        fraction_done = self._controller._consumption_tracker.get_solar_fraction_done(now_h, self._controller._solar_t_start, t_end)
-                        remaining_solar_kwh = forecast_today * (1.0 - fraction_done)
-                except (ValueError, TypeError):
-                    pass
+        remaining_solar_kwh = self._remaining_solar_today_kwh(now_h)
 
         # --- Remaining house consumption until midnight (handoff to the 00:05
         # eval, which re-plans the next day). Project *today's actual* rate onto
