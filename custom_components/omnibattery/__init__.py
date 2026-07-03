@@ -462,6 +462,13 @@ class ChargeDischargeController:
         self._active_balance_mgr = ActiveBalanceModeManager(hass, self)
         self._max_soc_mgr = MaxSocChargeManager(hass, self)
         self._temp_limit_mgr = TemperatureChargeLimitManager(hass, self)
+        # Temperature-based charge derate: settings must load before the first
+        # capacity calculation because _battery_power_limit() reads them.
+        self.temp_charge_limit_enabled = config_entry.data.get(CONF_ENABLE_TEMP_CHARGE_LIMIT, DEFAULT_ENABLE_TEMP_CHARGE_LIMIT)
+        self._temp_charge_limit_c = config_entry.data.get(CONF_TEMP_CHARGE_LIMIT_C, DEFAULT_TEMP_CHARGE_LIMIT_C)
+        self._temp_charge_limit_band_c = config_entry.data.get(CONF_TEMP_CHARGE_LIMIT_BAND_C, DEFAULT_TEMP_CHARGE_LIMIT_BAND_C)
+        self._temp_charge_limit_floor_pct = config_entry.data.get(CONF_TEMP_CHARGE_LIMIT_FLOOR_PCT, DEFAULT_TEMP_CHARGE_LIMIT_FLOOR_PCT)
+        self.temp_limit_apply_discharge = config_entry.data.get(CONF_TEMP_LIMIT_APPLY_DISCHARGE, DEFAULT_TEMP_LIMIT_APPLY_DISCHARGE)
 
         # Calculate dynamic anti-windup limits based on total system capacity
         self.max_charge_capacity = self._effective_system_capacity(coordinators, is_charging=True)
@@ -653,12 +660,6 @@ class ChargeDischargeController:
         self._charge_delay_balance_deadband_kwh = config_entry.data.get(CONF_CHARGE_DELAY_BALANCE_DEADBAND_KWH, DEFAULT_CHARGE_DELAY_BALANCE_DEADBAND_KWH)
         self._delay_soc_setpoint_enabled = config_entry.data.get(CONF_DELAY_SOC_SETPOINT_ENABLED, DEFAULT_DELAY_SOC_SETPOINT_ENABLED)
         self._delay_soc_setpoint = config_entry.data.get(CONF_DELAY_SOC_SETPOINT, DEFAULT_DELAY_SOC_SETPOINT)
-        # Temperature-based charge derate
-        self.temp_charge_limit_enabled = config_entry.data.get(CONF_ENABLE_TEMP_CHARGE_LIMIT, DEFAULT_ENABLE_TEMP_CHARGE_LIMIT)
-        self._temp_charge_limit_c = config_entry.data.get(CONF_TEMP_CHARGE_LIMIT_C, DEFAULT_TEMP_CHARGE_LIMIT_C)
-        self._temp_charge_limit_band_c = config_entry.data.get(CONF_TEMP_CHARGE_LIMIT_BAND_C, DEFAULT_TEMP_CHARGE_LIMIT_BAND_C)
-        self._temp_charge_limit_floor_pct = config_entry.data.get(CONF_TEMP_CHARGE_LIMIT_FLOOR_PCT, DEFAULT_TEMP_CHARGE_LIMIT_FLOOR_PCT)
-        self.temp_limit_apply_discharge = config_entry.data.get(CONF_TEMP_LIMIT_APPLY_DISCHARGE, DEFAULT_TEMP_LIMIT_APPLY_DISCHARGE)
         self._weekly_full_charge_skip_delay = config_entry.data.get(
             CONF_WEEKLY_FULL_CHARGE_SKIP_DELAY, DEFAULT_WEEKLY_FULL_CHARGE_SKIP_DELAY
         )
