@@ -498,24 +498,27 @@ class ConsumptionTracker:
         # OPPORTUNISTIC BACKFILL: Replace default entries with real data from HA history
         # This recovers real data after restarts or when defaults were pre-populated.
         # Window = the 7 most recent operating days (skips non-operating days).
+        # Gate on <7 real entries so a permanently unfillable day (no recorder
+        # data) isn't re-queried on every predictive evaluation.
         real_data_dates = {
             d for d, c in ctrl._daily_consumption_history if c != DEFAULT_BASE_CONSUMPTION_KWH
         }
-        for past_date in self._recent_operating_days(7):
-            if past_date not in real_data_dates:
-                value = await self.backfill_home_from_history(past_date)
-                if value is not None and value >= 1.5:
-                    replaced = False
-                    for i, (d, c) in enumerate(ctrl._daily_consumption_history):
-                        if d == past_date:
-                            ctrl._daily_consumption_history[i] = (past_date, value)
-                            replaced = True
-                            break
-                    if not replaced:
-                        ctrl._daily_consumption_history.append((past_date, value))
-                    ctrl._daily_consumption_history.sort(key=lambda x: x[0])
-                    ctrl._daily_consumption_history = ctrl._daily_consumption_history[-7:]
-                await asyncio.sleep(0.1)  # Small delay between history queries
+        if len(real_data_dates) < 7:
+            for past_date in self._recent_operating_days(7):
+                if past_date not in real_data_dates:
+                    value = await self.backfill_home_from_history(past_date)
+                    if value is not None and value >= 1.5:
+                        replaced = False
+                        for i, (d, c) in enumerate(ctrl._daily_consumption_history):
+                            if d == past_date:
+                                ctrl._daily_consumption_history[i] = (past_date, value)
+                                replaced = True
+                                break
+                        if not replaced:
+                            ctrl._daily_consumption_history.append((past_date, value))
+                        ctrl._daily_consumption_history.sort(key=lambda x: x[0])
+                        ctrl._daily_consumption_history = ctrl._daily_consumption_history[-7:]
+                    await asyncio.sleep(0.1)  # Small delay between history queries
 
         # Calculate average from history
         if len(ctrl._daily_consumption_history) == 0:
