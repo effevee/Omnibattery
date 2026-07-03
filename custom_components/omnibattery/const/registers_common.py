@@ -73,12 +73,13 @@ MESSAGE_WAIT_MS = {
     "vD": 150,
 }
 
-# Version-specific per-read timeout (seconds).
-# The v3 weak MCU answers in well under a second at the 150ms cadence. A long
-# timeout lets a request that already timed out get answered late, leaving a
-# stale frame in the socket buffer that poisons the next read (pymodbus
-# "transaction_id mismatch", issue #361). Fail fast on v3 so a slow reply is
-# discarded promptly instead of cascading.
+# Version-specific per-attempt timeout (seconds), passed to pymodbus.
+# The v3 weak MCU answers in well under a second at the 150ms cadence, but
+# occasionally stalls for several seconds and then flushes queued replies in a
+# burst. Each pymodbus-internal retry re-sends the SAME transaction_id (>=3.8),
+# so a reply arriving after a per-attempt timeout still matches the retry and
+# is consumed (issue #361 history in infra/modbus_client.py). Keep v3 attempts
+# short so the retries land inside the stall window.
 READ_TIMEOUT_S = {
     "v2": 10,
     "v3": 3,

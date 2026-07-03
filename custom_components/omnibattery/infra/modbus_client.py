@@ -17,6 +17,14 @@ from ..const import DEBUG_RAW_MODBUS_READS, SERIAL_BAUDRATE
 
 _LOGGER = logging.getLogger(__name__)
 
+# pymodbus-internal retries per request. Since the pymodbus 3.8 transaction
+# manager rewrite, internal retries re-send the SAME transaction_id, so a late
+# answer from a stalled battery (the v3 MCU queues requests and flushes the
+# replies in a burst) matches the retry and is consumed as valid. Wrapper-level
+# retries minted a new tid per attempt, which guaranteed every flushed reply
+# was discarded with a "transaction_id mismatch, Skipping" error.
+_PYMODBUS_RETRIES = 2
+
 
 def _backoff_jitter(delay: float) -> float:
     """Return a symmetric +/-10% jitter for a retry backoff delay.
@@ -146,6 +154,11 @@ class MarstekModbusClient:
         self._host = host
         self._port = port
         self._timeout = timeout
+        # Outer safety-net timeout for one request: must cover all pymodbus
+        # internal attempts ((retries+1) x per-attempt timeout) plus margin.
+        # Cancelling pymodbus mid-transaction orphans an already-sent request,
+        # which recreates the stale-reply mismatch this design avoids.
+        self._request_timeout = timeout * (_PYMODBUS_RETRIES + 1) + 2
         self._is_v3 = is_v3
         self._serial_port = serial_port
         # pymodbus has no inter-message delay for TCP (message_wait_milliseconds
@@ -169,10 +182,14 @@ class MarstekModbusClient:
 
         Auto-reconnect is disabled: we manage reconnection ourselves by creating
         fresh client instances, which avoids pymodbus's internal reconnect_delay
-        growing up to 300s. retries=0 because our _read_raw loop already owns
-        retries+backoff; pymodbus's default 3 internal retries each fire a NEW
-        transaction_id, which surfaces as the "transaction_id mismatch" cascade on
-        the weak v3 MCU (issue #361).
+        growing up to 300s. Retries live INSIDE pymodbus (not in our loop):
+        since pymodbus 3.8 internal retries re-send the same transaction_id, so
+        a reply that arrives after the per-attempt timeout still matches the
+        retry and is consumed. The old note here ("internal retries each fire a
+        NEW transaction_id", issue #361) described pre-3.8 behaviour and is why
+        retries used to be 0 with the loop in _read_raw owning them — that
+        combination is what produced the "transaction_id mismatch, Skipping"
+        log spam whenever a v3 battery stalled and answered late.
 
         Serial uses RTU framing at a fixed 115200 8N1 — the rate Marstek's RS485
         link runs at (discussion #350); these are hardware-fixed, not tunable.
@@ -185,13 +202,13 @@ class MarstekModbusClient:
                 parity="N",
                 stopbits=1,
                 timeout=self._timeout,
-                retries=0,
+                retries=_PYMODBUS_RETRIES,
             )
         return AsyncModbusTcpClient(
             host=self._host,
             port=self._port,
             timeout=self._timeout,
-            retries=0,
+            retries=_PYMODBUS_RETRIES,
             reconnect_delay=0,
             reconnect_delay_max=0,
         )
@@ -298,15 +315,21 @@ class MarstekModbusClient:
         self,
         register: int,
         count: int,
-        max_retries: int = 3,
+        max_retries: int = 1,
         retry_delay: float = 0.1,
         sensor_key: Optional[str] = None,
     ) -> Optional[list]:
-        """Read ``count`` holding registers with retries, returning raw words.
+        """Read ``count`` holding registers, returning raw words.
 
-        Shared read+retry machinery for both single-register reads and block
-        reads. Returns the list of register words (length ``count``) or None on
+        Shared read machinery for both single-register reads and block reads.
+        Returns the list of register words (length ``count``) or None on
         failure. Callers decode the words with :func:`decode_registers`.
+
+        Default is a single attempt: retries are pymodbus-internal
+        (_PYMODBUS_RETRIES, same transaction_id per re-send) so late replies
+        from a stalled battery match and are consumed. Looping here would mint
+        a new tid per attempt and turn every late reply into a discarded
+        "transaction_id mismatch".
         """
         if not (0 <= register <= 0xFFFF):
             _LOGGER.error(
@@ -334,7 +357,7 @@ class MarstekModbusClient:
                 try:
                     result = await asyncio.wait_for(
                         self.client.read_holding_registers(address=register, count=count, **{self._slave_kwarg: self.unit_id}),
-                        timeout=self._timeout,
+                        timeout=self._request_timeout,
                     )
                 finally:
                     # Inter-message spacing: v3 firmware needs time between
@@ -412,7 +435,7 @@ class MarstekModbusClient:
         count: Optional[int] = None,
         bit_index: Optional[int] = None,
         sensor_key: Optional[str] = None,
-        max_retries: int = 3,
+        max_retries: int = 1,
         retry_delay: float = 0.1,
     ):
         """
@@ -448,7 +471,7 @@ class MarstekModbusClient:
         self,
         start: int,
         count: int,
-        max_retries: int = 3,
+        max_retries: int = 1,
         retry_delay: float = 0.1,
         block_key: Optional[str] = None,
     ) -> Optional[list]:
@@ -467,9 +490,13 @@ class MarstekModbusClient:
             sensor_key=block_key,
         )
 
-    async def async_write_register(self, register: int, value: int, max_retries: int = 3, retry_delay: float = 0.1) -> bool:
+    async def async_write_register(self, register: int, value: int, max_retries: int = 1, retry_delay: float = 0.1) -> bool:
         """
         Write a single value to a Modbus holding register asynchronously.
+
+        Default is a single attempt; retries are pymodbus-internal with the
+        same transaction_id (see ``_read_raw``). Re-sending a single-register
+        write is idempotent, so a duplicate delivery is harmless.
 
         Args:
             register (int): Register address to write to.
@@ -491,7 +518,7 @@ class MarstekModbusClient:
                 try:
                     result = await asyncio.wait_for(
                         self.client.write_register(address=register, value=value, **{self._slave_kwarg: self.unit_id}),
-                        timeout=self._timeout,
+                        timeout=self._request_timeout,
                     )
                 finally:
                     # Inter-message spacing (see async_read_register).

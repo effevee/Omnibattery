@@ -1,10 +1,14 @@
 """Retry/backoff and no-self-reconnect behaviour of the Modbus read/write loops.
 
 Exercises ``_read_raw`` and ``async_write_register`` against a scripted fake
-pymodbus client (no hardware, no HA). These pin two deliberate properties that
-had no coverage: the same-connection retry loop, and that a connection error
-does NOT trigger a reconnect from inside the loop (the coordinator owns
-reconnection; reconnecting here would storm the v3 single TCP slot, issue #361).
+pymodbus client (no hardware, no HA). These pin three deliberate properties:
+the default is a SINGLE wrapper attempt (retries are pymodbus-internal so they
+re-send the same transaction_id and a late reply still matches — wrapper
+retries minted a new tid per attempt, turning every late reply into a
+"transaction_id mismatch, Skipping" error), the same-connection retry loop
+still works for callers that opt in, and a connection error does NOT trigger
+a reconnect from inside the loop (the coordinator owns reconnection;
+reconnecting here would storm the v3 single TCP slot, issue #361).
 
 ``retry_delay=0`` keeps the backoff sleeps at zero so the tests run instantly.
 """
@@ -81,10 +85,20 @@ def test_read_success_returns_registers():
     assert fake.read_calls == 1
 
 
+def test_read_default_is_single_attempt():
+    """Default = one wrapper attempt: retries are pymodbus-internal (same tid),
+    a wrapper-level retry would mint a new tid and discard the late reply."""
+    fake = _FakeClient(read_results=[asyncio.TimeoutError(), _Result([5])])
+    c = _client_with_fake(fake)
+    regs = asyncio.run(c._read_raw(0x0010, 1, retry_delay=0))
+    assert regs is None
+    assert fake.read_calls == 1
+
+
 def test_read_retries_on_connection_error_then_succeeds():
     fake = _FakeClient(read_results=[ConnectionException("boom"), _Result([5])])
     c = _client_with_fake(fake)
-    regs = asyncio.run(c._read_raw(0x0010, 1, retry_delay=0))
+    regs = asyncio.run(c._read_raw(0x0010, 1, max_retries=2, retry_delay=0))
     assert regs == [5]
     assert fake.read_calls == 2
 
@@ -92,7 +106,7 @@ def test_read_retries_on_connection_error_then_succeeds():
 def test_read_timeout_is_retried():
     fake = _FakeClient(read_results=[asyncio.TimeoutError(), _Result([9])])
     c = _client_with_fake(fake)
-    regs = asyncio.run(c._read_raw(0x0010, 1, retry_delay=0))
+    regs = asyncio.run(c._read_raw(0x0010, 1, max_retries=2, retry_delay=0))
     assert regs == [9]
     assert fake.read_calls == 2
 
@@ -100,7 +114,7 @@ def test_read_timeout_is_retried():
 def test_read_error_result_is_retried():
     fake = _FakeClient(read_results=[_Result(error=True), _Result([7])])
     c = _client_with_fake(fake)
-    regs = asyncio.run(c._read_raw(0x0010, 1, retry_delay=0))
+    regs = asyncio.run(c._read_raw(0x0010, 1, max_retries=2, retry_delay=0))
     assert regs == [7]
     assert fake.read_calls == 2
 
@@ -135,7 +149,7 @@ def test_read_stops_immediately_when_shutting_down():
     fake = _FakeClient(read_results=[ConnectionException(), _Result([1])])
     c = _client_with_fake(fake)
     c._is_shutting_down = True
-    regs = asyncio.run(c._read_raw(0x0010, 1, retry_delay=0))
+    regs = asyncio.run(c._read_raw(0x0010, 1, max_retries=3, retry_delay=0))
     assert regs is None
     assert fake.read_calls == 1  # no retry once shutting down
 
@@ -162,10 +176,18 @@ def test_write_success_returns_true():
     assert fake.write_calls == 1
 
 
+def test_write_default_is_single_attempt():
+    """Same property as the read path: pymodbus owns the retries."""
+    fake = _FakeClient(write_results=[asyncio.TimeoutError(), _Result(error=False)])
+    c = _client_with_fake(fake)
+    assert asyncio.run(c.async_write_register(0x2000, 1, retry_delay=0)) is False
+    assert fake.write_calls == 1
+
+
 def test_write_retries_on_connection_error_then_succeeds():
     fake = _FakeClient(write_results=[ConnectionException(), _Result(error=False)])
     c = _client_with_fake(fake)
-    assert asyncio.run(c.async_write_register(0x2000, 1, retry_delay=0)) is True
+    assert asyncio.run(c.async_write_register(0x2000, 1, max_retries=2, retry_delay=0)) is True
     assert fake.write_calls == 2
 
 
