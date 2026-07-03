@@ -519,11 +519,14 @@ def _slot(hour, price):
 
 
 def _price_ctrl(slots, **overrides):
-    return _controller(
+    base = dict(
         price_sensor="sensor.price",
+        predictive_charging_enabled=True,
+        predictive_charging_mode="dynamic_pricing",
         _pricing_mgr=SimpleNamespace(get_future_price_slots=lambda horizon_end=None: slots),
-        **overrides,
     )
+    base.update(overrides)
+    return _controller(**base)
 
 
 def test_price_release_none_without_sensor():
@@ -534,6 +537,20 @@ def test_price_release_none_without_sensor():
 
 def test_price_release_none_on_empty_slots():
     mgr = _make_mgr(_price_ctrl([]))
+    assert mgr._price_optimal_release_h(11.0, 16.0) is None
+
+
+def test_price_release_none_in_time_slot_mode():
+    # Price sensor configured (e.g. for testing) but predictive charging uses
+    # time slots, not prices → the solar-delay release must ignore prices.
+    slots = [_slot(11, 0.21), _slot(13, 0.14)]
+    mgr = _make_mgr(_price_ctrl(slots, predictive_charging_mode="time_slot"))
+    assert mgr._price_optimal_release_h(11.0, 16.0) is None
+
+
+def test_price_release_none_when_predictive_disabled():
+    slots = [_slot(11, 0.21), _slot(13, 0.14)]
+    mgr = _make_mgr(_price_ctrl(slots, predictive_charging_enabled=False))
     assert mgr._price_optimal_release_h(11.0, 16.0) is None
 
 

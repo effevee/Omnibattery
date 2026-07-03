@@ -31,7 +31,16 @@ from ..const import (
     DELAY_SAFETY_FACTOR,
     DELAY_SOC_SETPOINT_HYSTERESIS,
     DOMAIN,
+    PREDICTIVE_MODE_DYNAMIC_PRICING,
+    PREDICTIVE_MODE_REALTIME_PRICE,
     T_START_FALLBACK_HOUR,
+)
+
+# Price-aware release only makes sense when charging is actually scheduled by
+# price. In time-slot mode prices drive nothing, so a configured price_sensor
+# (e.g. left over from testing) must not pull the solar-delay release around.
+_PRICE_DRIVEN_MODES = frozenset(
+    {PREDICTIVE_MODE_DYNAMIC_PRICING, PREDICTIVE_MODE_REALTIME_PRICE}
 )
 
 if TYPE_CHECKING:
@@ -588,6 +597,14 @@ class ChargeDelayManager:
         defers past it, so the SOC-target safety margin enforced upstream is intact.
         """
         ctrl = self._controller
+        # Only honour prices when predictive charging is actually price-driven.
+        # In time-slot mode a configured price_sensor drives nothing, so it must
+        # not move the solar-delay release (degrade to legacy edge-release).
+        if (
+            not getattr(ctrl, "predictive_charging_enabled", False)
+            or getattr(ctrl, "predictive_charging_mode", None) not in _PRICE_DRIVEN_MODES
+        ):
+            return None
         pricing = getattr(ctrl, "_pricing_mgr", None)
         if pricing is None or not getattr(ctrl, "price_sensor", None):
             return None
