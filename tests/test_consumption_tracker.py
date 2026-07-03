@@ -8,7 +8,7 @@ helpers are called directly, and the one instance test uses the in-process
 from __future__ import annotations
 
 import math
-from datetime import date
+from datetime import date, timedelta
 from types import SimpleNamespace
 
 import pytest
@@ -131,16 +131,39 @@ def test_is_operating_day_true_when_no_slots():
     assert tracker._is_operating_day(date(2026, 6, 27))  # a Saturday
 
 
-def test_initialize_defaults_skips_non_operating_days():
+def test_recent_operating_days_reaches_across_weekend():
+    # The window is 7 OPERATING days, not 7 calendar days: on a Friday it reaches
+    # back over the weekend into the previous week. (Issue #46 clarification.)
     tracker = _make_history_tracker([], _MON_FRI)
-    # Anchor "today" so the 7-day window is deterministic: 2026-07-03 is a Friday,
-    # so the past-7 window spans Sat 06-27 and Sun 06-28.
+    days = tracker._recent_operating_days(7, before=date(2026, 7, 3))  # a Friday
+    assert days == [
+        date(2026, 7, 2),   # Thu (yesterday)
+        date(2026, 7, 1),   # Wed
+        date(2026, 6, 30),  # Tue
+        date(2026, 6, 29),  # Mon
+        date(2026, 6, 26),  # Fri  (skipped Sun 28 + Sat 27)
+        date(2026, 6, 25),  # Thu
+        date(2026, 6, 24),  # Wed
+    ]
+    # No weekend day ever appears.
+    assert all(tracker._is_operating_day(d) for d in days)
+
+
+def test_recent_operating_days_all_when_no_slots():
+    # 24/7 config → 7 consecutive calendar days before `before`.
+    tracker = _make_history_tracker([], [])
+    days = tracker._recent_operating_days(7, before=date(2026, 7, 3))
+    assert days == [date(2026, 7, 3) - timedelta(days=i) for i in range(1, 8)]
+
+
+def test_initialize_defaults_seeds_seven_operating_days():
+    tracker = _make_history_tracker([], _MON_FRI)
     import custom_components.omnibattery.tracking.consumption_tracker as ct
 
     class _FrozenDate(date):
         @classmethod
         def today(cls):
-            return date(2026, 7, 3)
+            return date(2026, 7, 3)  # Friday
 
     orig = ct.date
     ct.date = _FrozenDate
@@ -150,10 +173,9 @@ def test_initialize_defaults_skips_non_operating_days():
         ct.date = orig
 
     seeded = {d for d, _ in tracker._controller._daily_consumption_history}
-    assert date(2026, 6, 27) not in seeded  # Saturday
-    assert date(2026, 6, 28) not in seeded  # Sunday
-    assert date(2026, 7, 3) in seeded        # Friday
-    # Every seeded day is an operating weekday.
+    assert len(seeded) == 7                    # always 7 operating days
+    assert date(2026, 6, 27) not in seeded     # Saturday
+    assert date(2026, 6, 28) not in seeded     # Sunday
     assert all(tracker._is_operating_day(d) for d in seeded)
 
 

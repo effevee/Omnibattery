@@ -494,30 +494,28 @@ class ConsumptionTracker:
         the Home Consumption sensor's recorder history.
         """
         ctrl = self._controller
-        today = date.today()
 
         # OPPORTUNISTIC BACKFILL: Replace default entries with real data from HA history
-        # This recovers real data after restarts or when defaults were pre-populated
+        # This recovers real data after restarts or when defaults were pre-populated.
+        # Window = the 7 most recent operating days (skips non-operating days).
         real_data_dates = {
             d for d, c in ctrl._daily_consumption_history if c != DEFAULT_BASE_CONSUMPTION_KWH
         }
-        if len(real_data_dates) < 7:
-            for days_ago in range(1, 8):  # Look back 7 days (excluding today)
-                past_date = today - timedelta(days=days_ago)
-                if past_date not in real_data_dates:
-                    value = await self.backfill_home_from_history(past_date)
-                    if value is not None and value >= 1.5:
-                        replaced = False
-                        for i, (d, c) in enumerate(ctrl._daily_consumption_history):
-                            if d == past_date:
-                                ctrl._daily_consumption_history[i] = (past_date, value)
-                                replaced = True
-                                break
-                        if not replaced:
-                            ctrl._daily_consumption_history.append((past_date, value))
-                        ctrl._daily_consumption_history.sort(key=lambda x: x[0])
-                        ctrl._daily_consumption_history = ctrl._daily_consumption_history[-7:]
-                    await asyncio.sleep(0.1)  # Small delay between history queries
+        for past_date in self._recent_operating_days(7):
+            if past_date not in real_data_dates:
+                value = await self.backfill_home_from_history(past_date)
+                if value is not None and value >= 1.5:
+                    replaced = False
+                    for i, (d, c) in enumerate(ctrl._daily_consumption_history):
+                        if d == past_date:
+                            ctrl._daily_consumption_history[i] = (past_date, value)
+                            replaced = True
+                            break
+                    if not replaced:
+                        ctrl._daily_consumption_history.append((past_date, value))
+                    ctrl._daily_consumption_history.sort(key=lambda x: x[0])
+                    ctrl._daily_consumption_history = ctrl._daily_consumption_history[-7:]
+                await asyncio.sleep(0.1)  # Small delay between history queries
 
         # Calculate average from history
         if len(ctrl._daily_consumption_history) == 0:
@@ -564,6 +562,25 @@ class ConsumptionTracker:
             return True
         day_name = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"][d.weekday()]
         return any(day_name in s.get("days", []) for s in slots)
+
+    def _recent_operating_days(self, n: int = 7, *, before: Optional[date] = None) -> list[date]:
+        """The ``n`` most recent operating dates strictly before ``before`` (default today).
+
+        Walks the calendar backwards skipping non-operating days, so the history
+        window always spans ``n`` days the battery actually ran — reaching past
+        weekends into the previous week rather than shrinking. Bounded so an
+        unusual slot config (few operating days per week) can't loop unboundedly;
+        returns fewer than ``n`` only if the bound is hit.
+        """
+        before = before or date.today()
+        limit = before - timedelta(days=n * 7 + 7)  # worst case ~1 operating day/week
+        days: list[date] = []
+        d = before - timedelta(days=1)
+        while len(days) < n and d > limit:
+            if self._is_operating_day(d):
+                days.append(d)
+            d -= timedelta(days=1)
+        return days
 
     def _home_consumption_entity_id(self) -> Optional[str]:
         """Resolve the aggregate Home Consumption power sensor's entity_id.
@@ -752,8 +769,6 @@ class ConsumptionTracker:
         if not ctrl.predictive_charging_enabled:
             return
 
-        today = date.today()
-
         # Drop stale synthetic entries for non-operating days (e.g. weekends
         # outside the charging window) left by an earlier default-seeding run.
         # These are never measured, so a 5.0 kWh default only skews the average.
@@ -772,13 +787,14 @@ class ConsumptionTracker:
             sum(1 for _, c in ctrl._daily_consumption_history if c != DEFAULT_BASE_CONSUMPTION_KWH),
         )
 
-        # Try to backfill past days from recorder history
+        # Try to backfill past days from recorder history.
+        # Window = the 7 most recent operating days (skips non-operating days).
+        target_days = self._recent_operating_days(7)
         real_data_dates = {
             d for d, c in ctrl._daily_consumption_history if c != DEFAULT_BASE_CONSUMPTION_KWH
         }
         backfill_count = 0
-        for days_ago in range(1, 8):
-            past_date = today - timedelta(days=days_ago)
+        for past_date in target_days:
             if past_date not in real_data_dates:
                 value = await self.backfill_home_from_history(past_date)
                 if value is not None and value >= 1.5:
@@ -795,7 +811,7 @@ class ConsumptionTracker:
                 await asyncio.sleep(0.1)
                 backfill_count += 1
 
-        # Fill any remaining gaps in the 7-day window so we always have 7 entries.
+        # Fill any remaining gaps in the window so we always have 7 operating days.
         # Use the average of real entries as the gap value; fall back to
         # DEFAULT_BASE_CONSUMPTION_KWH only if there are no real entries at all.
         real_values = [
@@ -806,9 +822,8 @@ class ConsumptionTracker:
             else DEFAULT_BASE_CONSUMPTION_KWH
         )
         existing_dates = {d for d, _ in ctrl._daily_consumption_history}
-        for days_ago in range(1, 8):
-            past_date = today - timedelta(days=days_ago)
-            if past_date not in existing_dates and self._is_operating_day(past_date):
+        for past_date in target_days:
+            if past_date not in existing_dates:
                 ctrl._daily_consumption_history.append((past_date, gap_value))
                 _LOGGER.info(
                     "Startup backfill: no data found for %s, inserted %.2f kWh (%s)",
@@ -847,15 +862,10 @@ class ConsumptionTracker:
             DEFAULT_BASE_CONSUMPTION_KWH,
         )
 
-        today = date.today()
-
-        # Pre-populate the past 7 days with fallback values, but only for days the
-        # battery actually operates: non-operating days (e.g. weekends outside the
-        # charging window) are never measured, so seeding them would skew the avg.
-        for days_ago in range(6, -1, -1):
-            past_date = today - timedelta(days=days_ago)
-            if not self._is_operating_day(past_date):
-                continue
+        # Pre-populate the 7 most recent operating days with fallback values.
+        # Non-operating days (e.g. weekends outside the charging window) are never
+        # measured, so the window skips them and reaches further back instead.
+        for past_date in self._recent_operating_days(7):
             ctrl._daily_consumption_history.append((past_date, DEFAULT_BASE_CONSUMPTION_KWH))
 
         _LOGGER.info(
