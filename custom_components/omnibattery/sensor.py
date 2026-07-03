@@ -1185,6 +1185,10 @@ class IntegrationStatusSensor(SensorEntity):
             if status["charge_block_reason"]:
                 attrs["hourly_balance_charge_block_reason"] = status["charge_block_reason"]
 
+        temp_mgr = getattr(c, "_temp_limit_mgr", None)
+        if temp_mgr is not None and c.temp_charge_limit_enabled:
+            attrs["temperature_charge_limit"] = temp_mgr.get_status()
+
         balance_hold_batteries = self._balance_hold_batteries()
         if balance_hold_batteries:
             attrs["balance_hold_batteries"] = balance_hold_batteries
