@@ -2,11 +2,11 @@
   "config": {
     "step": {
       "migrate_legacy": {
-        "title": "Migrar des de Marstek Venus",
-        "description": "S’han trobat {count} configuració/ons de Marstek Venus existents. Migrar a Omnibattery conserva totes les teves entitats, historial i ajustos. Continuar?"
+        "title": "Migració des de Marstek Venus",
+        "description": "S’han trobat {count} configuracions de Marstek Venus existents. La migració a Omnibattery conserva totes les teves entitats, historial i ajustos. Continua?"
       },
       "user": {
-        "title": "Configurar Omnibattery",
+        "title": "Configura Omnibattery",
         "description": "Selecciona el sensor que mesura la importació/exportació de la xarxa elèctrica. Opcionalment, configura el sensor de predicció solar per a funcions avançades.",
         "data": {
           "consumption_sensor": "Sensor de consum de la xarxa",
@@ -17,10 +17,10 @@
         },
         "data_description": {
           "consumption_sensor": "Sensor que indica la potència importada (+) o exportada (-) a la xarxa. El controlador ajustarà les bateries per mantenir aquest valor a prop de 0W.",
-          "solar_forecast_sensor": "Sensor que proporciona la predicció de producció solar en kWh (ex: Solcast). Si es configura aquí, s'utilitzarà automàticament en càrrega predictiva i retard de càrrega solar.",
+          "solar_forecast_sensor": "Sensor que proporciona la predicció de producció solar en kWh (ex: Solcast). Si es configura aquí, s'utilitzarà automàticament per la càrrega predictiva i el retard de càrrega solar.",
           "solar_production_sensor": "Sensor de potència de producció fotovoltaica en temps real (W/kW) d'un inversor extern que no passa per les entrades MPPT de la bateria. S'utilitza per mostrar el node Solar al diagrama de flux del tauler. Deixa'l buit si els teus panells alimenten directament el MPPT de la bateria.",
           "meter_inverted": "Activa aquesta opció si el teu comptador utilitza el conveni oposat: positiu = exportació, negatiu = importació. La unitat (W/kW) es detecta automàticament.",
-          "max_contracted_power": "Potència total contractada en watts. El sistema no superarà aquest límit en carregar per evitar que salti el diferencial"
+          "max_contracted_power": "Potència total contractada en watts. El sistema no superarà aquest límit en carregar per evitar que salti el comptador"
         }
       },
       "batteries": {
@@ -31,7 +31,7 @@
         }
       },
       "battery_brand": {
-        "title": "Configurar bateria {battery_num} — Marca",
+        "title": "Configura bateria {battery_num} — Marca",
         "description": "Selecciona la marca i model de la bateria {battery_num}.",
         "data": {
           "brand": "Marca de la bateria"
@@ -41,7 +41,7 @@
         }
       },
       "battery_connection": {
-        "title": "Configurar bateria {battery_num} — Connexió (Marstek)",
+        "title": "Configura bateria {battery_num} — Connexió (Marstek)",
         "description": "Introdueix les dades de connexió i el model de la bateria {battery_num}.",
         "data": {
           "name": "Nom",
@@ -53,15 +53,15 @@
         },
         "data_description": {
           "name": "Nom descriptiu per identificar aquesta bateria",
-          "host": "Adreça IP de la bateria a la teva xarxa local. Deixa-ho buit si utilitzes un port sèrie.",
+          "host": "Adreça IP de la bateria a la teva xarxa local. Deixa-ho buit si utilitzes un port de sèrie.",
           "port": "Port Modbus (normalment 502)",
           "slave_id": "ID d'esclau/unitat Modbus (per defecte 1). Canvia'l només si un proxy Modbus exposa diverses bateries a una mateixa IP:port amb IDs d'esclau diferents.",
-          "battery_version": "Selecciona la versió del model de la teva bateria. Ev2 per a models antics, Ev3 per a models nous amb mapa de registres actualitzat, A (Venus A) o D (Venus D) per a models d'inversor híbrid",
+          "battery_version": "Selecciona la versió del model de la teva bateria. Ev2 per a models antics, Ev3 per a models nous amb mapa de registres actualitzat, A (Venus A) o D (Venus D) per a models amb inversor híbrid",
           "serial_port": "Ruta de l'adaptador USB-RS485, p. ex. /dev/ttyUSB0 o COM3. Omple-ho en lloc de l'adreça IP per utilitzar Modbus RTU per sèrie; deixa-ho buit per a TCP."
         }
       },
       "battery_connection_zendure": {
-        "title": "Configurar bateria {battery_num} — Connexió (Zendure)",
+        "title": "Configura bateria {battery_num} — Connexió (Zendure)",
         "description": "Introdueix les dades de connexió per a la bateria Zendure SolarFlow {battery_num}. Activa primer HEMS a l'app Zendure.",
         "data": {
           "name": "Nom",
@@ -87,7 +87,7 @@
         }
       },
       "battery_limits": {
-        "title": "Configurar bateria {battery_num} — Límits",
+        "title": "Configura la bateria {battery_num} — Límits",
         "description": "Introdueix els límits de potència i SOC de la bateria {battery_num}.",
         "data": {
           "max_charge_power": "Potència màxima de càrrega",
@@ -95,8 +95,8 @@
           "max_soc": "SOC màxim (%)",
           "min_soc": "SOC mínim de descàrrega (%)",
           "charge_hysteresis_percent": "Histèresi de càrrega (%)",
-          "backup_offgrid_threshold": "Llindar de càrrega offgrid de backup (W)",
-          "full_charge_voltage_taper_enabled": "Activar reducció per voltatge en carregar al 100%",
+          "backup_offgrid_threshold": "Llindar de càrrega offgrid (fora de la xarxa) de backup (W)",
+          "full_charge_voltage_taper_enabled": "Activa la reducció per voltatge en carregar al 100%",
           "battery_capacity_kwh": "Capacitat nominal de la bateria (kWh)"
         },
         "data_description": {
@@ -107,14 +107,14 @@
           "charge_hysteresis_percent": "Sempre activa (mínim 2%). En arribar al màxim, la bateria no tornarà a carregar fins que el SOC baixi a (SOC màx − histèresi). Ex: SOC màx 100% amb 2% = no carrega fins a 98%.",
           "backup_offgrid_threshold": "Una càrrega offgrid superior a aquest valor es considera un esdeveniment de backup actiu, excloent la bateria del control PD. Augmenta'l si tens càrregues permanents (router, càmeres) al port offgrid.",
           "full_charge_voltage_taper_enabled": "Quan l'objectiu és 100%, limita la càrrega a 95 W des de 3,48 V de cel·la màxima i s'atura a 3,58 V per mesurar el desbalanç durant 60 segons.",
-          "battery_capacity_kwh": "Capacitat utilizable nominal del pack de bateries. S'usa per calcular l'energia emmagatzemada i l'eficiència a partir del SOC. Deixa en 0 si no la coneixes."
+          "battery_capacity_kwh": "Capacitat usable nominal del pack de bateries. S'usa per calcular l'energia emmagatzemada i l'eficiència a partir del SOC. Deixa en 0 si no la coneixes."
         }
       },
       "time_slots": {
         "title": "Franges horàries d'operació",
         "description": "Vols configurar franges horàries? Si configures franges, les bateries NOMÉS podran descarregar durant aquestes franges. Sense franges configurades, funcionen sempre.",
         "data": {
-          "configure_time_slots": "Configurar franges horàries"
+          "configure_time_slots": "Configura franges horàries"
         }
       },
       "add_time_slot": {
@@ -125,10 +125,10 @@
           "end_time": "Hora de fi",
           "days": "Dies de la setmana",
           "battery_scope": "Bateria afectada",
-          "allow_charge": "Permetre càrrega",
-          "allow_discharge": "Permetre descàrrega",
-          "soc_override_enabled": "Controlar SOC màx/mín de la franja",
-          "power_override_enabled": "Controlar potència màx de càrrega/descàrrega",
+          "allow_charge": "Permet la càrrega",
+          "allow_discharge": "Permet la descàrrega",
+          "soc_override_enabled": "Controla el SOC màx/mín de la franja",
+          "power_override_enabled": "Controla la potència màx de càrrega/descàrrega",
           "mode": "Mode d'operació"
         },
         "data_description": {
@@ -180,17 +180,17 @@
         }
       },
       "add_more_slots": {
-        "title": "Afegir més franges horàries",
+        "title": "Afegeix més franges horàries",
         "description": "Actualment tens {current_slots} franja/es configurada/es. Pots afegir fins a {max_slots} franges en total.",
         "data": {
-          "add_more": "Afegir una altra franja horària"
+          "add_more": "Afegeix una altra franja horària"
         }
       },
       "excluded_devices": {
-        "title": "Gestió de dispositius especials",
+        "title": "Gestió de dispositius exclosos",
         "description": "Configura dispositius amb gestió especial: pots EXCLOURE dispositius que NO han d'alimentar-se per bateria, o AFEGIR dispositius que SÍ ha d'alimentar la bateria tot i que no estiguin al sensor de consum de la llar.",
         "data": {
-          "configure_excluded_devices": "Configurar dispositius especials"
+          "configure_excluded_devices": "Configura dispositius exclosos"
         }
       },
       "add_excluded_device": {
@@ -199,7 +199,7 @@
         "data": {
           "power_sensor": "Sensor del dispositiu",
           "included_in_consumption": "El consum està inclòs al sensor de consum de la llar",
-          "allow_solar_surplus": "Permetre usar excedent solar (no carregar bateria)",
+          "allow_solar_surplus": "Permet l'ús d'excedent solar (no carregar bateria)",
           "ev_charger_no_telemetry": "Carregador VE sense telemetria de potència"
         },
         "data_description": {
@@ -210,17 +210,17 @@
         }
       },
       "add_more_excluded_devices": {
-        "title": "Afegir més dispositius exclosos",
+        "title": "Afegeix més dispositius exclosos",
         "description": "Actualment tens {current_devices} dispositiu/s exclòs/os. Pots afegir fins a {max_devices} dispositius en total.",
         "data": {
-          "add_more": "Afegir un altre dispositiu exclòs"
+          "add_more": "Afegeix un altre dispositiu exclòs"
         }
       },
       "predictive_charging": {
         "title": "Càrrega predictiva des de la xarxa",
         "description": "Vols activar la càrrega intel·ligent des de la xarxa? Aquesta funció permet carregar les bateries automàticament durant les hores vall quan la predicció solar d'avui és insuficient.",
         "data": {
-          "configure_predictive_charging": "Configurar càrrega predictiva"
+          "configure_predictive_charging": "Configura la càrrega predictiva"
         }
       },
       "predictive_charging_mode": {
@@ -309,7 +309,7 @@
         "title": "Càrrega completa setmanal",
         "description": "Vols activar la càrrega completa setmanal per al balanç de cel·les? Aquesta funció carrega les bateries al 100% un cop per setmana per equilibrar les cel·les.",
         "data": {
-          "configure_weekly_full_charge": "Configurar càrrega completa setmanal"
+          "configure_weekly_full_charge": "Configura la càrrega completa setmanal"
         }
       },
       "weekly_full_charge_config": {
@@ -326,7 +326,7 @@
         "title": "Retard de càrrega solar",
         "description": "Vols activar el retard de càrrega solar? Aquesta funció retarda la càrrega de les bateries fins que el balanç energètic solar indiqui que és necessari, exportant l'excedent a la xarxa mentrestant.",
         "data": {
-          "configure_charge_delay": "Configurar retard de càrrega"
+          "configure_charge_delay": "Configura el retard de càrrega"
         }
       },
       "charge_delay_config": {
@@ -349,7 +349,7 @@
         "title": "Límit de càrrega per temperatura",
         "description": "Voleu reduir la potència de càrrega quan una bateria s'escalfa? Per damunt d'un límit de temperatura la càrrega es redueix progressivament i es restableix quan la bateria es refreda.",
         "data": {
-          "configure_temp_charge_limit": "Configurar el límit de càrrega per temperatura"
+          "configure_temp_charge_limit": "Configura el límit de càrrega per temperatura"
         }
       },
       "temp_charge_limit_config": {
@@ -372,7 +372,7 @@
         "title": "Mode de reducció de pics",
         "description": "Si s'activa, quan el SOC de la bateria baixi d'un llindar, el sistema conservarà energia descarregant només per cobrir consum que superi un límit pic.",
         "data": {
-          "configure_capacity_protection": "Activar reducció de pics"
+          "configure_capacity_protection": "Activa la reducció de pics"
         }
       },
       "capacity_protection_config": {
@@ -389,7 +389,7 @@
       },
       "hourly_balance": {
         "title": "Balanç Net Horari",
-        "description": "Activar el control de balanç net horari? Aquesta funció registra la importació/exportació de xarxa per hora i ajusta automàticament el setpoint de la bateria per assolir un balanç d'energia objectiu.\n\n⚠️ **Aquesta funció només té utilitat a Espanya**, sota l'esquema de compensació d'excedents horària (Reial Decret 244/2019), on l'excedent abocat a la xarxa es liquida hora a hora. En mercats amb tarifa d'injecció (feed-in) o balanç net anual no aporta cap benefici i pot causar pèrdua d'ingressos per exportació i cicles innecessaris de la bateria.\n\nPaís detectat a Home Assistant: **{country}**.",
+        "description": "Activa el control de balanç net horari? Aquesta funció registra la importació/exportació de xarxa per hora i ajusta automàticament el setpoint de la bateria per assolir un balanç d'energia objectiu.\n\n⚠️ **Aquesta funció només té utilitat a Espanya**, sota l'esquema de compensació d'excedents horària (Reial Decret 244/2019), on l'excedent abocat a la xarxa es liquida hora a hora. En mercats amb tarifa d'injecció (feed-in) o balanç net anual no aporta cap benefici i pot causar pèrdua d'ingressos per exportació i cicles innecessaris de la bateria.\n\nPaís detectat a Home Assistant: **{country}**.",
         "data": {
           "configure_hourly_balance": "Configurar balanç net horari"
         }
@@ -448,7 +448,7 @@
         }
       },
       "reconfigure_battery": {
-        "title": "Reconfigurar bateria {battery_num} — Connexió (Marstek)",
+        "title": "Reconfigura la bateria {battery_num} — Connexió (Marstek)",
         "description": "Actualitza les dades de connexió de la bateria {battery_num}. Els límits de potència, SOC i la resta de configuració es conserven.",
         "data": {
           "name": "Nom",
@@ -468,7 +468,7 @@
         }
       },
       "reconfigure_battery_zendure": {
-        "title": "Reconfigurar bateria {battery_num} — Connexió (Zendure)",
+        "title": "Reconfigura la bateria {battery_num} — Connexió (Zendure)",
         "description": "Actualitza les dades de connexió de la bateria Zendure SolarFlow {battery_num}. La resta de configuració es conserva.",
         "data": {
           "name": "Nom",
@@ -527,7 +527,7 @@
   "options": {
     "step": {
       "init": {
-        "title": "Reconfigurar Omnibattery",
+        "title": "Reconfigura Omnibattery",
         "description": "Selecciona la secció que vols configurar.",
         "menu_options": {
           "sensors": "Sensors",
@@ -569,7 +569,7 @@
         }
       },
       "battery_brand": {
-        "title": "Configurar bateria {battery_num} — Marca",
+        "title": "Configura la bateria {battery_num} — Marca",
         "description": "Selecciona la marca i model de la bateria {battery_num}.",
         "data": {
           "brand": "Marca de la bateria"
@@ -579,7 +579,7 @@
         }
       },
       "battery_connection": {
-        "title": "Configurar bateria {battery_num} — Connexió (Marstek)",
+        "title": "Configura la bateria {battery_num} — Connexió (Marstek)",
         "description": "Modifica les dades de connexió i el model de la bateria {battery_num}.",
         "data": {
           "name": "Nom",
@@ -599,7 +599,7 @@
         }
       },
       "battery_connection_zendure": {
-        "title": "Configurar bateria {battery_num} — Connexió (Zendure)",
+        "title": "Configura la bateria {battery_num} — Connexió (Zendure)",
         "description": "Modifica les dades de connexió per a la bateria Zendure SolarFlow {battery_num}. Activa primer HEMS a l'app Zendure.",
         "data": {
           "name": "Nom",
@@ -625,7 +625,7 @@
         }
       },
       "battery_limits": {
-        "title": "Configurar bateria {battery_num} — Límits",
+        "title": "Configura la bateria {battery_num} — Límits",
         "description": "Modifica els límits de potència i SOC de la bateria {battery_num}.",
         "data": {
           "max_charge_power": "Potència màxima de càrrega",
@@ -725,14 +725,14 @@
         }
       },
       "excluded_devices": {
-        "title": "Gestió de dispositius especials",
+        "title": "Gestió de dispositius exclosos",
         "description": "Configura dispositius amb gestió especial: pots EXCLOURE dispositius que NO han d'alimentar-se per bateria, o AFEGIR dispositius que SÍ ha d'alimentar la bateria tot i que no estiguin al sensor de consum de la llar.",
         "data": {
-          "configure_excluded_devices": "Configurar dispositius especials"
+          "configure_excluded_devices": "Configurar dispositius exclosos"
         }
       },
       "add_excluded_device": {
-        "title": "Dispositiu especial {device_num}",
+        "title": "Dispositiu exclòs {device_num}",
         "description": "Configura com ha de gestionar la bateria aquest dispositiu.",
         "data": {
           "power_sensor": "Sensor del dispositiu",
@@ -748,17 +748,17 @@
         }
       },
       "add_more_excluded_devices": {
-        "title": "Afegir més dispositius especials",
-        "description": "Tens {current_devices} dispositiu/s configurat/s. Pots afegir fins a {max_devices} en total.",
+        "title": "Afegeix més dispositius exclosos",
+        "description": "Tens {current_devices} dispositiu/s configurat/s. Pots afegir-ne fins a {max_devices} en total.",
         "data": {
-          "add_more": "Afegir un altre dispositiu especial"
+          "add_more": "Afegir un altre dispositiu exclòs"
         }
       },
       "predictive_charging": {
         "title": "Càrrega predictiva des de la xarxa",
         "description": "Vols activar la càrrega intel·ligent des de la xarxa? Aquesta funció permet carregar les bateries automàticament durant les hores vall quan la predicció solar d'avui és insuficient.",
         "data": {
-          "configure_predictive_charging": "Configurar càrrega predictiva"
+          "configure_predictive_charging": "Configura la càrrega predictiva"
         }
       },
       "predictive_charging_mode": {
@@ -805,7 +805,7 @@
           "price_sensor": "Sensor de preu elèctric",
           "max_price_threshold": "Preu màxim (opcional)",
           "discharge_price_threshold": "Preu mínim de descàrrega (opcional)",
-          "dp_price_discharge_control": "Descarregar només quan el preu superi el llindar",
+          "dp_price_discharge_control": "Descarrega només quan el preu superi el llindar",
           "solar_forecast_sensor": "Sensor de predicció solar (kWh)",
           "predictive_safety_margin_kwh": "Marge de seguretat de previsió solar (kWh)",
           "predictive_grid_charge_margin_pct": "Marge de càrrega de xarxa predictiva (%)"
@@ -828,7 +828,7 @@
           "price_sensor": "Sensor de preu elèctric",
           "max_price_threshold": "Preu màxim (opcional)",
           "average_price_sensor": "Sensor de preu mitjà diari (opcional)",
-          "rt_price_discharge_control": "Descarregar només quan el preu superi el llindar",
+          "rt_price_discharge_control": "Descarrega només quan el preu superi el llindar",
           "solar_forecast_sensor": "Sensor de predicció solar (kWh)",
           "predictive_safety_margin_kwh": "Marge de seguretat de previsió solar (kWh)",
           "predictive_grid_charge_margin_pct": "Marge de càrrega de xarxa predictiva (%)"
@@ -847,7 +847,7 @@
         "title": "Càrrega completa setmanal",
         "description": "Vols activar la càrrega completa setmanal per al balanç de cel·les? Aquesta funció carrega les bateries al 100% un cop per setmana per equilibrar les cel·les.",
         "data": {
-          "configure_weekly_full_charge": "Configurar càrrega completa setmanal"
+          "configure_weekly_full_charge": "Configura la càrrega completa setmanal"
         }
       },
       "weekly_full_charge_config": {
@@ -864,7 +864,7 @@
         "title": "Retard de càrrega solar",
         "description": "Vols activar el retard de càrrega solar? Aquesta funció retarda la càrrega de les bateries fins que el balanç energètic solar indiqui que és necessari, exportant l'excedent a la xarxa mentrestant.",
         "data": {
-          "configure_charge_delay": "Configurar retard de càrrega"
+          "configure_charge_delay": "Configura el retard de càrrega"
         }
       },
       "charge_delay_config": {
@@ -887,7 +887,7 @@
         "title": "Límit de càrrega per temperatura",
         "description": "Voleu reduir la potència de càrrega quan una bateria s'escalfa? Per damunt d'un límit de temperatura la càrrega es redueix progressivament i es restableix quan la bateria es refreda.",
         "data": {
-          "configure_temp_charge_limit": "Configurar el límit de càrrega per temperatura"
+          "configure_temp_charge_limit": "Configura el límit de càrrega per temperatura"
         }
       },
       "temp_charge_limit_config": {
@@ -944,7 +944,7 @@
           "pd_min_charge_power": "Potència mínima de càrrega (W)",
           "pd_min_discharge_power": "Potència mínima de descàrrega (W)",
           "pd_target_grid_power": "Potència objectiu de xarxa (W)",
-          "enable_system_power_limits": "Activar límits de potència del sistema",
+          "enable_system_power_limits": "Activa els límits de potència del sistema",
           "system_max_charge_power": "Potència màxima de càrrega del sistema (W)",
           "system_max_discharge_power": "Potència màxima de descàrrega del sistema (W)"
         },
@@ -964,9 +964,9 @@
       },
       "hourly_balance": {
         "title": "Balanç Net Horari",
-        "description": "Activar el control de balanç net horari? Aquesta funció registra la importació/exportació de xarxa per hora i ajusta automàticament el setpoint de la bateria per assolir un balanç d'energia objectiu.\n\n⚠️ **Aquesta funció només té utilitat a Espanya**, sota l'esquema de compensació d'excedents horària (Reial Decret 244/2019), on l'excedent abocat a la xarxa es liquida hora a hora. En mercats amb tarifa d'injecció (feed-in) o balanç net anual no aporta cap benefici i pot causar pèrdua d'ingressos per exportació i cicles innecessaris de la bateria.\n\nPaís detectat a Home Assistant: **{country}**.",
+        "description": "Activa el control de balanç net horari? Aquesta funció registra la importació/exportació de xarxa per hora i ajusta automàticament el setpoint de la bateria per assolir un balanç d'energia objectiu.\n\n⚠️ **Aquesta funció només té utilitat a Espanya**, sota l'esquema de compensació d'excedents horària (Reial Decret 244/2019), on l'excedent abocat a la xarxa es liquida hora a hora. En mercats amb tarifa d'injecció (feed-in) o balanç net anual no aporta cap benefici i pot causar pèrdua d'ingressos per exportació i cicles innecessaris de la bateria.\n\nPaís detectat a Home Assistant: **{country}**.",
         "data": {
-          "configure_hourly_balance": "Configurar balanç net horari"
+          "configure_hourly_balance": "Configura el balanç net horari"
         }
       },
       "hourly_balance_config": {
@@ -1381,10 +1381,10 @@
         }
       },
       "last_balance_read": {
-        "name": "Balanç - Última Lectura"
+        "name": "Balanç - Darrera Lectura"
       },
       "delta_avg_4w": {
-        "name": "Balanç - Delta Mitjà (4 lectures)"
+        "name": "Balanç - Delta mitjana (4 lectures)"
       },
       "balance_neto": {
         "name": "Balanç Net",
@@ -1503,7 +1503,7 @@
         "name": "SOC Mínim de Descàrrega"
       },
       "charge_to_soc": {
-        "name": "Carregar fins a SOC"
+        "name": "Carrega fins al SOC"
       },
       "pd_controller_kp": {
         "name": "PD Kp"
@@ -1607,10 +1607,10 @@
     },
     "button": {
       "reset_device": {
-        "name": "Reiniciar Dispositiu"
+        "name": "Reinicia el Dispositiu"
       },
       "reevaluate_dynamic_pricing": {
-        "name": "Reavaluar Preus Dinàmics"
+        "name": "Reavalua els Preus Dinàmics"
       }
     }
   }
