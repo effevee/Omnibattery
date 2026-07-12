@@ -8,6 +8,9 @@
 - **Hideable control cards**: in the Control tab's arrange mode, each card gets an eye toggle that parks it in a "Hidden cards" section below the grid; restore it from there. Persists per browser. [`frontend/marstek-panel.js`](custom_components/omnibattery/frontend/marstek-panel.js).
 - **Feedforward on confirmed load steps (PD mode)**: a kettle/oven-sized load step is now covered in one deadbeat cycle (~5-7 s, actuator floor) instead of the ~13 s exponential approach of the incremental P term. Two-sample confirmation rejects meter spikes; a cooldown and an opposite-sign pulse guard keep pulsing loads (induction hobs) on the stable slow-PD averaging. [`__init__.py`](custom_components/omnibattery/__init__.py).
 
+### Fixed
+- **Battery reporting a 0 W power limit crashed the control cycle**: a Venus D whose `max_discharge_power` register reads 0 hit a division by zero in the load-sharing selector, aborting the whole cycle and leaving batteries idle. Zero-limit batteries are now skipped. [`control/power_distribution.py`](custom_components/omnibattery/control/power_distribution.py).
+
 ## [1.0.0b6] - 2026-07-04
 
 ### Added
