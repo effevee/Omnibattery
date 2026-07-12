@@ -65,8 +65,15 @@ async def async_setup_entry(
         entities.append(ManualModeSwitch(hass, entry, controller))
         entities.append(NoPdModeSwitch(hass, entry, controller))
 
-    # Add predictive charging switch (system-level, not per-battery)
-    if controller and controller.predictive_charging_enabled:
+    # Add predictive charging switch (system-level, not per-battery). Shown
+    # whenever predictive charging has been through config (the key is always
+    # written, True or False), not only when currently enabled, so the enable
+    # toggle behaves like the other feature blocks (charge delay, capacity
+    # protection): always visible on the dashboard, hiding its sibling sliders
+    # via the panel gate when OFF. Gating it on the enabled *value* previously
+    # made the switch vanish while the sliders (keyed on presence) stayed,
+    # leaving orphaned settings with no toggle (#68).
+    if controller and CONF_ENABLE_PREDICTIVE_CHARGING in entry.data:
         entities.append(PredictiveChargingSwitch(hass, entry, controller))
 
     # Add capacity protection switch (system-level, when configured, regardless of enabled state)
@@ -379,10 +386,19 @@ class BatteryActiveBalanceModeSwitch(SwitchEntity):
 
 
 class PredictiveChargingSwitch(SwitchEntity):
-    """Switch to enable/disable predictive grid charging.
+    """Switch to enable/disable predictive grid charging at runtime.
 
-    ON = predictive charging enabled (default when configured).
-    OFF = predictive charging paused (overridden).
+    Mirrors the other feature toggles (charge delay, capacity protection): always
+    visible once predictive charging is configured, drives the ``enable`` flag,
+    and the panel hides the sibling sliders when OFF.
+
+    ON  = predictive charging enabled and running.
+    OFF = predictive charging disabled/paused.
+
+    The two persisted booleans (``enabled`` = configured on, ``overridden`` =
+    runtime pause) are moved together so the switch stays consistent with every
+    consumer, whichever flag it reads (the pricing engine checks ``overridden``,
+    the time-slot path checks ``enabled``).
     """
 
     def __init__(self, hass: HomeAssistant, entry: ConfigEntry, controller) -> None:
@@ -400,13 +416,19 @@ class PredictiveChargingSwitch(SwitchEntity):
 
     @property
     def is_on(self) -> bool:
-        """Return True if predictive charging is enabled (not overridden)."""
-        return not self.controller.predictive_charging_overridden
+        """Return True when predictive charging is enabled and not paused."""
+        return (
+            self.controller.predictive_charging_enabled
+            and not self.controller.predictive_charging_overridden
+        )
 
     async def async_turn_on(self, **kwargs) -> None:
-        """Enable predictive charging (remove override)."""
+        """Enable predictive charging (set enabled, clear override)."""
+        was_enabled = self.controller.predictive_charging_enabled
+        self.controller.predictive_charging_enabled = True
         self.controller.predictive_charging_overridden = False
         new_data = dict(self.entry.data)
+        new_data[CONF_ENABLE_PREDICTIVE_CHARGING] = True
         new_data[CONF_PREDICTIVE_CHARGING_OVERRIDDEN] = False
         self.hass.config_entries.async_update_entry(self.entry, data=new_data)
         await self.hass.services.async_call(
@@ -415,12 +437,15 @@ class PredictiveChargingSwitch(SwitchEntity):
             {"notification_id": f"{NOTIFICATION_ID_PREFIX}predictive_charging_override"},
         )
         _LOGGER.info("Predictive charging enabled")
-        self.async_write_ha_state()
+        await self._apply_enabled_change(was_enabled, now_enabled=True)
 
     async def async_turn_off(self, **kwargs) -> None:
-        """Disable predictive charging (activate override)."""
+        """Disable predictive charging (clear enabled, set override)."""
+        was_enabled = self.controller.predictive_charging_enabled
+        self.controller.predictive_charging_enabled = False
         self.controller.predictive_charging_overridden = True
         new_data = dict(self.entry.data)
+        new_data[CONF_ENABLE_PREDICTIVE_CHARGING] = False
         new_data[CONF_PREDICTIVE_CHARGING_OVERRIDDEN] = True
         self.hass.config_entries.async_update_entry(self.entry, data=new_data)
         if self.controller.grid_charging_active:
@@ -437,7 +462,21 @@ class PredictiveChargingSwitch(SwitchEntity):
             },
         )
         _LOGGER.info("Predictive charging disabled (overridden)")
-        self.async_write_ha_state()
+        await self._apply_enabled_change(was_enabled, now_enabled=False)
+
+    async def _apply_enabled_change(self, was_enabled: bool, *, now_enabled: bool) -> None:
+        """Finish a toggle. When the ``enabled`` value flips, reload the entry so
+        the setup-time gating re-evaluates: the daily consumption-capture and
+        dynamic-pricing schedules and the predictive status sensor are all armed
+        (or torn down) only in ``async_setup_entry`` against this value, and the
+        entry-update listener does not reload. This mirrors the options flow,
+        which reloads on the same change. When only the runtime override moved
+        (a legacy paused entry resuming with ``enabled`` already True), a plain
+        state write suffices and avoids a needless reload."""
+        if was_enabled != now_enabled:
+            await self.hass.config_entries.async_reload(self.entry.entry_id)
+        else:
+            self.async_write_ha_state()
 
     @property
     def device_info(self):
