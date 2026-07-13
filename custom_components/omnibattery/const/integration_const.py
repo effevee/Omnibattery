@@ -244,6 +244,16 @@ FEEDFORWARD_CANDIDATE_MAX_AGE_S = 5.0 # s: candidate expires if not checked in t
 FEEDFORWARD_COOLDOWN_S = 10.0         # s: min spacing between fires (covers actuator ramp 3-6s)
 FEEDFORWARD_PULSE_GUARD_S = 30.0      # s: opposite-sign step this soon after a fire = pulsing load, skip
 
+# Zero-cross hold (direction-flip dwell): minimum seconds an opposite-direction
+# (charge<->discharge) request must persist before the PD is allowed to flip.
+# During a downward load step the grid shows a transient export while the
+# discharging battery is still ramping down (actuator settle 3-6 s measured), so
+# the incremental PD crosses zero and would command a real charge on another
+# battery, zeroing the discharger (5-40 s dips, ping-pong every 1-3 min). The
+# effective window is max(this, 2 * slowest actuator_latency_s) — see
+# _apply_zero_cross_hold. Legitimate sustained surplus flips after the window.
+PD_ZERO_CROSS_MIN_HOLD_S = 5.0
+
 # An actuator at or below this latency (seconds, DriverCapabilities.actuator_latency_s)
 # reaches its setpoint and reflects it in telemetry within one poll. Such drivers do
 # the hot-path readback and use the measured-power feedforward; slower ones (Zendure

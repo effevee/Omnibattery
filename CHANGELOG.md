@@ -9,6 +9,7 @@
 - **Feedforward on confirmed load steps (PD mode)**: a kettle/oven-sized load step is now covered in one deadbeat cycle (~5-7 s, actuator floor) instead of the ~13 s exponential approach of the incremental P term. Two-sample confirmation rejects meter spikes; a cooldown and an opposite-sign pulse guard keep pulsing loads (induction hobs) on the stable slow-PD averaging. [`__init__.py`](custom_components/omnibattery/__init__.py).
 
 ### Fixed
+- **Discharge dropped to 0 W for 5-40 s on downward load steps**: the transient grid export while the discharging battery ramped down made the incremental PD cross zero and emit a charge order on another battery, zeroing the discharger (ping-pong every 1-3 min). A charge↔discharge flip must now persist past the actuator settle window (~5 s) before it goes through; transients collapse back to discharge, sustained solar surplus still flips. [`__init__.py`](custom_components/omnibattery/__init__.py).
 - **Battery reporting a 0 W power limit crashed the control cycle**: a Venus D whose `max_discharge_power` register reads 0 hit a division by zero in the load-sharing selector, aborting the whole cycle and leaving batteries idle. Zero-limit batteries are now skipped. [`control/power_distribution.py`](custom_components/omnibattery/control/power_distribution.py).
 
 ## [1.0.0b6] - 2026-07-04

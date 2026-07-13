@@ -138,6 +138,7 @@ from .const import (
     FEEDFORWARD_CANDIDATE_MAX_AGE_S,
     FEEDFORWARD_COOLDOWN_S,
     FEEDFORWARD_PULSE_GUARD_S,
+    PD_ZERO_CROSS_MIN_HOLD_S,
     FAST_ACTUATOR_MAX_LATENCY_S,
     DISCHARGE_ENGAGE_GRACE_S,
     IDLE_RUNAWAY_POWER_W,
@@ -354,6 +355,10 @@ class ChargeDischargeController:
         # instant, so the relay doesn't click off as soon as demand falls.
         self._relay_cooldown_s = config_entry.data.get(CONF_PD_RELAY_COOLDOWN, DEFAULT_PD_RELAY_COOLDOWN)
         self._relay_shutoff_since = None
+        # Zero-cross hold (direction-flip dwell): stamped on the first cycle that
+        # requests the opposite charge/discharge direction; the flip is clamped to
+        # 0 until the request persists past the actuator settle window.
+        self._zero_cross_since = None
         # Event-driven cycle rate limit: drop grid-sensor triggers that arrive
         # closer together than this, so fast meters can't flood the Modbus bridge.
         # NOT raised to the slowest actuator's latency: a slow battery (Zendure HTTP)
@@ -4240,6 +4245,69 @@ class ChargeDischargeController:
         )
         return held_power
 
+    def _apply_zero_cross_hold(self, new_power, error):
+        """ZERO-CROSS HOLD (direction-flip dwell).
+
+        On a downward load step the discharging battery keeps delivering its old
+        setpoint for the actuator settle time (~3-6 s measured), so the grid shows
+        a transient export of hundreds of watts. The incremental PD (request =
+        previous + Kp*error...) crosses zero on that transient and, if charging is
+        allowed, emits a real charge command — assigned to another battery while
+        the assignment loop zeroes the discharger. Result: 0 W discharge with the
+        house importing, then the PD swings back — ping-pong every 1-3 min. The
+        direction hysteresis (magnitude-based, ~60 W) cannot stop a -500/-1500 W
+        transient, and the relay dwell only gates active->idle, not flips.
+
+        Gate: the first cycle that requests the OPPOSITE direction to
+        ``last_output_sign`` is clamped to 0 and arms ``_zero_cross_since``; the
+        flip only passes once the opposite-direction request has persisted for the
+        settle window. A transient export collapses back to the previous direction
+        within a couple of cycles and re-arms the timer; a legitimate sustained
+        surplus flips after the window (a few seconds' delay, harmless). Requests
+        of 0 or of the previous direction pass through untouched and re-arm.
+
+        Runs on every control path (PD, feedforward, no-PD) and BEFORE the
+        min-power floor, so a suppressed flip can never be bootstrapped up to
+        pd_min_charge_power; the relay dwell downstream then decides whether the
+        previous battery holds at minimum power or drops to 0.
+        """
+        requested_sign = 1 if new_power > 0 else (-1 if new_power < 0 else 0)
+        if (
+            self.last_output_sign == 0
+            or requested_sign == 0
+            or requested_sign == self.last_output_sign
+        ):
+            self._zero_cross_since = None
+            return new_power
+
+        # Window: at least the fixed floor, stretched for slow actuators (2x
+        # latency ~= command->ramp + telemetry grain; Zendure 3.0 s -> 6 s).
+        latency_s = max(
+            (c.capabilities.actuator_latency_s for c in self.coordinators),
+            default=0.0,
+        )
+        window_s = max(PD_ZERO_CROSS_MIN_HOLD_S, 2.0 * latency_s)
+
+        now = dt_util.utcnow()
+        if self._zero_cross_since is None:
+            self._zero_cross_since = now
+        held_s = (now - self._zero_cross_since).total_seconds()
+        if held_s >= window_s:
+            self._zero_cross_since = None
+            _LOGGER.info(
+                "PD zero-cross hold: %s request persisted %.1fs >= %.1fs, allowing direction flip (%.0fW)",
+                "charge" if requested_sign > 0 else "discharge",
+                held_s, window_s, new_power,
+            )
+            return new_power
+        _LOGGER.info(
+            "PD zero-cross hold: suppressing %s->%s flip (%.0fW, error=%.0fW) while actuator settles (%.1fs/%.1fs)",
+            "charge" if self.last_output_sign > 0 else "discharge",
+            "charge" if requested_sign > 0 else "discharge",
+            new_power, error, held_s, window_s,
+        )
+        return 0
+
     async def _run_control_cycle(self, now=None):
         """Update the charge/discharge power of the batteries."""
         if DEBUG_CONTROL_LOOP_DETAIL:
@@ -4499,6 +4567,10 @@ class ChargeDischargeController:
             # over one sample (a derivative kick). Drop the filtered derivative too.
             self.previous_error = sensor_actual - active_target
             self.derivative_filtered = 0.0
+            # Drop any armed zero-cross timer: reaching the deadband ends the flip
+            # streak, so a much later flip must start its own settle window instead
+            # of inheriting a stale timestamp that would let it pass instantly.
+            self._zero_cross_since = None
             # NOTE: Do NOT clear load sharing state here. Batteries keep executing
             # their last command during deadband, so the active battery lists must
             # remain accurate for the diagnostic sensor.
@@ -4680,6 +4752,12 @@ class ChargeDischargeController:
             new_power = self._compute_pd_new_power(
                 error, sensor_elapsed_s, stale_safety_recalc
             )
+        # ZERO-CROSS HOLD: a charge<->discharge flip must survive the actuator
+        # settle window before it becomes a real opposite-direction command (see
+        # _apply_zero_cross_hold). Must run before _apply_min_power so a clamped
+        # flip cannot be raised to the minimum charge power.
+        new_power = self._apply_zero_cross_hold(new_power, error)
+
         # Final commanded direction (feeds last_output_sign at end of cycle). In the
         # PD path the hysteresis inside _compute_pd_new_power already zeroed new_power
         # for a suppressed direction change, so recomputing from new_power matches.
