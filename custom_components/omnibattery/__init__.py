@@ -4237,13 +4237,27 @@ class ChargeDischargeController:
         so comparing raw error would trip the cap on every shut-off above ~3x deadband
         and skip the hold entirely.
 
+        EXCEPTION to the bypass: a zero that comes from a zero-cross-suppressed
+        flip (``_zero_cross_since`` armed) is not a real idle decision — the PD
+        wants the OPPOSITE direction, and once the flip passes the settle window
+        the relay stays engaged in that direction anyway. Bypassing there dropped
+        the relay for exactly the settle window on every direction swing (constant
+        chatter under a volatile adjusted sensor, e.g. an excluded A/C riding solar
+        clouds), so a suppressed flip always holds: the wrong-direction cost is
+        min power for at most the settle window.
+
         Returns the (possibly held) power and manages the dwell timer as a side effect.
         """
+        suppressed_flip = self._zero_cross_since is not None
         wants_idle = (
             self._relay_cooldown_s > 0
             and new_power == 0
             and self.previous_power != 0
-            and abs(error) - abs(self.previous_power) < max(self.deadband * 3, RELAY_COOLDOWN_HOLD_POWER)
+            and (
+                suppressed_flip
+                or abs(error) - abs(self.previous_power)
+                < max(self.deadband * 3, RELAY_COOLDOWN_HOLD_POWER)
+            )
         )
         if not wants_idle:
             # Battery is active (or a large imbalance bypassed the hold): re-arm.

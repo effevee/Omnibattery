@@ -33,6 +33,7 @@ def _ctrl(
     min_charge=50,
     min_discharge=50,
     shutoff_since=None,
+    zero_cross_since=None,
 ):
     return SimpleNamespace(
         _relay_cooldown_s=cooldown_s,
@@ -41,6 +42,7 @@ def _ctrl(
         min_charge_power=min_charge,
         min_discharge_power=min_discharge,
         _relay_shutoff_since=shutoff_since,
+        _zero_cross_since=zero_cross_since,
     )
 
 
@@ -102,6 +104,26 @@ def test_large_imbalance_bypasses_hold():
     # A sudden real load (error far beyond what the battery was handling) must not
     # be left on the grid: skip the hold, go to the commanded idle, drop the timer.
     ctrl = _ctrl(previous_power=-100, shutoff_since=dt_util.utcnow())
+    out = _dwell(ctrl, new_power=0, error=500)
+    assert out == 0
+    assert ctrl._relay_shutoff_since is None
+
+
+def test_zero_cross_suppressed_flip_holds_despite_large_error():
+    # The zero came from a zero-cross-suppressed flip (timer armed), not a real
+    # idle decision: the PD wants the opposite direction and the relay will stay
+    # engaged after the flip. The large-imbalance bypass must NOT trip here, or
+    # every direction swing drops the relay for the settle window (chatter).
+    ctrl = _ctrl(previous_power=-500, zero_cross_since=dt_util.utcnow())
+    out = _dwell(ctrl, new_power=0, error=-900)
+    assert out == -50
+    assert ctrl._relay_shutoff_since is not None
+
+
+def test_large_imbalance_still_bypasses_without_suppressed_flip():
+    # Same large error but no zero-cross timer armed: genuine idle request with a
+    # big real imbalance keeps the original bypass behaviour.
+    ctrl = _ctrl(previous_power=-100, zero_cross_since=None)
     out = _dwell(ctrl, new_power=0, error=500)
     assert out == 0
     assert ctrl._relay_shutoff_since is None
