@@ -5,7 +5,12 @@ Covers System Charge/Discharge Power (Zendure coordinators only synthesise
 System Battery Cell Power (signed, mirroring the dashboard formula
 ``-ac_power - ac_offgrid_power + sum(MPPT)``).
 """
+from datetime import timedelta
+
+from homeassistant.util import dt as dt_util
+
 from custom_components.omnibattery.sensors.aggregate_sensors import (
+    HOME_CONSUMPTION_HOLD_S,
     MarstekVenusAggregateSensor,
 )
 from tests.conftest import FakeCoordinator
@@ -16,6 +21,11 @@ def _sensor(coordinators, key):
     sensor = MarstekVenusAggregateSensor.__new__(MarstekVenusAggregateSensor)
     sensor.coordinators = coordinators
     sensor.definition = {"key": key, "precision": 0}
+    sensor._daily_source_key = None
+    sensor._last_valid_home_consumption = None
+    sensor._last_valid_home_consumption_at = None
+    sensor._home_consumption_raw_balance = None
+    sensor._home_consumption_quality = "unknown"
     return sensor
 
 
@@ -74,6 +84,7 @@ class _FakeState:
 
 class _FakeHass:
     def __init__(self, states):
+        self._states = states
         self.states = type("S", (), {"get": staticmethod(states.get)})()
 
 
@@ -108,6 +119,38 @@ def test_home_consumption_charging_zendure_reduces_home():
     zendure = FakeCoordinator(data={"battery_power": 400})
     sensor = _home_sensor([zendure], grid=1000, solar=0)
     assert sensor._calculate_home_consumption() == 600
+
+
+def test_home_consumption_holds_last_valid_value_for_negative_transient():
+    # Independent telemetry can briefly make the derived AC balance negative
+    # while a battery is charging. Keep the previous positive estimate instead
+    # of publishing an impossible 0 W state.
+    zendure = FakeCoordinator(data={"battery_power": 400})
+    sensor = _home_sensor([zendure], grid=1000, solar=0)
+    assert sensor._calculate_home_consumption() == 600
+
+    sensor.hass._states["sensor.grid"] = _FakeState(100)
+    assert sensor._calculate_home_consumption() == 600
+    assert sensor.extra_state_attributes == {
+        "raw_balance_w": -300,
+        "balance_quality": "held_last_valid",
+    }
+
+
+def test_home_consumption_does_not_hold_stale_value_forever():
+    zendure = FakeCoordinator(data={"battery_power": 400})
+    sensor = _home_sensor([zendure], grid=1000, solar=0)
+    assert sensor._calculate_home_consumption() == 600
+
+    sensor.hass._states["sensor.grid"] = _FakeState(100)
+    sensor._last_valid_home_consumption_at = (
+        dt_util.utcnow() - timedelta(seconds=HOME_CONSUMPTION_HOLD_S + 1)
+    )
+    assert sensor._calculate_home_consumption() is None
+    assert sensor.extra_state_attributes == {
+        "raw_balance_w": -300,
+        "balance_quality": "invalid_balance",
+    }
 
 
 # --- system_battery_cell_power: signed cell power (+charge / -discharge) -------

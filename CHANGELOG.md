@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.3.1] - 2026-08-15
+
+### Fixed
+- **Home Consumption could briefly fall to 0 W during battery charging**: the derived sensor now holds its last valid positive estimate for up to 15 seconds when independently polled grid, solar and battery telemetry produces a transient negative balance, exposes the raw balance and estimate quality for diagnostics, and becomes unknown rather than publishing a false zero when the invalid balance persists.
+
 ## [1.3.0] - 2026-08-14
 
 ### Added
