@@ -214,7 +214,11 @@ from .pricing import (
     notifications,
 )
 from .pricing.engine import DynamicPricingEvaluationHorizon, PricingManager
-from .solar_forecast import normalize_solar_forecast_config, read_solar_forecast_kwh
+from .solar_forecast import (
+    get_configured_solar_forecast_sensor,
+    normalize_solar_forecast_config,
+    read_solar_forecast_kwh,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -637,9 +641,11 @@ class ChargeDischargeController:
         if isinstance(_raw_slots, dict):
             _raw_slots = [_raw_slots]
         self.charging_time_slots = _raw_slots or []
-        self.solar_forecast_sensor = config_entry.data.get(CONF_SOLAR_FORECAST_SENSOR, None)
-        self.solar_forecast_remaining_sensor = config_entry.data.get(
-            CONF_SOLAR_FORECAST_REMAINING_SENSOR, None
+        self.solar_forecast_sensor = get_configured_solar_forecast_sensor(
+            self, "today"
+        )
+        self.solar_forecast_remaining_sensor = get_configured_solar_forecast_sensor(
+            self, "remaining"
         )
         self.solar_forecast_source: str | None = None
         self.solar_forecast_diagnostic_source: str | None = None
@@ -1448,9 +1454,11 @@ class ChargeDischargeController:
             CONF_ENABLE_CHARGE_DELAY,
             self.config_entry.data.get(CONF_ENABLE_WEEKLY_FULL_CHARGE_DELAY, False)
         )
-        self.solar_forecast_sensor = self.config_entry.data.get(CONF_SOLAR_FORECAST_SENSOR, None)
-        self.solar_forecast_remaining_sensor = self.config_entry.data.get(
-            CONF_SOLAR_FORECAST_REMAINING_SENSOR, None
+        self.solar_forecast_sensor = get_configured_solar_forecast_sensor(
+            self, "today"
+        )
+        self.solar_forecast_remaining_sensor = get_configured_solar_forecast_sensor(
+            self, "remaining"
         )
         self.solar_production_sensor = self.config_entry.data.get(CONF_SOLAR_PRODUCTION_SENSOR, None)
         self.predictive_charging_mode = self.config_entry.data.get(CONF_PREDICTIVE_CHARGING_MODE, PREDICTIVE_MODE_TIME_SLOT)
@@ -5623,8 +5631,9 @@ class ChargeDischargeController:
 
         forecast = read_solar_forecast_kwh(self.hass, self)
         usable = forecast is not None
-        remaining_sensor = getattr(self, "solar_forecast_remaining_sensor", None)
-        configured = bool(remaining_sensor or self.solar_forecast_sensor)
+        remaining_sensor = get_configured_solar_forecast_sensor(self, "remaining")
+        today_sensor = get_configured_solar_forecast_sensor(self, "today")
+        configured = bool(remaining_sensor or today_sensor)
 
         if usable or not configured:
             self._solar_forecast_bad_since = None
@@ -5649,7 +5658,7 @@ class ChargeDischargeController:
         _LOGGER.warning(
             "Solar forecast sensor %s unreadable for over %.0f minutes - charge delay, "
             "grid-charge decisions and remaining-solar estimates are running blind",
-            remaining_sensor or self.solar_forecast_sensor, FORECAST_DATA_ISSUE_DELAY_S / 60,
+            remaining_sensor or today_sensor, FORECAST_DATA_ISSUE_DELAY_S / 60,
         )
         ir.async_create_issue(
             self.hass,
@@ -5661,7 +5670,7 @@ class ChargeDischargeController:
             severity=ir.IssueSeverity.WARNING,
             translation_key="solar_forecast_unusable",
             translation_placeholders={
-                "sensor": remaining_sensor or self.solar_forecast_sensor,
+                "sensor": remaining_sensor or today_sensor,
                 "minutes": f"{FORECAST_DATA_ISSUE_DELAY_S / 60:.0f}",
             },
         )
@@ -5675,8 +5684,8 @@ class ChargeDischargeController:
         applies so a config-flow update resolves it immediately.
         """
         issue_id = f"solar_forecast_remaining_recommended_{self.config_entry.entry_id}"
-        legacy_sensor = getattr(self, "solar_forecast_sensor", None)
-        remaining_sensor = getattr(self, "solar_forecast_remaining_sensor", None)
+        legacy_sensor = get_configured_solar_forecast_sensor(self, "today")
+        remaining_sensor = get_configured_solar_forecast_sensor(self, "remaining")
         if legacy_sensor and not remaining_sensor:
             if not getattr(self, "_solar_forecast_migration_issue_created", False):
                 ir.async_create_issue(

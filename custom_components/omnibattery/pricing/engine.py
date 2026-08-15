@@ -46,7 +46,10 @@ from ..const import (
     T_START_FALLBACK_HOUR,
     FLOOR_HYSTERESIS_PCT,
 )
-from ..solar_forecast import read_solar_forecast_kwh
+from ..solar_forecast import (
+    get_configured_solar_forecast_sensor,
+    read_solar_forecast_kwh,
+)
 from . import (
     DynamicPricingSchedule,
     PriceSlot,
@@ -1909,7 +1912,9 @@ class PricingManager:
         # remainder, including already-produced solar.
         if (
             horizon is DynamicPricingEvaluationHorizon.DAILY
-            and not getattr(self._controller, "solar_forecast_remaining_sensor", None)
+            and not get_configured_solar_forecast_sensor(
+                self._controller, "remaining"
+            )
         ):
             decision_data = await self._controller._should_activate_grid_charging()
         else:
@@ -2591,7 +2596,9 @@ class PricingManager:
         provider supplies ``remaining today``, pair it with remaining load too.
         """
         if (
-            getattr(self._controller, "solar_forecast_remaining_sensor", None)
+            get_configured_solar_forecast_sensor(
+                self._controller, "remaining"
+            )
             or getattr(
                 getattr(self._controller, "_consumption_tracker", None),
                 "consumption_profile",
@@ -3522,8 +3529,12 @@ class PricingManager:
                                 self._controller.last_evaluation_soc, current_avg_soc)
 
                 forecast_configured = bool(
-                    getattr(self._controller, "solar_forecast_remaining_sensor", None)
-                    or getattr(self._controller, "solar_forecast_sensor", None)
+                    get_configured_solar_forecast_sensor(
+                        self._controller, "remaining"
+                    )
+                    or get_configured_solar_forecast_sensor(
+                        self._controller, "today"
+                    )
                 )
                 if is_initial_eval and forecast_configured:
                     # ``_evaluate_remaining_grid_charging`` deliberately uses

@@ -79,6 +79,50 @@ class SolarForecastInput:
         return normalized
 
 
+def get_configured_solar_forecast_sensor(
+    controller: Any,
+    source: ForecastSource,
+) -> str | None:
+    """Return the effective configured entity for a forecast horizon.
+
+    The controller keeps a runtime copy of these values, but an options update
+    can briefly leave that copy behind the config entry.  Read the persisted
+    entry first so horizon selection cannot silently fall back to the daily
+    legacy path while the remaining-today sensor is configured.
+    """
+    if source == "remaining":
+        key = CONF_SOLAR_FORECAST_REMAINING_SENSOR
+        attribute = "solar_forecast_remaining_sensor"
+    else:
+        key = CONF_SOLAR_FORECAST_SENSOR
+        attribute = "solar_forecast_sensor"
+
+    config_entry = getattr(controller, "config_entry", None)
+    if config_entry is not None:
+        has_persisted_config = False
+        for config in (
+            getattr(config_entry, "data", None),
+            getattr(config_entry, "options", None),
+        ):
+            if config is None:
+                continue
+            has_persisted_config = True
+            if key not in config:
+                continue
+            value = config.get(key)
+            return value if value else None
+        # A real config entry is authoritative even when the key is absent.
+        # This prevents a stale runtime attribute from resurrecting a sensor
+        # that was cleared in the options flow.
+        if has_persisted_config:
+            return None
+
+    # Small unit-test doubles and lightweight consumers may not carry a config
+    # entry; preserve their existing runtime-only contract.
+    value = getattr(controller, attribute, None)
+    return value if value else None
+
+
 def normalize_solar_forecast_config(data: dict[str, Any]) -> dict[str, Any]:
     """Keep at most one persisted solar forecast horizon.
 
@@ -123,8 +167,11 @@ def read_solar_forecast_kwh(hass: Any, controller: Any) -> SolarForecast | None:
     transformed; consumers can rely on it already being the future horizon.
     """
     candidates = (
-        ("remaining", getattr(controller, "solar_forecast_remaining_sensor", None)),
-        ("today", getattr(controller, "solar_forecast_sensor", None)),
+        (
+            "remaining",
+            get_configured_solar_forecast_sensor(controller, "remaining"),
+        ),
+        ("today", get_configured_solar_forecast_sensor(controller, "today")),
     )
     for source, sensor in candidates:
         if not sensor:

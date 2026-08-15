@@ -13,6 +13,7 @@ no ``hass`` and no time mocking.
 """
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timedelta
 from types import SimpleNamespace
 
@@ -22,6 +23,7 @@ from custom_components.omnibattery import ChargeDischargeController
 from custom_components.omnibattery.button import ReevaluateDynamicPricingButton
 from custom_components.omnibattery.const import (
     DEFAULT_ROUND_TRIP_EFFICIENCY,
+    CONF_SOLAR_FORECAST_REMAINING_SENSOR,
     PRICE_INTEGRATION_CKW,
     PRICE_INTEGRATION_NORDPOOL,
     PRICE_INTEGRATION_TIBBER,
@@ -173,6 +175,59 @@ def test_in_slot_false_when_slot_in_the_past():
 def test_evening_reeval_false_when_already_done_today():
     ctrl = _controller(_dp_evening_reevaluated_date=datetime.now().date())
     assert _mgr(ctrl)._is_evening_reevaluation_time() is False
+
+
+def test_daily_dynamic_pricing_uses_persisted_remaining_sensor_when_cache_is_empty():
+    """The 00:05 evaluation must not fall back to the legacy daily balance."""
+    calls = []
+
+    async def daily_decision():
+        calls.append("daily")
+        return {
+            "should_charge": False,
+            "avg_soc": 50.0,
+            "energy_deficit_kwh": 0.0,
+            "avg_consumption_kwh": 0.0,
+        }
+
+    async def remaining_decision(*, now=None):
+        calls.append("remaining")
+        return {
+            "should_charge": False,
+            "avg_soc": 50.0,
+            "energy_deficit_kwh": 0.0,
+            "avg_consumption_kwh": 0.0,
+        }
+
+    async def no_op(*_args, **_kwargs):
+        return None
+
+    ctrl = _controller(
+        config_entry=SimpleNamespace(
+            data={CONF_SOLAR_FORECAST_REMAINING_SENSOR: "sensor.remaining"},
+            options={},
+        ),
+        solar_forecast_remaining_sensor=None,
+        solar_forecast_sensor=None,
+        _should_activate_grid_charging=daily_decision,
+        _dp_eval_retry_count=0,
+    )
+    manager = _mgr(ctrl)
+    manager._evaluate_remaining_grid_charging = remaining_decision
+    manager._maybe_refresh_service_prices = no_op
+    manager._parse_price_data = lambda horizon_end=None: []
+    manager._build_curtailment_plan = lambda *_args, **_kwargs: CurtailmentPlan(
+        status="no_risk", reason="none"
+    )
+    manager._send_dynamic_pricing_notification = no_op
+
+    asyncio.run(
+        manager._evaluate_dynamic_pricing(
+            horizon=DynamicPricingEvaluationHorizon.DAILY,
+        )
+    )
+
+    assert calls == ["remaining"]
 
 
 # ----------------------------------------------------------------------

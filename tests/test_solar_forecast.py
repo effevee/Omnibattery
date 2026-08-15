@@ -4,8 +4,10 @@ from types import SimpleNamespace
 import pytest
 
 from custom_components.omnibattery.pricing.engine import PricingManager
+from custom_components.omnibattery.const import CONF_SOLAR_FORECAST_REMAINING_SENSOR
 from custom_components.omnibattery.solar_forecast import (
     SolarForecastInput,
+    get_configured_solar_forecast_sensor,
     normalize_solar_forecast_config,
     read_remaining_solar_kwh,
     read_solar_forecast_kwh,
@@ -51,6 +53,29 @@ def test_remaining_forecast_is_not_reduced_by_production():
     hass = SimpleNamespace(states=SimpleNamespace(get=states.get))
 
     assert PricingManager(hass, controller)._remaining_solar_today_kwh(14.0) == pytest.approx(1.81)
+
+
+def test_forecast_reader_uses_persisted_remaining_sensor_when_runtime_cache_is_empty():
+    controller = SimpleNamespace(
+        config_entry=SimpleNamespace(
+            data={CONF_SOLAR_FORECAST_REMAINING_SENSOR: "sensor.remaining"},
+            options={},
+        ),
+        solar_forecast_remaining_sensor=None,
+        solar_forecast_sensor=None,
+    )
+    hass = SimpleNamespace(
+        states=SimpleNamespace(
+            get=lambda entity_id: _state(41.94) if entity_id == "sensor.remaining" else None
+        )
+    )
+
+    assert get_configured_solar_forecast_sensor(controller, "remaining") == "sensor.remaining"
+    forecast = read_solar_forecast_kwh(hass, controller)
+
+    assert forecast is not None
+    assert forecast.source == "remaining"
+    assert forecast.kwh == pytest.approx(41.94)
 
 
 def test_invalid_remaining_sensor_falls_back_to_legacy_today():
