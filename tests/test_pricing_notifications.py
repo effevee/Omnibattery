@@ -220,8 +220,9 @@ def test_dynamic_remaining_horizon_does_not_label_remainder_as_daily_average():
     _, message = notifications.format_dynamic_pricing_notification(
         _decision(
             should_charge=True,
-            avg_consumption_kwh=12.15,
+            avg_consumption_kwh=35.52,
             daily_avg_consumption_kwh=17.98,
+            remaining_consumption_kwh=12.15,
             consumption_scope="remaining",
             energy_deficit_kwh=2.0,
         ),

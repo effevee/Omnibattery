@@ -146,13 +146,24 @@ def format_dynamic_pricing_notification(
 
     solar_str = f"{solar_forecast:.2f} kWh" if solar_forecast is not None else "N/A"
     is_remaining = decision_data.get("consumption_scope") == "remaining"
+    consumption_for_horizon = avg_consumption
     solar_label = "Solar remaining" if is_remaining else "Solar forecast"
     if is_remaining:
+        # ``avg_consumption_kwh`` is the legacy field and may still contain the
+        # full-day average in callers that preserve it for diagnostics.  The
+        # notification must show the explicit remaining-horizon value.
+        consumption_for_horizon = decision_data.get(
+            "remaining_consumption_kwh", avg_consumption
+        )
+        if consumption_for_horizon is None:
+            consumption_for_horizon = avg_consumption
         daily_average = decision_data.get("daily_avg_consumption_kwh")
         average_source = (
             f"{days_in_history}-day avg" if days_in_history > 0 else "default"
         )
-        consumption_str = f"{avg_consumption:.2f} kWh remaining until midnight"
+        consumption_str = (
+            f"{float(consumption_for_horizon):.2f} kWh remaining until midnight"
+        )
         if daily_average is not None:
             consumption_str += (
                 f" ({float(daily_average):.2f} kWh {average_source})"
@@ -186,7 +197,7 @@ def format_dynamic_pricing_notification(
                 f"🔋 Battery: {avg_soc:.0f}% ({usable_energy:.2f} kWh usable)\n"
                 f"☀️ {solar_label}: {solar_str}\n"
                 f"📊 Consumption: {consumption_str}\n\n"
-                f"✅ Available: {decision_data.get('total_available_kwh', 0):.2f} kWh ≥ {avg_consumption:.2f} kWh needed\n"
+                f"✅ Available: {decision_data.get('total_available_kwh', 0):.2f} kWh ≥ {float(consumption_for_horizon):.2f} kWh needed\n"
                 f"{price_config_line}"
                 f"No grid charging required."
             )
@@ -247,7 +258,7 @@ def format_dynamic_pricing_notification(
                 f"🔋 Battery: {avg_soc:.0f}% ({usable_energy:.2f} kWh usable)\n"
                 f"☀️ {solar_label}: {solar_str}\n"
                 f"📊 Consumption: {consumption_str}\n"
-                f"✅ Available: {decision_data.get('total_available_kwh', 0):.2f} kWh ≥ {decision_data.get('avg_consumption_kwh', 0):.2f} kWh needed\n\n"
+                f"✅ Available: {decision_data.get('total_available_kwh', 0):.2f} kWh ≥ {float(consumption_for_horizon):.2f} kWh needed\n\n"
                 f"💰 Cheapest hours today (informational):\n{slot_lines}\n\n"
                 f"Average price: {schedule.average_price:.4f} {unit}\n"
                 f"{price_config_line}"
