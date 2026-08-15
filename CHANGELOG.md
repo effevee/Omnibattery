@@ -1,14 +1,14 @@
 # Changelog
 
-## Unreleased
+## [1.4.0] - Unreleased
 
 ### Changed
 
 - **Remaining-today solar forecasts are now supported without breaking existing setups**: a new recommended sensor field accepts the provider's production still expected today and replaces/removes the legacy whole-day forecast when saved. Intraday predictive charging, Solar Charge Delay and Smart Pre-discharge use matching remaining-energy horizons without subtracting measured production or applying the solar curve twice; untouched legacy `today` sensors continue through the existing approximation during the transition. A Home Assistant Repair guides legacy-only entries and clears automatically after migration. Forecast values are now normalized from Wh to kWh and their active source is exposed in diagnostics.
 
-## [1.3.1] - 2026-08-15
-
 ### Fixed
+
+- **Dynamic Pricing remaining-consumption forecast could count today's home energy twice**: Manual recalculations now subtract the full-day home energy already accumulated since midnight and plan only the consumption remaining until midnight. Notifications use the explicit remaining value, with a safe battery-window fallback during startup and diagnostics identifying the source used.
 - **Home Consumption could briefly fall to 0 W during battery charging**: the derived sensor now holds its last valid positive estimate for up to 15 seconds when independently polled grid, solar and battery telemetry produces a transient negative balance, exposes the raw balance and estimate quality for diagnostics, and becomes unknown rather than publishing a false zero when the invalid balance persists.
 
 ## [1.3.0] - 2026-08-14
