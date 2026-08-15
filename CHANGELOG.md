@@ -1,5 +1,10 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+- **The slow grid-sensor warning stayed after the sensor recovered**: a transient stall of three intervals raised the Repairs warning, and nothing could clear it until the integration or Home Assistant restarted, so the warning kept describing a fast meter as slow. Twenty consecutive fast intervals now clear it during the same run, and a sensor that slows down again raises it once more. Clearing deliberately needs a longer streak than raising, so a sensor hovering around the ten-second threshold does not churn the repair. A warning left over from an earlier run now also needs that longer streak, so it disappears about twenty publications into the new run instead of three.
+
 ## [1.3.0] - 2026-08-14
 
 ### Added
