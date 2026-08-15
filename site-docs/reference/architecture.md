@@ -141,3 +141,20 @@ Coordinator → driver.read_telemetry → Entity updates
 | `medium` | 5 s | Voltage, current, temperature |
 | `low` | 30 s | Accumulated energy, alarms |
 | `very_low` | 600 s | Device info, firmware |
+
+## Consumption profile
+
+`tracking/consumption_profile.py` owns the independent
+`omnibattery.<entry_id>.consumption_profile` Store. It captures adjusted home
+power continuously into raw local-date/96-interval energy and coverage arrays,
+then builds a weighted forecast only at query time. Recorder backfill is
+background work and never blocks setup or battery control. The tracker rejects
+invalid samples, isolates corrupt stored days, handles local DST boundaries and
+invalidates the raw profile when its source/configuration fingerprint changes.
+
+Control consumers use one contract: mature profile data for the requested range,
+otherwise an explicit legacy fallback. The capture path never applies charging
+window masks; `forecast_energy_between()` applies them only when a forecast is
+requested. This keeps the same learned signal usable by daily predictive
+charging, Solar Charge Delay and Dynamic Pricing without coupling their runtime
+decisions to one another.

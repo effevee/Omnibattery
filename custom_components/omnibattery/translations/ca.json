@@ -1435,6 +1435,9 @@
       "system_daily_home_energy": {
         "name": "Consum Diari de la Casa"
       },
+      "expected_home_consumption_profile": {
+        "name": "Perfil de consum domèstic esperat"
+      },
       "system_pd_control_quality": {
         "name": "Qualitat de Control PD",
         "state": {

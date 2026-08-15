@@ -2444,6 +2444,34 @@ class PricingManager:
                 return value, True, source
         return 0.0, False, "none"
 
+    def _profile_remaining_consumption(
+        self,
+        start: datetime,
+        end: datetime,
+    ):
+        """Return a mature profile forecast for a remaining local-time range."""
+        tracker = getattr(self._controller, "_consumption_tracker", None)
+        profile = getattr(tracker, "consumption_profile", None)
+        if profile is None or end <= start:
+            return None
+        try:
+            if start.tzinfo is None:
+                current = getattr(profile, "_timezone", lambda: None)()
+                start = start.replace(tzinfo=current)
+            if end.tzinfo is None:
+                end = end.replace(tzinfo=start.tzinfo)
+            forecast = profile.forecast_energy_between(
+                start,
+                end,
+                exclude_charging_windows=True,
+                fallback="legacy_daily",
+            )
+            if forecast.mature and forecast.source == "profile":
+                return forecast
+        except Exception as exc:  # noqa: BLE001
+            _LOGGER.debug("Pricing: profile forecast failed: %s", exc)
+        return None
+
     async def _evaluate_remaining_grid_charging(self, *, now: datetime | None = None) -> dict:
         """Evaluate the energy still needed before the end of today's horizon.
 
@@ -2492,16 +2520,35 @@ class PricingManager:
                 if callable(get_remaining_window_hours)
                 else 24.0 - now_h
             )
-        remaining_consumption_kwh, consumption_rate_kwh_h = (
-            self._project_remaining_consumption(
-                now_h,
-                consumed_today_kwh,
-                avg_daily_kwh,
-                accumulator_ready=accumulator_ready,
-                window_hours_per_day=window_hours_per_day,
-                remaining_window_hours=remaining_window_hours,
+        profile_forecast = None
+        local_now = now
+        end_of_day = local_now.replace(
+            hour=0,
+            minute=0,
+            second=0,
+            microsecond=0,
+        ) + timedelta(days=1)
+        profile_forecast = self._profile_remaining_consumption(local_now, end_of_day)
+        if profile_forecast is not None:
+            remaining_consumption_kwh = profile_forecast.energy_kwh
+            consumption_rate_kwh_h = (
+                remaining_consumption_kwh / remaining_window_hours
+                if remaining_window_hours > 0
+                else 0.0
             )
-        )
+            consumption_scope = "remaining_profile"
+        else:
+            remaining_consumption_kwh, consumption_rate_kwh_h = (
+                self._project_remaining_consumption(
+                    now_h,
+                    consumed_today_kwh,
+                    avg_daily_kwh,
+                    accumulator_ready=accumulator_ready,
+                    window_hours_per_day=window_hours_per_day,
+                    remaining_window_hours=remaining_window_hours,
+                )
+            )
+            consumption_scope = "remaining"
         remaining_solar_kwh = self._remaining_solar_today_kwh(now_h)
 
         decision = await controller._should_activate_grid_charging(
@@ -2510,7 +2557,7 @@ class PricingManager:
         )
         # Keep explicit diagnostics for the pre-slot notification and future
         # consumers while preserving the legacy avg_consumption_kwh field.
-        decision["consumption_scope"] = "remaining"
+        decision["consumption_scope"] = consumption_scope
         decision["daily_avg_consumption_kwh"] = avg_daily_kwh
         decision["consumed_today_kwh"] = consumed_today_kwh
         decision["remaining_consumption_kwh"] = remaining_consumption_kwh
@@ -2518,6 +2565,23 @@ class PricingManager:
         decision["consumption_rate_kwh_h"] = consumption_rate_kwh_h
         decision["consumption_accumulator_ready"] = accumulator_ready
         decision["consumption_accumulator_source"] = consumption_source
+        decision["consumption_forecast_source"] = (
+            profile_forecast.source if profile_forecast is not None else "legacy_daily"
+        )
+        decision["profile_coverage_ratio"] = (
+            profile_forecast.coverage_ratio if profile_forecast is not None else 0.0
+        )
+        decision["profile_days"] = (
+            profile_forecast.total_days if profile_forecast is not None else 0
+        )
+        decision["profile_fallback_reason"] = (
+            profile_forecast.fallback_reason if profile_forecast is not None else "profile_not_mature"
+        )
+        decision["solar_forecast_source"] = getattr(
+            controller,
+            "solar_forecast_diagnostic_source",
+            getattr(controller, "solar_forecast_source", None),
+        )
         return decision
 
     async def _current_horizon_grid_charging_decision(self) -> dict:
@@ -2526,7 +2590,14 @@ class PricingManager:
         These paths run during the day rather than solely at 00:05. When a
         provider supplies ``remaining today``, pair it with remaining load too.
         """
-        if getattr(self._controller, "solar_forecast_remaining_sensor", None):
+        if (
+            getattr(self._controller, "solar_forecast_remaining_sensor", None)
+            or getattr(
+                getattr(self._controller, "_consumption_tracker", None),
+                "consumption_profile",
+                None,
+            ) is not None
+        ):
             return await self._evaluate_remaining_grid_charging()
         return await self._controller._should_activate_grid_charging()
 
@@ -2719,14 +2790,57 @@ class PricingManager:
             remaining_window_hours = tracker.consumption_window_hours_in_range(
                 now_h, 24.0
             )
-        remaining_consumption_kwh, consumption_rate_kwh_h = self._project_remaining_consumption(
-            now_h,
-            consumed_today_kwh,
-            avg_daily_kwh,
-            accumulator_ready=accumulator_ready,
-            window_hours_per_day=window_hours_per_day,
-            remaining_window_hours=remaining_window_hours,
+        profile_forecast = self._profile_remaining_consumption(now, now.replace(
+            hour=0,
+            minute=0,
+            second=0,
+            microsecond=0,
+        ) + timedelta(days=1))
+        if profile_forecast is not None:
+            remaining_consumption_kwh = profile_forecast.energy_kwh
+            consumption_rate_kwh_h = (
+                remaining_consumption_kwh / remaining_window_hours
+                if remaining_window_hours > 0
+                else 0.0
+            )
+            consumption_scope = "remaining_profile"
+        else:
+            remaining_consumption_kwh, consumption_rate_kwh_h = self._project_remaining_consumption(
+                now_h,
+                consumed_today_kwh,
+                avg_daily_kwh,
+                accumulator_ready=accumulator_ready,
+                window_hours_per_day=window_hours_per_day,
+                remaining_window_hours=remaining_window_hours,
+            )
+            consumption_scope = "remaining"
+
+        # Keep the source visible to the status/diagnostic sensor and to the
+        # next decision snapshot without changing the scheduling schema.
+        decision_data = self._controller._last_decision_data
+        if not isinstance(decision_data, dict):
+            decision_data = {}
+        decision_data.update(
+            {
+                "consumption_scope": consumption_scope,
+                "consumption_forecast_source": (
+                    profile_forecast.source if profile_forecast is not None else "legacy_daily"
+                ),
+                "profile_coverage_ratio": (
+                    profile_forecast.coverage_ratio if profile_forecast is not None else 0.0
+                ),
+                "profile_days": (
+                    profile_forecast.total_days if profile_forecast is not None else 0
+                ),
+                "remaining_consumption_kwh": remaining_consumption_kwh,
+                "solar_forecast_source": getattr(
+                    self._controller,
+                    "solar_forecast_diagnostic_source",
+                    getattr(self._controller, "solar_forecast_source", None),
+                ),
+            }
         )
+        self._controller._last_decision_data = decision_data
 
         # Battery energy available above the discharge floor right now.
         usable_now_kwh = sum(

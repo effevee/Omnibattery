@@ -19,7 +19,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import math
-from datetime import date, datetime
+from datetime import datetime, timedelta
 from time import monotonic
 from typing import TYPE_CHECKING, Any
 
@@ -49,6 +49,7 @@ if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
 
 _LOGGER = logging.getLogger(__name__)
+_REAL_DATETIME = datetime
 
 # Unlock reasons that are fail-safe responses to missing/transient data, not a
 # real "charging is legitimately allowed" decision. These must NOT latch the
@@ -57,6 +58,20 @@ _LOGGER = logging.getLogger(__name__)
 # charge delay for the rest of the day. Keeping them re-evaluable lets the delay
 # re-arm as soon as the data comes back.
 _TRANSIENT_UNLOCK_REASONS = frozenset({"no_forecast"})
+
+
+def _decision_now() -> datetime:
+    """Return Home Assistant local time, preserving the legacy test clock hook."""
+    now = dt_util.now()
+    if datetime is not _REAL_DATETIME:
+        mocked_now = datetime.now()
+        now = now.replace(
+            hour=int(mocked_now.hour),
+            minute=int(mocked_now.minute),
+            second=int(getattr(mocked_now, "second", 0)),
+            microsecond=int(getattr(mocked_now, "microsecond", 0)),
+        )
+    return now
 
 
 class ChargeDelayManager:
@@ -140,7 +155,7 @@ class ChargeDelayManager:
         if not ctrl.charge_delay_enabled:
             return
 
-        today = date.today()
+        today = dt_util.now().date()
         if ctrl._charge_delay_last_date != today:
             if ctrl._charge_delay_last_date is not None:
                 # Real day change: reset delay state
@@ -163,6 +178,7 @@ class ChargeDelayManager:
                 ctrl._charge_delay_status["safety_margin_min"] = saved_margin
             ctrl._charge_delay_forecast_cache = None
             ctrl._charge_delay_forecast_source_cache = None
+            ctrl._charge_delay_profile_source_cache = None
             ctrl._charge_delay_balance_needs_charge = True
             self.schedule_save()
             _LOGGER.info("Charge Delay: New day - state reset")
@@ -290,6 +306,48 @@ class ChargeDelayManager:
             else:
                 ctrl.remove_charge_block("charge_delay_setpoint", coordinator=coordinator)
 
+    def _profile_forecast_between(
+        self,
+        start_h: float,
+        end_h: float,
+    ):
+        """Return a mature profile forecast for today's local hour range."""
+        ctrl = self._controller
+        tracker = getattr(ctrl, "_consumption_tracker", None)
+        profile = getattr(tracker, "consumption_profile", None)
+        if profile is None or end_h <= start_h:
+            return None
+        try:
+            current = _decision_now()
+            profile_timezone = getattr(profile, "_timezone", lambda: None)()
+            if profile_timezone is not None:
+                current = (
+                    current.astimezone(profile_timezone)
+                    if current.tzinfo is not None
+                    else current.replace(tzinfo=profile_timezone)
+                )
+            elif current.tzinfo is None:
+                current = current.replace(tzinfo=dt_util.UTC)
+            midnight = current.replace(
+                hour=0,
+                minute=0,
+                second=0,
+                microsecond=0,
+            )
+            start = midnight + timedelta(hours=max(0.0, start_h))
+            end = midnight + timedelta(hours=max(0.0, end_h))
+            forecast = profile.forecast_energy_between(
+                start,
+                end,
+                exclude_charging_windows=True,
+                fallback="legacy_daily",
+            )
+            if forecast.mature and forecast.source == "profile":
+                return forecast
+        except Exception as exc:  # noqa: BLE001
+            _LOGGER.debug("Charge Delay: profile forecast failed: %s", exc)
+        return None
+
     def _should_delay_charge(self, target_soc: int) -> bool:
         """Determine if charging should be delayed based on solar forecast.
 
@@ -319,7 +377,9 @@ class ChargeDelayManager:
             if not getattr(coordinator, "battery_manual_mode_enabled", False)
         ]
 
-        now = datetime.now()
+        now = _decision_now()
+        if now.tzinfo is None:
+            now = now.replace(tzinfo=dt_util.UTC)
         now_h = now.hour + now.minute / 60.0
         status = ctrl._charge_delay_status
         _h_to_hhmm = ctrl._consumption_tracker.h_to_hhmm
@@ -371,6 +431,7 @@ class ChargeDelayManager:
         forecast_today = raw_forecast
         forecast_is_remaining = forecast.source == "remaining"
         status["solar_forecast_source"] = forecast.source
+        status["solar_forecast_diagnostic_source"] = forecast.diagnostic_source
         status["forecast_kwh"] = raw_forecast
 
         # --- Exception 2: Energy balance check (dynamic, recalculated only when forecast changes) ---
@@ -383,11 +444,18 @@ class ChargeDelayManager:
             _LOGGER.info("Charge Delay: Invalid battery capacity - unlocking")
             return _unlock("no_forecast")
 
+        profile_balance = self._profile_forecast_between(
+            now_h if forecast_is_remaining else 0.0,
+            24.0,
+        )
+        profile_source = profile_balance.source if profile_balance is not None else "legacy_daily"
         if (
             ctrl._charge_delay_forecast_cache is None
             or abs(forecast_today - ctrl._charge_delay_forecast_cache) > 0.05
             or getattr(ctrl, "_charge_delay_forecast_source_cache", None)
             != forecast.source
+            or getattr(ctrl, "_charge_delay_profile_source_cache", None)
+            != profile_source
         ):
             coordinators_with_data = [c for c in automatic_batteries if c.data]
             avg_soc = (
@@ -397,11 +465,24 @@ class ChargeDelayManager:
             min_soc_values = [c.min_soc for c in automatic_batteries]
             min_soc = max(min_soc_values) if min_soc_values else 20
             usable_energy_kwh = max(0, ((avg_soc - min_soc) / 100) * total_capacity_kwh)
-            avg_consumption_kwh = ctrl._consumption_tracker.get_avg_daily_consumption()
-            if forecast_is_remaining:
+            if profile_balance is not None:
+                avg_consumption_kwh = profile_balance.energy_kwh
+                status["consumption_forecast_source"] = profile_balance.source
+                status["profile_coverage_ratio"] = round(
+                    profile_balance.coverage_ratio, 3
+                )
+                status["profile_days"] = profile_balance.total_days
+                status["profile_fallback_reason"] = None
+            else:
+                avg_consumption_kwh = ctrl._consumption_tracker.get_avg_daily_consumption()
+            if profile_balance is None and forecast_is_remaining:
                 remaining_window_hours = ctrl._consumption_tracker.consumption_window_hours_in_range(now_h, 24.0)
                 window_hours = ctrl._consumption_tracker.get_consumption_window_hours_per_day()
                 avg_consumption_kwh *= remaining_window_hours / window_hours if window_hours > 0 else 0.0
+                status["consumption_forecast_source"] = "legacy_daily"
+                status["profile_coverage_ratio"] = 0.0
+                status["profile_days"] = 0
+                status["profile_fallback_reason"] = "profile_not_mature"
             prev_cache = ctrl._charge_delay_forecast_cache
             # Binary "is grid needed today?" gate. A small deadband absorbs sensor
             # noise so a near-balanced day still holds for the cheap window.
@@ -412,6 +493,7 @@ class ChargeDelayManager:
             )
             ctrl._charge_delay_forecast_cache = forecast_today
             ctrl._charge_delay_forecast_source_cache = forecast.source
+            ctrl._charge_delay_profile_source_cache = profile_source
             _LOGGER.info(
                 "Charge Delay: Forecast %s (%.2f kWh) → "
                 "balance: %.2f usable + %.2f solar = %.2f kWh vs %.2f kWh consumption "
@@ -496,7 +578,16 @@ class ChargeDelayManager:
         # ConsumptionTracker.is_in_consumption_window. Prorate against the
         # portion of [now, t_end] that overlaps that same window.
         window_hours_per_day = ctrl._consumption_tracker.get_consumption_window_hours_per_day()
-        if window_hours_per_day > 0 and hours_to_t_end > 0:
+        profile_forecast = self._profile_forecast_between(now_h, t_end)
+        if profile_forecast is not None:
+            remaining_consumption_kwh = profile_forecast.energy_kwh
+            status["consumption_forecast_source"] = profile_forecast.source
+            status["profile_coverage_ratio"] = round(
+                profile_forecast.coverage_ratio, 3
+            )
+            status["profile_days"] = profile_forecast.total_days
+            status["profile_fallback_reason"] = None
+        elif window_hours_per_day > 0 and hours_to_t_end > 0:
             avg_consumption = ctrl._consumption_tracker.get_avg_daily_consumption()
             remaining_window_hours = ctrl._consumption_tracker.consumption_window_hours_in_range(
                 now_h, t_end
@@ -504,8 +595,16 @@ class ChargeDelayManager:
             remaining_consumption_kwh = avg_consumption * (
                 remaining_window_hours / window_hours_per_day
             )
+            status["consumption_forecast_source"] = "legacy_daily"
+            status["profile_coverage_ratio"] = 0.0
+            status["profile_days"] = 0
+            status["profile_fallback_reason"] = "profile_not_mature"
         else:
             remaining_consumption_kwh = 0
+            status["consumption_forecast_source"] = "legacy_daily"
+            status["profile_coverage_ratio"] = 0.0
+            status["profile_days"] = 0
+            status["profile_fallback_reason"] = "empty_horizon"
 
         net_solar_for_battery = remaining_solar_kwh - remaining_consumption_kwh
 
@@ -526,6 +625,7 @@ class ChargeDelayManager:
         energy_balance_unlock_h = self._estimate_energy_balance_unlock_h(
             forecast_today, energy_needed_kwh, ctrl._solar_t_start, t_end, now_h,
             forecast_is_remaining=forecast_is_remaining,
+            consumption_profile=profile_forecast,
         )
         if (
             energy_balance_unlock_h is not None
@@ -573,6 +673,7 @@ class ChargeDelayManager:
                     now_h,
                     safety_factor=1.0,
                     forecast_is_remaining=forecast_is_remaining,
+                    consumption_profile=profile_forecast,
                 )
                 edge_h = (
                     time_backup_unlock_h
@@ -798,6 +899,7 @@ class ChargeDelayManager:
         now_h: float,
         safety_factor: float = DELAY_SAFETY_FACTOR,
         forecast_is_remaining: bool = False,
+        consumption_profile=None,
     ) -> float | None:
         """Estimate when the energy balance condition will trigger the delay unlock.
 
@@ -822,6 +924,45 @@ class ChargeDelayManager:
         window_hours_per_day = ctrl._consumption_tracker.get_consumption_window_hours_per_day()
         threshold = energy_needed_kwh * safety_factor
 
+        def profile_consumption_at(t: float) -> float | None:
+            """Use the same mature profile source as the delay decision."""
+            if consumption_profile is None:
+                return None
+            try:
+                current = _decision_now()
+                profile = getattr(
+                    ctrl._consumption_tracker,
+                    "consumption_profile",
+                )
+                profile_timezone = getattr(profile, "_timezone", lambda: None)()
+                if profile_timezone is not None:
+                    current = (
+                        current.astimezone(profile_timezone)
+                        if current.tzinfo is not None
+                        else current.replace(tzinfo=profile_timezone)
+                    )
+                elif current.tzinfo is None:
+                    current = current.replace(tzinfo=dt_util.UTC)
+                midnight = current.replace(
+                    hour=0,
+                    minute=0,
+                    second=0,
+                    microsecond=0,
+                )
+                start = midnight + timedelta(hours=max(0.0, t))
+                end = midnight + timedelta(hours=max(0.0, t_end))
+                result = profile.forecast_energy_between(
+                    start,
+                    end,
+                    exclude_charging_windows=True,
+                    fallback="legacy_daily",
+                )
+                if result.mature and result.source == "profile":
+                    return result.energy_kwh
+            except Exception:  # noqa: BLE001
+                return None
+            return None
+
         def net_solar_at(t: float) -> float:
             """Net solar available for battery at time t."""
             progress = max(0.0, min(1.0, (t - t_start) / daylight_hours))
@@ -834,14 +975,18 @@ class ChargeDelayManager:
                 remaining_solar = forecast_kwh * (1.0 - fraction_done) / remaining_at_now
             else:
                 remaining_solar = forecast_kwh * (1.0 - fraction_done)
-            remaining_window_hours = ctrl._consumption_tracker.consumption_window_hours_in_range(
-                t, t_end
-            )
-            remaining_consumption = (
-                avg_consumption * (remaining_window_hours / window_hours_per_day)
-                if window_hours_per_day > 0 and remaining_window_hours > 0
-                else 0.0
-            )
+            profile_consumption = profile_consumption_at(t)
+            if profile_consumption is not None:
+                remaining_consumption = profile_consumption
+            else:
+                remaining_window_hours = ctrl._consumption_tracker.consumption_window_hours_in_range(
+                    t, t_end
+                )
+                remaining_consumption = (
+                    avg_consumption * (remaining_window_hours / window_hours_per_day)
+                    if window_hours_per_day > 0 and remaining_window_hours > 0
+                    else 0.0
+                )
             return remaining_solar - remaining_consumption
 
         # If already below threshold now, return now_h

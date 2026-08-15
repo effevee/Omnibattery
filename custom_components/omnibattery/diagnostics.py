@@ -429,6 +429,9 @@ def _dynamic_pricing_info(controller) -> dict[str, Any]:
     schedule = getattr(controller, "_dynamic_pricing_schedule", None)
     info = {
         "solar_forecast_source": getattr(controller, "solar_forecast_source", None),
+        "solar_forecast_diagnostic_source": getattr(
+            controller, "solar_forecast_diagnostic_source", None
+        ),
         "solar_forecast_remaining_sensor": getattr(
             controller, "solar_forecast_remaining_sensor", None
         ),
@@ -518,6 +521,15 @@ async def async_get_config_entry_diagnostics(
         if not getattr(coord, "battery_manual_mode_enabled", False)
     ]
 
+    consumption_profile = {}
+    tracker = getattr(controller, "_consumption_tracker", None)
+    profile = getattr(tracker, "consumption_profile", None)
+    if profile is not None:
+        try:
+            consumption_profile = _json_safe(profile.diagnostics())
+        except Exception as exc:  # noqa: BLE001
+            consumption_profile = {"error": str(exc)}
+
     return {
         "entry": {
             "title": entry.title,
@@ -531,6 +543,7 @@ async def async_get_config_entry_diagnostics(
             "automatic_batteries": automatic_batteries,
         },
         "dynamic_pricing": _dynamic_pricing_info(controller),
+        "consumption_profile": consumption_profile,
         "curtailment": _curtailment_info(controller),
         "phase_protection": async_redact_data(
             controller._phase_power_limiter.diagnostics(), TO_REDACT

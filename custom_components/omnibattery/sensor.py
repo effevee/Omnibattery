@@ -32,6 +32,7 @@ from .const import (
     DEFAULT_SLOT_ALLOW_DISCHARGE,
 )
 from .infra.coordinator import MarstekVenusDataUpdateCoordinator
+from .tracking.consumption_profile import INTERVAL_COUNT, INTERVAL_MINUTES
 from .sensors.aggregate_sensors import AGGREGATE_SENSOR_DEFINITIONS, SYSTEM_BATTERY_CELL_POWER_DEFINITION, MarstekVenusAggregateSensor, DailyGridAtMinSocSensor, SystemAlarmSensor, PdControlQualitySensor
 from .sensors.calculated_sensors import (
     MarstekVenusEfficiencySensor,
@@ -182,6 +183,12 @@ async def async_setup_entry(
     if controller and getattr(controller, "consumption_sensor", None):
         entities.append(DailyGridImportEnergySensor(controller))
         entities.append(DailyGridExportEnergySensor(controller))
+
+    # Quarter-hour household profile.  It is diagnostic-only and remains
+    # available even while it is learning; control consumers explicitly inspect
+    # the maturity/source metadata before using it.
+    if controller and getattr(controller, "_consumption_tracker", None) is not None:
+        entities.append(ConsumptionProfileSensor(controller))
 
 
 
@@ -671,6 +678,9 @@ class ChargeDelaySensor(RestoreEntity, SensorEntity):
             "forecast_kwh", "solar_t_start", "solar_t_end",
             "energy_needed_kwh", "remaining_solar_kwh",
             "remaining_consumption_kwh", "net_solar_kwh",
+            "consumption_forecast_source", "profile_coverage_ratio",
+            "profile_days", "profile_fallback_reason", "solar_forecast_source",
+            "solar_forecast_diagnostic_source",
             "charge_time_h", "estimated_unlock_time", "unlock_reason",
         ):
             value = status.get(key)
@@ -1053,6 +1063,97 @@ class NonResponsiveBatteriesSensor(SensorEntity):
     @property
     def device_info(self):
         """Return device information for the system."""
+        return {
+            "identifiers": {(DOMAIN, "marstek_venus_system")},
+            "name": "Omnibattery System",
+            "manufacturer": "Omnibattery",
+            "model": "Multi-Battery System",
+        }
+
+
+class ConsumptionProfileSensor(SensorEntity):
+    """Expected household consumption for the current local day."""
+
+    _attr_has_entity_name = True
+    _attr_translation_key = "expected_home_consumption_profile"
+    _attr_unique_id = f"{SYSTEM_UNIQUE_ID_PREFIX}expected_home_consumption_profile"
+    _attr_device_class = SensorDeviceClass.ENERGY
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = "kWh"
+    _attr_suggested_display_precision = 2
+    _attr_icon = "mdi:chart-bell-curve-cumulative"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_should_poll = True
+
+    def __init__(self, controller) -> None:
+        """Initialize the profile diagnostic sensor."""
+        self._controller = controller
+        self.entity_id = system_entity_id("sensor", "expected_home_consumption_profile")
+
+    def _target_date(self):
+        tracker = getattr(self._controller, "_consumption_tracker", None)
+        profile = getattr(tracker, "consumption_profile", None)
+        today = getattr(profile, "_today", None)
+        if callable(today):
+            try:
+                return today()
+            except Exception:  # noqa: BLE001
+                pass
+        return dt_util.now().date()
+
+    def _forecast(self):
+        tracker = getattr(self._controller, "_consumption_tracker", None)
+        profile = getattr(tracker, "consumption_profile", None)
+        if profile is None:
+            return None
+        try:
+            return profile.forecast_for_date(self._target_date())
+        except Exception as exc:  # noqa: BLE001
+            _LOGGER.debug("Consumption profile sensor: forecast unavailable: %s", exc)
+            return None
+
+    @property
+    def native_value(self) -> float | None:
+        forecast = self._forecast()
+        return round(forecast.energy_kwh, 3) if forecast is not None else None
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        forecast = self._forecast()
+        tracker = getattr(self._controller, "_consumption_tracker", None)
+        profile = getattr(tracker, "consumption_profile", None)
+        if forecast is None or profile is None:
+            return {"state": "unavailable"}
+        intervals = [round(value, 6) for value in forecast.intervals_kwh]
+        hourly = [
+            round(sum(intervals[index:index + 4]), 6)
+            for index in range(0, INTERVAL_COUNT, 4)
+        ]
+        peak_index = max(range(len(hourly)), key=hourly.__getitem__) if hourly else 0
+        return {
+            "target_date": self._target_date().isoformat(),
+            "interval_minutes": INTERVAL_MINUTES,
+            "hourly_profile_kwh": hourly,
+            "interval_profile_kwh": intervals,
+            "expected_remaining_kwh": round(forecast.energy_kwh, 6),
+            "source": forecast.source,
+            "mature": forecast.mature,
+            "coverage_ratio": round(forecast.coverage_ratio, 6),
+            "weekday_samples": forecast.weekday_samples,
+            "day_type_samples": forecast.day_type_samples,
+            "total_profile_days": forecast.total_days,
+            "newest_profile_date": (
+                forecast.newest_profile_date.isoformat()
+                if forecast.newest_profile_date is not None
+                else None
+            ),
+            "fallback_reason": forecast.fallback_reason,
+            "peak_hour": peak_index,
+            "peak_hour_kwh": round(hourly[peak_index], 6) if hourly else 0.0,
+        }
+
+    @property
+    def device_info(self):
         return {
             "identifiers": {(DOMAIN, "marstek_venus_system")},
             "name": "Omnibattery System",

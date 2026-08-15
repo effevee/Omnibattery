@@ -1,6 +1,6 @@
-# Daily consumption estimate
+# Daily and hourly consumption estimate
 
-Predictive charging needs to know how much energy your home consumes each day to decide whether grid charging is needed. Instead of a fixed value, the integration calculates a **dynamic consumption estimate** from the real history of the past 7 days.
+Predictive charging needs to know how much energy your home consumes to decide whether grid charging is needed. The integration learns a **15-minute consumption profile** from up to 28 complete local days. Until that profile is mature, the existing 7-day daily estimate remains the safe fallback.
 
 ---
 
@@ -101,3 +101,32 @@ This **Grid at Min SOC** sensor is informational: it shows demand the battery mi
 The `binary_sensor.marstek_venus_system_predictive_charging_active` sensor exposes the 7-day consumption history and the count of real vs. fallback entries in its attributes, useful to verify the learning status.
 
 ![Consumption history attributes in HA](../assets/screenshots/features/consumption-estimate-attributes.png){ width="700"  style="display: block; margin: 0 auto;"}
+
+## 28-day quarter-hour profile
+
+The integration also captures adjusted household demand continuously, 24 hours
+per day, in **96 local quarter-hour intervals**. Each sample is integrated with a
+trapezoidal rule and split across midnight, quarter-hour boundaries and daylight
+saving transitions. A gap longer than five minutes breaks continuity; an interval
+is usable only after at least 675 seconds (75%) of observed coverage. Charging
+windows are not applied while learning, so the profile can later answer any
+remaining-time query without biasing the source data.
+
+The profile uses a hierarchy of matching weekday, weekday/weekend type and global
+samples. Recent days are weighted `1.0`, `0.75`, `0.5` and `0.25`. It is considered
+mature only when it has at least seven valid days, at least two samples for 75%
+of the requested intervals, at least 80% coverage of the requested range and a
+sample no older than seven days. An immature profile automatically falls back to
+the legacy daily average or the current-rate estimate, depending on the caller.
+
+Recorder backfill runs in the background after startup and uses one query per
+configured source. Raw profile data is isolated in
+`omnibattery.<entry_id>.consumption_profile`; changing the source, load
+adjustments or Home Assistant timezone invalidates it and starts a fresh learn.
+
+The diagnostic sensor
+`sensor.omnibattery_expected_home_consumption_profile` exposes the current
+forecast, 96-interval/hourly values, source, maturity, coverage and fallback
+metadata. The integration diagnostics endpoint contains the bounded day-level
+learning summary. Predictive charging, Solar Charge Delay and Dynamic Pricing
+use the profile only when the maturity contract is satisfied.

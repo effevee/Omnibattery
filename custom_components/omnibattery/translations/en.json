@@ -1444,6 +1444,9 @@
       "system_daily_home_energy": {
         "name": "Daily Home Consumption"
       },
+      "expected_home_consumption_profile": {
+        "name": "Expected Home Consumption Profile"
+      },
       "home_consumption": {
         "name": "Home Consumption"
       },

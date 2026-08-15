@@ -5,7 +5,9 @@ import pytest
 
 from custom_components.omnibattery.pricing.engine import PricingManager
 from custom_components.omnibattery.solar_forecast import (
+    SolarForecastInput,
     normalize_solar_forecast_config,
+    read_remaining_solar_kwh,
     read_solar_forecast_kwh,
 )
 
@@ -79,3 +81,28 @@ def test_config_normalization_keeps_remaining_and_preserves_legacy_only_entries(
     assert normalize_solar_forecast_config(
         {"solar_forecast_sensor": "sensor.today"}
     ) == {"solar_forecast_sensor": "sensor.today"}
+
+
+def test_remaining_solar_adapter_normalizes_temporal_shape_to_remaining_energy():
+    normalized = SolarForecastInput(
+        remaining_kwh=4.0,
+        source="remaining_sensor",
+        temporal_shape=(1.0, 2.0, 1.0),
+    ).normalized_shape()
+
+    assert normalized == pytest.approx([1.0, 2.0, 1.0])
+    assert sum(normalized) == pytest.approx(4.0)
+
+
+def test_remaining_solar_adapter_exposes_safe_fallback():
+    controller = SimpleNamespace(
+        solar_forecast_sensor=None,
+        solar_forecast_remaining_sensor=None,
+    )
+    hass = SimpleNamespace(states=SimpleNamespace(get=lambda _entity_id: None))
+
+    result = read_remaining_solar_kwh(hass, controller)
+
+    assert result.remaining_kwh == 0.0
+    assert result.source == "fallback"
+    assert controller.solar_forecast_source == "fallback"

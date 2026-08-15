@@ -48,6 +48,7 @@ const I18N = {
     placeholderMsg: "This view is coming in a future phase. For now, use the Overview view.",
     cardFlow: "Energy flow", cardSoc: "System status", cardDaily: "Energy today",
     cardWeekly: "Weekly energy", cardPower: "Power", cardSocToday: "SOC · today",
+    cardProfile: "Expected consumption", profileLearning: "Learning", profileMature: "Mature", profileFallback: "Fallback", profileSource: "Source",
     grid: "Grid", solar: "Solar", home: "Home", battery: "Battery",
     excludedDevices: "Excluded devices",
     importing: "Importing", exporting: "Exporting",
@@ -119,6 +120,7 @@ const I18N = {
     placeholderMsg: "Esta vista llegará en una próxima fase. Por ahora, usa la vista Resumen.",
     cardFlow: "Flujo de energía", cardSoc: "Estado del sistema", cardDaily: "Energía hoy",
     cardWeekly: "Energía semanal", cardPower: "Potencias", cardSocToday: "SOC · hoy",
+    cardProfile: "Consumo esperado", profileLearning: "Aprendiendo", profileMature: "Maduro", profileFallback: "Fallback", profileSource: "Fuente",
     grid: "Red", solar: "Solar", home: "Casa", battery: "Batería",
     excludedDevices: "Disp. excluidos",
     importing: "Importando", exporting: "Exportando",
@@ -190,6 +192,7 @@ const I18N = {
     placeholderMsg: "Aquesta vista arribarà en una fase futura. De moment, fes servir la vista Resum.",
     cardFlow: "Flux d'energia", cardSoc: "Estat del sistema", cardDaily: "Energia avui",
     cardWeekly: "Energia setmanal", cardPower: "Potències", cardSocToday: "SOC · avui",
+    cardProfile: "Consum esperat", profileLearning: "Aprenent", profileMature: "Madur", profileFallback: "Fallback", profileSource: "Font",
     grid: "Xarxa", solar: "Solar", home: "Casa", battery: "Bateria",
     excludedDevices: "Disp. exclosos",
     importing: "Important", exporting: "Exportant",
@@ -257,6 +260,7 @@ const I18N = {
     placeholderMsg: "Diese Ansicht kommt in einer späteren Phase. Nutze vorerst die Übersicht.",
     cardFlow: "Energiefluss", cardSoc: "Systemstatus", cardDaily: "Energie heute",
     cardWeekly: "Wochenenergie", cardPower: "Leistung", cardSocToday: "SOC · heute",
+    cardProfile: "Erwarteter Verbrauch", profileLearning: "Lernt", profileMature: "Ausgereift", profileFallback: "Fallback", profileSource: "Quelle",
     grid: "Netz", solar: "Solar", home: "Haus", battery: "Batterie",
     excludedDevices: "Ausgeschl. Geräte",
     importing: "Bezug", exporting: "Einspeisung",
@@ -324,6 +328,7 @@ const I18N = {
     placeholderMsg: "Cette vue arrivera dans une phase ultérieure. Pour l'instant, utilisez la vue Résumé.",
     cardFlow: "Flux d'énergie", cardSoc: "État du système", cardDaily: "Énergie aujourd'hui",
     cardWeekly: "Énergie hebdomadaire", cardPower: "Puissances", cardSocToday: "SOC · aujourd'hui",
+    cardProfile: "Consommation prévue", profileLearning: "Apprentissage", profileMature: "Mature", profileFallback: "Secours", profileSource: "Source",
     grid: "Réseau", solar: "Solaire", home: "Maison", battery: "Batterie",
     excludedDevices: "Appareils exclus",
     importing: "Importation", exporting: "Exportation",
@@ -391,6 +396,7 @@ const I18N = {
     placeholderMsg: "Deze weergave komt in een latere fase. Gebruik voorlopig het Overzicht.",
     cardFlow: "Energiestroom", cardSoc: "Systeemstatus", cardDaily: "Energie vandaag",
     cardWeekly: "Energie per week", cardPower: "Vermogen", cardSocToday: "SOC · vandaag",
+    cardProfile: "Verwacht verbruik", profileLearning: "Leren", profileMature: "Volwassen", profileFallback: "Fallback", profileSource: "Bron",
     grid: "Net", solar: "Zon", home: "Huis", battery: "Batterij",
     excludedDevices: "Uitgesloten app.",
     importing: "Invoer", exporting: "Teruglevering",
@@ -504,6 +510,7 @@ const K = {
   sysDailyHome: "system_daily_home_energy", // exact daily home consumption (kWh)
   sysDailyGridImport: "system_daily_grid_import_energy", // exact daily grid import (kWh)
   sysDailyGridExport: "system_daily_grid_export_energy", // exact daily grid export (kWh)
+  consumptionProfile: "expected_home_consumption_profile",
   sysAlarm: "system_alarm_status",
   pdQuality: "system_pd_control_quality", // PD control-quality verdict
   // diagnostics / flags
@@ -1634,6 +1641,16 @@ class MarstekVenusPanel extends HTMLElement {
     const dailyHome = this._num(this._stateFor(byKey, K.sysDailyHome));
     const dailyGridImport = this._num(this._stateFor(byKey, K.sysDailyGridImport));
     const dailyGridExport = this._num(this._stateFor(byKey, K.sysDailyGridExport));
+    const profileObj = this._stateFor(byKey, K.consumptionProfile);
+    const profileAttrs = profileObj && profileObj.attributes ? profileObj.attributes : {};
+    const profile = {
+      energy: this._num(profileObj),
+      hourly: Array.isArray(profileAttrs.hourly_profile_kwh) ? profileAttrs.hourly_profile_kwh : [],
+      source: profileAttrs.source || null,
+      mature: profileAttrs.mature === true,
+      coverage: Number(profileAttrs.coverage_ratio),
+      days: Number(profileAttrs.total_profile_days),
+    };
 
     return {
       nBat,
@@ -1653,6 +1670,7 @@ class MarstekVenusPanel extends HTMLElement {
       dailyHome,
       dailyGridImport,
       dailyGridExport,
+      profile,
       active,
       offline,
       netBalance,
@@ -1798,7 +1816,7 @@ class MarstekVenusPanel extends HTMLElement {
       c.soc,
       wrap("resumen-lower", [
         c.flow,
-        wrap("charts-2x2", [c.daily, c.weekly, c.power, c.mini]),
+        wrap("charts-2x2", [c.daily, c.weekly, c.power, c.mini, c.profile]),
       ]),
     ]);
   }
@@ -1821,7 +1839,32 @@ class MarstekVenusPanel extends HTMLElement {
       weekly: this._buildWeeklyCard(),
       power: this._buildPowerHistoryCard(),
       mini: this._buildMiniHistory(),
+      profile: this._buildProfileCard(),
     };
+  }
+
+  _buildProfileCard() {
+    const { card, head } = this._card(this._t("cardProfile"), "mdi:chart-bar");
+    card.classList.add("chart-card", "profile-card");
+    const meta = document.createElement("div");
+    meta.className = "profile-meta dim";
+    meta.innerHTML = `<span class="profile-state">—</span><span class="profile-source"></span>`;
+    const bars = document.createElement("div");
+    bars.className = "profile-bars";
+    for (let i = 0; i < 24; i++) {
+      const bar = document.createElement("span");
+      bar.className = "profile-bar";
+      bar.title = `${String(i).padStart(2, "0")}:00`;
+      bars.appendChild(bar);
+    }
+    const axis = document.createElement("div");
+    axis.className = "chart-xaxis dim profile-axis";
+    axis.innerHTML = "<span>00:00</span><span>12:00</span><span>24:00</span>";
+    card.append(meta, bars, axis);
+    this._r.profileState = meta.querySelector(".profile-state");
+    this._r.profileSource = meta.querySelector(".profile-source");
+    this._r.profileBars = [...bars.children];
+    return card;
   }
 
   // ----- Flow card -----
@@ -3027,6 +3070,24 @@ class MarstekVenusPanel extends HTMLElement {
     if (exp != null) {
       r.dExpV.innerHTML = `${this._nf(exp, 2)}${u}`;
       r.dExpBar.style.width = (exp / max) * 100 + "%";
+    }
+
+    // ----- expected quarter-hour consumption profile -----
+    const profile = m.profile || {};
+    const hourly = Array.isArray(profile.hourly) ? profile.hourly : [];
+    const peak = Math.max(0.01, ...hourly.map((v) => Number(v) || 0));
+    (r.profileBars || []).forEach((bar, index) => {
+      const value = Number(hourly[index]) || 0;
+      bar.style.height = `${Math.max(2, (value / peak) * 100)}%`;
+      bar.classList.toggle("current", index === new Date().getHours());
+      bar.title = `${String(index).padStart(2, "0")}:00 · ${this._nf(value, 2)} kWh`;
+    });
+    if (r.profileState) {
+      r.profileState.textContent = profile.mature ? this._t("profileMature") : this._t("profileLearning");
+    }
+    if (r.profileSource) {
+      const coverage = Number.isFinite(profile.coverage) ? ` · ${Math.round(profile.coverage * 100)}%` : "";
+      r.profileSource.textContent = `${this._t("profileSource")}: ${profile.source || this._t("profileFallback")}${coverage}`;
     }
 
     // ----- diagnostics (section 2, two columns) -----
@@ -4972,6 +5033,12 @@ class MarstekVenusPanel extends HTMLElement {
 
       /* chart cards (Potencias / Energía semanal / SOC hoy) */
       .chart-card { display: flex; flex-direction: column; min-height: 0; }
+      .profile-card { min-height: 190px; }
+      .profile-meta { display: flex; justify-content: space-between; gap: 8px; margin: 2px 0 10px; font-size: 11px; }
+      .profile-bars { display: flex; align-items: flex-end; gap: 3px; height: 112px; padding: 8px 4px 0; border-bottom: 1px solid var(--line); }
+      .profile-bar { flex: 1 1 0; min-height: 2px; border-radius: 3px 3px 0 0; background: var(--home); opacity: .72; transition: height .25s ease, background .25s ease; }
+      .profile-bar.current { background: var(--accent); opacity: 1; }
+      .profile-axis { margin-top: 5px; padding-left: 4px; }
       .chart-plot { flex: 1 1 auto; min-height: 96px; position: relative; }
       .chart-canvas { display: flex; height: 100%; min-height: 0; }
       .chart-yaxis { display: flex; flex: 0 0 48px; flex-direction: column; align-items: flex-end; justify-content: space-between; padding: 1px 8px 1px 0; color: var(--ink-dim); font-size: 10px; line-height: 1; white-space: nowrap; }

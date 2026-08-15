@@ -25,6 +25,7 @@ from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
 from ..const import DEFAULT_BASE_CONSUMPTION_KWH, DOMAIN
+from .consumption_profile import ConsumptionProfileTracker
 
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
@@ -92,6 +93,19 @@ class ConsumptionTracker:
             hass, 1, f"{DOMAIN}.{config_entry.entry_id}.daily_energy"
         )
 
+        # The legacy seven-day total history remains owned by this tracker for
+        # compatibility.  The quarter-hour profile is deliberately isolated in
+        # its own Store and learns the same adjusted home demand over 24 hours.
+        self._consumption_profile = ConsumptionProfileTracker(
+            hass,
+            config_entry,
+            controller,
+            fallback_daily_kwh=self.get_avg_daily_consumption,
+        )
+        # Public alias for diagnostics and consumers that do not need to know
+        # which legacy tracker owns the input derivation.
+        self.consumption_profile = self._consumption_profile
+
         # Transient state (not exposed to sensors)
         self._household_last_accumulation_time: Optional[float] = None
         self._daily_solar_last_time: Optional[float] = None
@@ -104,6 +118,14 @@ class ConsumptionTracker:
         self._grid_at_min_soc_last_save_mono: float = 0.0
         self._accumulator_last_save_monotonic: float = 0.0
         self._solar_noon_cache: Optional[tuple[date, float]] = None
+
+    async def load_consumption_profile(self) -> bool:
+        """Restore the independent quarter-hour profile Store."""
+        return await self._consumption_profile.async_load()
+
+    def start_consumption_profile_backfill(self) -> None:
+        """Start the non-blocking Recorder backfill for the quarter-hour profile."""
+        self._consumption_profile.start_backfill()
 
     # ------------------------------------------------------------------
     # Persistence
@@ -400,6 +422,25 @@ class ConsumptionTracker:
             if solar_kw is not None:
                 total_kw += solar_kw
         return max(0.0, total_kw)
+
+    def get_adjusted_home_power_kw(self) -> Optional[float]:
+        """Return household demand adjusted for configured external loads.
+
+        This is intentionally side-effect free and is the single input shared
+        by the legacy windowed accumulator and the 24-hour profile.
+        """
+        power_kw = self._derive_home_power_kw()
+        if power_kw is None:
+            return None
+        external_loads = getattr(self._controller, "_external_loads", None)
+        if external_loads is not None:
+            try:
+                power_kw += float(external_loads.consumption_delta_kw())
+            except (AttributeError, TypeError, ValueError):
+                pass
+        if not math.isfinite(power_kw):
+            return None
+        return max(0.0, power_kw)
 
     async def accumulate_daily_home_energy(self) -> None:
         """Integrate home consumption power → exact daily kWh.
@@ -769,8 +810,14 @@ class ConsumptionTracker:
         """
         ctrl = self._controller
 
-        if not ctrl.predictive_charging_enabled:
+        if not (ctrl.predictive_charging_enabled or ctrl.charge_delay_enabled):
             return
+
+        # The profile backfill has one range query per configured source and is
+        # intentionally independent from the legacy seven-day reconstruction.
+        # Start it here so existing startup behaviour remains available while
+        # the new Store learns in the background.
+        self.start_consumption_profile_backfill()
 
         # Drop stale synthetic entries for non-operating days (e.g. weekends
         # outside the charging window) left by an earlier default-seeding run.
@@ -1213,20 +1260,27 @@ class ConsumptionTracker:
         """
         ctrl = self._controller
 
+        # Capture the adjusted demand before applying the legacy battery-window
+        # mask.  A profile sample is valid 24 hours a day; the mask is applied
+        # only by forecast consumers.
+        profile_now = dt_util.now()
+        profile_mono = monotonic()
+        power_kw = self.get_adjusted_home_power_kw()
+        self._consumption_profile.record_power_sample(
+            power_kw,
+            local_time=profile_now,
+            monotonic_time=profile_mono,
+        )
+
         if not self.is_in_consumption_window():
             # Outside measurement window — pause accumulation but don't reset timer
             self._household_last_accumulation_time = None
             return
 
-        power_kw = self._derive_home_power_kw()
         if power_kw is None:
             return
 
-        # Adjust for excluded devices: remove power the battery doesn't cover and
-        # add power the battery covers that isn't visible to the home sensor.
-        power_kw += ctrl._external_loads.consumption_delta_kw()
-
-        now = monotonic()
+        now = profile_mono
         if self._household_last_accumulation_time is not None:
             dt_hours = (now - self._household_last_accumulation_time) / 3600.0
             ctrl._household_energy_accumulator += max(0.0, power_kw) * dt_hours
@@ -1243,6 +1297,7 @@ class ConsumptionTracker:
             self._accumulator_last_save_monotonic = now_mono
             self.save_accumulators()
             self.save_daily_energy()
+            self._consumption_profile.request_save()
 
     async def maybe_save_grid_at_min_soc_history(self) -> None:
         """Persist consumption history every ~5 min during grid-at-min-soc accumulation.
@@ -1268,3 +1323,4 @@ class ConsumptionTracker:
         await self.save_consumption_history()
         await self.async_save_accumulators()
         await self.async_save_daily_energy()
+        await self._consumption_profile.async_save_all()

@@ -1435,6 +1435,9 @@
       "system_daily_home_energy": {
         "name": "Consumo Diario de la Casa"
       },
+      "expected_home_consumption_profile": {
+        "name": "Perfil de consumo doméstico esperado"
+      },
       "home_consumption": {
         "name": "Consumo de la Casa"
       },

@@ -29,6 +29,16 @@ Every time the sensor value changes by more than 0.05 kWh, the integration re-ev
 
 Once the delay is unlocked it stays unlocked for the rest of the day.
 
+## Household demand horizon
+
+When the 28-day quarter-hour household profile is mature, Solar Charge Delay uses
+the same local-time remaining-consumption range as predictive charging. The
+profile is queried with charging windows excluded at read time, so demand already
+observed today is never counted again and the source remains a full 24-hour
+learning signal. During learning, the delay falls back to the legacy daily
+estimate. The Charge Delay sensor attributes expose `consumption_forecast_source`,
+`profile_coverage_ratio` and `profile_days` for this handoff.
+
 !!! note "Cushion-only shortfall waits for the cheapest hour"
     The energy-balance unlock fires at `net_solar < energy_needed × 1.3`, where the 30 % is a safety cushion rather than the target itself. When only that cushion is missing (`net_solar` is still at or above the bare `energy_needed`) and predictive charging runs in a price-driven mode, the delay does not release on the spot: it holds for the cheapest remaining hour, bounded by the moment the unfactored balance is projected to break. Self-charging then lands in the midday price trough instead of the morning export peak, and the SOC target stays reachable. A genuine deficit (`net_solar < energy_needed`) still unlocks immediately, as does any day without usable price data.
 

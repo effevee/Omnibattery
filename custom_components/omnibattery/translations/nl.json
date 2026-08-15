@@ -1435,6 +1435,9 @@
       "system_daily_home_energy": {
         "name": "Dagelijks Huishoudverbruik"
       },
+      "expected_home_consumption_profile": {
+        "name": "Verwacht huishoudelijk verbruiksprofiel"
+      },
       "system_pd_control_quality": {
         "name": "PD-Regelkwaliteit",
         "state": {

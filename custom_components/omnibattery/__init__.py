@@ -642,6 +642,7 @@ class ChargeDischargeController:
             CONF_SOLAR_FORECAST_REMAINING_SENSOR, None
         )
         self.solar_forecast_source: str | None = None
+        self.solar_forecast_diagnostic_source: str | None = None
         self.solar_production_sensor = config_entry.data.get(CONF_SOLAR_PRODUCTION_SENSOR, None)
         self.max_contracted_power = config_entry.data.get(CONF_MAX_CONTRACTED_POWER, 7000)
 
@@ -875,6 +876,7 @@ class ChargeDischargeController:
         self._charge_delay_last_date = None       # For daily reset
         self._charge_delay_forecast_cache = None  # Last forecast value used for balance check
         self._charge_delay_forecast_source_cache = None
+        self._charge_delay_profile_source_cache = None
         self._charge_delay_balance_needs_charge = True  # Cached balance result (conservative default)
         self._forecast_unavailable_since = None   # monotonic ts when a configured forecast sensor first read unavailable
         self._forecast_grace_s = 300              # hold the delay through forecast blips / HA-startup sensor loading before unlocking
@@ -893,6 +895,12 @@ class ChargeDischargeController:
             "remaining_solar_kwh": None,
             "remaining_consumption_kwh": None,
             "net_solar_kwh": None,
+            "consumption_forecast_source": "legacy_daily",
+            "profile_coverage_ratio": 0.0,
+            "profile_days": 0,
+            "profile_fallback_reason": None,
+            "solar_forecast_source": None,
+            "solar_forecast_diagnostic_source": None,
             "charge_time_h": None,
             "estimated_unlock_time": None,
             "unlock_reason": None,
@@ -1418,6 +1426,7 @@ class ChargeDischargeController:
             # next cycle (it is otherwise cached until the forecast value moves).
             self._charge_delay_forecast_cache = None
             self._charge_delay_forecast_source_cache = None
+            self._charge_delay_profile_source_cache = None
         self._charge_delay_balance_deadband_kwh = new_balance_deadband
         self._delay_soc_setpoint_enabled = self.config_entry.data.get(CONF_DELAY_SOC_SETPOINT_ENABLED, DEFAULT_DELAY_SOC_SETPOINT_ENABLED)
         self._delay_soc_setpoint = self.config_entry.data.get(CONF_DELAY_SOC_SETPOINT, DEFAULT_DELAY_SOC_SETPOINT)
@@ -3125,15 +3134,56 @@ class ChargeDischargeController:
         # the full-day average; a pre-slot re-evaluation may provide the
         # remaining consumption for the current day instead.
         consumption_scope = "daily"
+        profile_forecast = None
         if consumption_override_kwh is None:
-            avg_consumption_kwh = await self._consumption_tracker.get_dynamic_base_consumption()
+            profile = getattr(
+                getattr(self, "_consumption_tracker", None),
+                "consumption_profile",
+                None,
+            )
+            if profile is not None:
+                try:
+                    profile_now = dt_util.now()
+                    profile_timezone = getattr(profile, "_timezone", lambda: None)()
+                    if profile_timezone is not None:
+                        profile_now = (
+                            profile_now.astimezone(profile_timezone)
+                            if profile_now.tzinfo is not None
+                            else profile_now.replace(tzinfo=profile_timezone)
+                        )
+                    elif profile_now.tzinfo is None:
+                        profile_now = profile_now.replace(tzinfo=dt_util.UTC)
+                    profile_start = profile_now.replace(
+                        hour=0,
+                        minute=0,
+                        second=0,
+                        microsecond=0,
+                    )
+                    profile_forecast = profile.forecast_energy_between(
+                        profile_start,
+                        profile_start + timedelta(days=1),
+                        exclude_charging_windows=True,
+                        fallback="legacy_daily",
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    _LOGGER.debug("Predictive evaluation: daily profile failed: %s", exc)
+                    profile_forecast = None
+            if profile_forecast is not None and profile_forecast.mature:
+                avg_consumption_kwh = profile_forecast.energy_kwh
+                consumption_scope = "daily_profile"
+            else:
+                avg_consumption_kwh = await self._consumption_tracker.get_dynamic_base_consumption()
         else:
             try:
                 avg_consumption_kwh = max(0.0, float(consumption_override_kwh))
                 consumption_scope = "remaining"
             except (TypeError, ValueError):
                 avg_consumption_kwh = await self._consumption_tracker.get_dynamic_base_consumption()
-        days_in_history = len(self._daily_consumption_history)
+        days_in_history = (
+            profile_forecast.total_days
+            if profile_forecast is not None and profile_forecast.mature
+            else len(self._daily_consumption_history)
+        )
 
         # === STEP 4: Get Solar Forecast ===
         # Use the live sensor value directly for the daily evaluation.  A
@@ -3148,11 +3198,13 @@ class ChargeDischargeController:
 
         forecast_state = None
         forecast_source = None
+        forecast_diagnostic_source = None
         if solar_forecast_kwh is None:
             forecast = read_solar_forecast_kwh(self.hass, self)
             if forecast is not None:
                 solar_forecast_kwh = forecast.kwh
                 forecast_source = forecast.source
+                forecast_diagnostic_source = forecast.diagnostic_source
                 forecast_state = self.hass.states.get(forecast.sensor)
         if solar_forecast_kwh is None:
             # Conservative mode: assume zero solar, compare usable vs consumption
@@ -3191,6 +3243,30 @@ class ChargeDischargeController:
                 "planned_grid_charge_kwh": planned_grid_charge_kwh,
                 "days_in_history": days_in_history,
                 "consumption_scope": consumption_scope,
+                "consumption_forecast_source": (
+                    profile_forecast.source
+                    if profile_forecast is not None and profile_forecast.mature
+                    else "legacy_daily"
+                ),
+                "profile_coverage_ratio": (
+                    profile_forecast.coverage_ratio
+                    if profile_forecast is not None and profile_forecast.mature
+                    else 0.0
+                ),
+                "profile_days": (
+                    profile_forecast.total_days
+                    if profile_forecast is not None and profile_forecast.mature
+                    else 0
+                ),
+                "profile_fallback_reason": (
+                    None
+                    if profile_forecast is not None and profile_forecast.mature
+                    else getattr(profile_forecast, "fallback_reason", "profile_not_mature")
+                ),
+                "solar_forecast_source": forecast_diagnostic_source
+                or getattr(self, "solar_forecast_diagnostic_source", None),
+                "solar_forecast_diagnostic_source": forecast_diagnostic_source
+                or getattr(self, "solar_forecast_diagnostic_source", None),
                 "reason": f"Solar unavailable - conservative mode ({'charge' if should_charge else 'safe'})"
             }
 
@@ -3263,7 +3339,31 @@ class ChargeDischargeController:
             "grid_charge_kwh": grid_charge_kwh,
             "floor_active": floor_active,
             "consumption_scope": consumption_scope,
+            "consumption_forecast_source": (
+                "profile"
+                if profile_forecast is not None and profile_forecast.mature
+                else "legacy_daily"
+            ),
+            "profile_coverage_ratio": (
+                profile_forecast.coverage_ratio
+                if profile_forecast is not None and profile_forecast.mature
+                else 0.0
+            ),
+            "profile_days": (
+                profile_forecast.total_days
+                if profile_forecast is not None and profile_forecast.mature
+                else 0
+            ),
+            "profile_fallback_reason": (
+                None
+                if profile_forecast is not None and profile_forecast.mature
+                else getattr(profile_forecast, "fallback_reason", "profile_not_mature")
+            ),
             "solar_forecast_source": forecast_source or getattr(self, "solar_forecast_source", None),
+            "solar_forecast_diagnostic_source": (
+                forecast_diagnostic_source
+                or getattr(self, "solar_forecast_diagnostic_source", None)
+            ),
             "consumption_source": "derived (grid + battery AC + solar)",
             "reason": (
                 f"Guaranteed minimum SOC: charging {energy_deficit_kwh:.2f} kWh "
@@ -7480,6 +7580,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         consumption_tracker.initialize_history_with_defaults()
         await consumption_tracker.save_consumption_history()
 
+    # Restore the independent 15-minute profile after the legacy daily history
+    # is available.  A corrupt or incompatible profile is isolated and never
+    # prevents the integration from starting.
+    await consumption_tracker.load_consumption_profile()
+
     # Restore household and solar accumulators from persistent storage
     await consumption_tracker.load_accumulators()
     await consumption_tracker.load_daily_energy()
@@ -7659,6 +7764,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         if controller:
             controller.update_pd_parameters()
             controller._check_solar_forecast_migration()
+            tracker = getattr(controller, "_consumption_tracker", None)
+            profile = getattr(tracker, "consumption_profile", None)
+            if profile is not None and profile.invalidate_if_configuration_changed():
+                tracker.start_consumption_profile_backfill()
         # Keep the recovery copy in sync with the latest options.
         from .config_backup import async_save_config_backup
         await async_save_config_backup(hass)

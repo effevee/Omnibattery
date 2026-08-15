@@ -27,6 +27,57 @@ class SolarForecast:
     source: ForecastSource
     sensor: str
 
+    @property
+    def remaining_kwh(self) -> float:
+        """Normalized future energy consumed by all control decisions."""
+        return self.kwh
+
+    @property
+    def diagnostic_source(self) -> str:
+        """Stable diagnostic label distinguishing the migration paths."""
+        return "remaining_sensor" if self.source == "remaining" else "today_legacy"
+
+
+@dataclass(frozen=True)
+class SolarForecastInput:
+    """Consumer-facing solar contract with an optional normalized curve."""
+
+    remaining_kwh: float
+    source: str
+    temporal_shape: tuple[float, ...] | None = None
+
+    def __post_init__(self) -> None:
+        """Keep the normalized contract finite even with a loose sensor value."""
+        try:
+            value = float(self.remaining_kwh)
+        except (TypeError, ValueError):
+            value = 0.0
+        object.__setattr__(
+            self,
+            "remaining_kwh",
+            value if math.isfinite(value) and value >= 0.0 else 0.0,
+        )
+
+    def normalized_shape(self) -> list[float] | None:
+        """Return a shape whose values sum exactly to ``remaining_kwh``."""
+        if self.temporal_shape is None:
+            return None
+        values = []
+        for value in self.temporal_shape:
+            try:
+                parsed = float(value)
+            except (TypeError, ValueError):
+                parsed = 0.0
+            values.append(parsed if math.isfinite(parsed) and parsed >= 0.0 else 0.0)
+        total = sum(values)
+        if total <= 0.0:
+            return [0.0] * len(values)
+        factor = max(0.0, self.remaining_kwh) / total
+        normalized = [value * factor for value in values]
+        if normalized:
+            normalized[-1] += max(0.0, self.remaining_kwh) - sum(normalized)
+        return normalized
+
 
 def normalize_solar_forecast_config(data: dict[str, Any]) -> dict[str, Any]:
     """Keep at most one persisted solar forecast horizon.
@@ -82,6 +133,19 @@ def read_solar_forecast_kwh(hass: Any, controller: Any) -> SolarForecast | None:
         if value is not None:
             # Kept on the controller for diagnostics and lightweight consumers.
             controller.solar_forecast_source = source
-            return SolarForecast(value, source, sensor)
+            forecast = SolarForecast(value, source, sensor)
+            controller.solar_forecast_diagnostic_source = forecast.diagnostic_source
+            return forecast
     controller.solar_forecast_source = None
+    controller.solar_forecast_diagnostic_source = None
     return None
+
+
+def read_remaining_solar_kwh(hass: Any, controller: Any) -> SolarForecastInput:
+    """Read the normalized future-solar contract, with a safe zero fallback."""
+    forecast = read_solar_forecast_kwh(hass, controller)
+    if forecast is None:
+        controller.solar_forecast_source = "fallback"
+        controller.solar_forecast_diagnostic_source = "fallback"
+        return SolarForecastInput(0.0, "fallback")
+    return SolarForecastInput(forecast.remaining_kwh, forecast.diagnostic_source)

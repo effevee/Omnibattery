@@ -1447,6 +1447,9 @@
       "system_daily_home_energy": {
         "name": "Consommation Domestique Quotidienne"
       },
+      "expected_home_consumption_profile": {
+        "name": "Profil de consommation domestique prévu"
+      },
       "system_pd_control_quality": {
         "name": "Qualité du Contrôle PD",
         "state": {

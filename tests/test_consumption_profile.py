@@ -1,0 +1,308 @@
+"""Pure tests for the quarter-hour consumption profile."""
+from __future__ import annotations
+
+from datetime import date, datetime, timedelta
+from types import SimpleNamespace
+from zoneinfo import ZoneInfo
+
+import pytest
+
+from custom_components.omnibattery.tracking.consumption_profile import (
+    INTERVAL_COUNT,
+    INTERVAL_SECONDS,
+    MIN_INTERVAL_COVERAGE_S,
+    ConsumptionProfileTracker,
+    ProfileDay,
+    _series_to_bins,
+    split_sample_across_bins,
+)
+
+
+MADRID = ZoneInfo("Europe/Madrid")
+
+
+def _profile(days=None, *, slots=None):
+    profile = ConsumptionProfileTracker.__new__(ConsumptionProfileTracker)
+    profile._days = days or {}
+    profile._controller = SimpleNamespace(
+        charging_time_slots=slots or [],
+        get_avg_daily_consumption=lambda: 5.0,
+    )
+    profile._fallback_daily_kwh = 5.0
+    profile._last_error = None
+    profile._hass = SimpleNamespace(
+        config=SimpleNamespace(time_zone="Europe/Madrid")
+    )
+    profile._last_local_date = None
+    profile._last_sample_time = None
+    profile._last_sample_monotonic = None
+    profile._last_power_kw = None
+    profile._last_save_monotonic = 1.0
+    profile._save_task = None
+    profile._backfill_task = None
+    profile._loaded = True
+    profile._invalidated = False
+    profile._active_fingerprint = "test"
+    return profile
+
+
+def _day(local_date: date, value: float, *, coverage=INTERVAL_SECONDS):
+    return ProfileDay(
+        local_date,
+        [value * coverage / INTERVAL_SECONDS] * INTERVAL_COUNT,
+        [coverage] * INTERVAL_COUNT,
+        complete=True,
+    )
+
+
+def _single_interval_day(local_date: date, value: float, interval=40):
+    energy = [0.0] * INTERVAL_COUNT
+    coverage = [0.0] * INTERVAL_COUNT
+    energy[interval] = value
+    coverage[interval] = INTERVAL_SECONDS
+    return ProfileDay(local_date, energy, coverage, complete=True)
+
+
+def test_split_sample_inside_one_bin():
+    start = datetime(2026, 8, 10, 10, 0, tzinfo=MADRID)
+    end = start + timedelta(minutes=10)
+    result = split_sample_across_bins(start, end, 1.0, 1.0)
+
+    assert len(result) == 1
+    assert result[0].interval_index == 40
+    assert result[0].coverage_s == pytest.approx(600)
+    assert result[0].energy_kwh == pytest.approx(1 / 6)
+
+
+def test_split_sample_crosses_quarter_boundary():
+    start = datetime(2026, 8, 10, 10, 14, tzinfo=MADRID)
+    end = datetime(2026, 8, 10, 10, 16, tzinfo=MADRID)
+    result = split_sample_across_bins(start, end, 1.0, 1.0)
+
+    assert [item.interval_index for item in result] == [40, 41]
+    assert [item.coverage_s for item in result] == pytest.approx([60, 60])
+    assert sum(item.energy_kwh for item in result) == pytest.approx(1 / 30)
+
+
+def test_split_sample_crosses_midnight():
+    start = datetime(2026, 8, 10, 23, 59, tzinfo=MADRID)
+    end = datetime(2026, 8, 11, 0, 1, tzinfo=MADRID)
+    result = split_sample_across_bins(start, end, 1.0, 1.0)
+
+    assert [item.local_date for item in result] == [date(2026, 8, 10), date(2026, 8, 11)]
+    assert [item.coverage_s for item in result] == pytest.approx([60, 60])
+
+
+def test_split_sample_uses_trapezoidal_power():
+    start = datetime(2026, 8, 10, 10, 0, tzinfo=MADRID)
+    end = datetime(2026, 8, 10, 10, 15, tzinfo=MADRID)
+    result = split_sample_across_bins(start, end, 0.0, 2.0)
+
+    assert result[0].energy_kwh == pytest.approx(0.25)
+
+
+def test_split_sample_rejects_invalid_power():
+    start = datetime(2026, 8, 10, 10, 0, tzinfo=MADRID)
+    end = start + timedelta(minutes=1)
+
+    assert split_sample_across_bins(start, end, float("nan"), 1.0) == []
+    assert split_sample_across_bins(start, end, 1.0, float("inf")) == []
+    assert split_sample_across_bins(start, end, -1.0, 1.0) == []
+
+
+def test_split_sample_handles_local_dst_transitions():
+    autumn = split_sample_across_bins(
+        datetime(2026, 10, 25, 2, 55, tzinfo=MADRID, fold=0),
+        datetime(2026, 10, 25, 2, 15, tzinfo=MADRID, fold=1),
+        1.0,
+        1.0,
+    )
+    spring = split_sample_across_bins(
+        datetime(2026, 3, 29, 1, 55, tzinfo=MADRID),
+        datetime(2026, 3, 29, 3, 15, tzinfo=MADRID),
+        1.0,
+        1.0,
+    )
+
+    assert [item.coverage_s for item in autumn] == pytest.approx([300, 900])
+    assert [item.coverage_s for item in spring] == pytest.approx([300, 900])
+
+
+def test_recorder_utc_timestamps_are_binned_in_configured_local_timezone():
+    states = [
+        SimpleNamespace(
+            state="1000",
+            attributes={"unit_of_measurement": "W"},
+            last_updated=datetime(2026, 8, 10, 22, 59, tzinfo=ZoneInfo("UTC")),
+        ),
+        SimpleNamespace(
+            state="1000",
+            attributes={"unit_of_measurement": "W"},
+            last_updated=datetime(2026, 8, 10, 23, 1, tzinfo=ZoneInfo("UTC")),
+        ),
+    ]
+
+    days = _series_to_bins(states, MADRID)
+
+    assert list(days) == [date(2026, 8, 11)]
+    assert days[date(2026, 8, 11)].coverage_s[3] == pytest.approx(60)
+    assert days[date(2026, 8, 11)].coverage_s[4] == pytest.approx(60)
+
+
+def test_capture_breaks_continuity_after_unknown_and_long_gap():
+    profile = _profile()
+    start = datetime(2026, 8, 10, 10, 0, tzinfo=MADRID)
+    profile.record_power_sample(1.0, local_time=start, monotonic_time=0.0)
+    profile.record_power_sample(
+        1.0,
+        local_time=start + timedelta(minutes=2),
+        monotonic_time=120.0,
+    )
+    profile.record_power_sample(
+        None,
+        local_time=start + timedelta(minutes=3),
+        monotonic_time=180.0,
+    )
+    profile.record_power_sample(
+        1.0,
+        local_time=start + timedelta(minutes=13),
+        monotonic_time=780.0,
+    )
+    profile.record_power_sample(
+        1.0,
+        local_time=start + timedelta(minutes=19),
+        monotonic_time=1140.0,
+    )
+
+    day = profile._days[start.date()]
+    assert day.coverage_s[40] == pytest.approx(120.0)
+    assert day.coverage_s[41] == pytest.approx(0.0)
+
+
+def test_corrupt_profile_day_is_rejected_without_partial_data():
+    assert ConsumptionProfileTracker._parse_day({"date": "2026-08-10"}) is None
+    assert ConsumptionProfileTracker._parse_day(
+        {
+            "date": "2026-08-10",
+            "energy_kwh": [0.0] * (INTERVAL_COUNT - 1),
+            "coverage_s": [0.0] * INTERVAL_COUNT,
+        }
+    ) is None
+
+
+def test_profile_day_requires_seventy_five_percent_coverage():
+    day = ProfileDay(
+        date(2026, 8, 10),
+        [1.0] + [0.0] * (INTERVAL_COUNT - 1),
+        [MIN_INTERVAL_COVERAGE_S - 1] + [0.0] * (INTERVAL_COUNT - 1),
+        complete=True,
+    )
+    assert day.normalized_interval(0) is None
+
+    day.coverage_s[0] = MIN_INTERVAL_COVERAGE_S
+    assert day.normalized_interval(0) == pytest.approx(INTERVAL_SECONDS / MIN_INTERVAL_COVERAGE_S)
+
+
+def test_profile_retention_keeps_current_and_previous_twenty_eight_days():
+    profile = _profile()
+    today = date.today()
+    profile._days = {
+        today - timedelta(days=offset): _day(today - timedelta(days=offset), 1.0)
+        for offset in range(31)
+    }
+    profile._prune(today)
+
+    assert len(profile._days) == 29
+    assert min(profile._days) == today - timedelta(days=28)
+    assert max(profile._days) == today
+
+
+def test_partial_current_day_is_kept_but_not_used_as_training_sample():
+    today = date.today()
+    profile = _profile({today: _day(today, 2.0, coverage=INTERVAL_SECONDS)})
+    profile._days[today].complete = False
+
+    forecast = profile.forecast_for_date(today)
+
+    assert forecast.total_days == 0
+    assert forecast.mature is False
+    assert forecast.source == "legacy_daily"
+
+
+def test_four_weekday_samples_are_weighted_by_age_and_profile_becomes_mature():
+    # The current date in the test environment is a Saturday.  These four
+    # Mondays therefore receive weights 1, .75, .50 and .25.
+    monday_samples = {
+        date(2026, 8, 10): 1.0,
+        date(2026, 8, 3): 2.0,
+        date(2026, 7, 27): 3.0,
+        date(2026, 7, 20): 4.0,
+    }
+    days = {local_date: _day(local_date, value) for local_date, value in monday_samples.items()}
+    for local_date in (date(2026, 8, 9), date(2026, 8, 8), date(2026, 8, 7)):
+        days[local_date] = _day(local_date, 2.0)
+
+    forecast = _profile(days).forecast_for_date(date(2026, 8, 17))
+
+    # Weighted weekday mean = (1 + .75*2 + .50*3 + .25*4) / 2.5 = 2.
+    assert forecast.mature is True
+    assert forecast.source == "profile"
+    assert forecast.intervals_kwh[40] == pytest.approx(2.0)
+    assert forecast.energy_kwh == pytest.approx(2.0 * INTERVAL_COUNT)
+    assert forecast.weekday_samples == 4
+
+
+def test_partial_query_maturity_uses_requested_intervals_only():
+    days = {
+        date(2026, 8, 10): _single_interval_day(date(2026, 8, 10), 1.0),
+        date(2026, 8, 3): _single_interval_day(date(2026, 8, 3), 1.0),
+        date(2026, 7, 27): _single_interval_day(date(2026, 7, 27), 1.0),
+        date(2026, 7, 20): _single_interval_day(date(2026, 7, 20), 1.0),
+        date(2026, 8, 9): _single_interval_day(date(2026, 8, 9), 1.0),
+        date(2026, 8, 8): _single_interval_day(date(2026, 8, 8), 1.0),
+        date(2026, 8, 7): _single_interval_day(date(2026, 8, 7), 1.0),
+    }
+
+    forecast = _profile(days).forecast_for_date(
+        date(2026, 8, 17),
+        interval_indices={40},
+    )
+
+    assert forecast.mature is True
+    assert forecast.coverage_ratio == pytest.approx(1.0)
+    assert forecast.intervals_kwh[40] == pytest.approx(1.0)
+
+
+def test_immature_profile_uses_coherent_legacy_fallback():
+    days = {date.today() - timedelta(days=1): _day(date.today() - timedelta(days=1), 2.0)}
+    forecast = _profile(days).forecast_for_date(date.today())
+
+    assert forecast.mature is False
+    assert forecast.source == "legacy_daily"
+    assert forecast.fallback_reason == "insufficient_days"
+    assert forecast.energy_kwh == pytest.approx(5.0)
+
+
+def test_range_query_prorates_partial_interval_and_masks_slot_days():
+    today = date.today()
+    profile = _profile(
+        {today - timedelta(days=offset): _day(today - timedelta(days=offset), 1.0)
+         for offset in range(14)},
+        slots=[{
+            "days": ["mon"],
+            "start_time": "10:00",
+            "end_time": "11:00",
+        }],
+    )
+    monday = today + timedelta(days=(0 - today.weekday()) % 7)
+    start = datetime.combine(monday, datetime.min.time()).replace(tzinfo=MADRID)
+    result = profile.forecast_energy_between(
+        start + timedelta(hours=9, minutes=52),
+        start + timedelta(hours=10, minutes=8),
+        exclude_charging_windows=True,
+        fallback="legacy_daily",
+    )
+
+    # The 16 minutes are all in one nominal 1 kWh/hour profile, but the middle
+    # 8 minutes are a configured Monday charging window.
+    assert result.energy_kwh == pytest.approx(8 / 15, abs=1e-6)

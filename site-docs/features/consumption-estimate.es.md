@@ -1,6 +1,6 @@
-# Estimación del consumo diario
+# Estimación diaria y horaria del consumo
 
-La carga predictiva necesita saber cuánta energía consume tu hogar cada día para decidir si hace falta cargar desde la red. En lugar de usar un valor fijo, la integración calcula un **consumo estimado dinámico** a partir del historial real de los últimos 7 días.
+La carga predictiva necesita saber cuánta energía consume tu hogar para decidir si hace falta cargar desde la red. La integración aprende un **perfil de consumo de 15 minutos** a partir de hasta 28 días locales completos. Hasta que ese perfil alcanza la madurez, la estimación diaria existente de 7 días sigue siendo el fallback seguro.
 
 ---
 
@@ -101,3 +101,33 @@ Este sensor **Grid at Min SOC** es informativo: muestra la demanda que la bater�
 El sensor `binary_sensor.marstek_venus_system_predictive_charging_active` expone en sus atributos el historial de consumo de los últimos 7 días y el número de entradas reales vs. valores de reserva, útil para verificar el estado del aprendizaje.
 
 ![Atributos del historial de consumo en HA](../assets/screenshots/features/consumption-estimate-attributes.png){ width="700"  style="display: block; margin: 0 auto;"}
+
+## Perfil de 28 días por cuarto de hora
+
+La integración captura además la demanda corregida del hogar de forma continua,
+las 24 horas, en **96 intervalos locales de 15 minutos**. Cada muestra se integra
+con regla trapezoidal y se divide al cruzar medianoche, cuartos de hora y cambios
+de horario de verano. Un hueco de más de cinco minutos rompe la continuidad; un
+intervalo solo es válido cuando tiene al menos 675 segundos (75 %) de cobertura.
+Las franjas de carga no se aplican durante el aprendizaje: se aplican únicamente
+al consultar el perfil, para no sesgar los datos guardados.
+
+El perfil combina muestras del mismo día de la semana, del mismo tipo
+laborable/fin de semana y globales. Los días recientes pesan `1,0`, `0,75`, `0,5`
+y `0,25`. Solo se considera maduro con al menos siete días válidos, dos muestras
+para el 75 % de los intervalos solicitados, un 80 % de cobertura del rango y una
+muestra de menos de siete días. Si no es maduro, se usa automáticamente la media
+diaria heredada o la estimación por potencia actual, según el consumidor.
+
+Tras arrancar, el backfill del Recorder se ejecuta en segundo plano con una
+consulta por cada fuente configurada. Los datos crudos están aislados en
+`omnibattery.<entry_id>.consumption_profile`; cambiar la fuente, los ajustes de
+cargas o la zona horaria de Home Assistant invalida el perfil y comienza un
+aprendizaje nuevo.
+
+El sensor de diagnóstico
+`sensor.omnibattery_expected_home_consumption_profile` expone la previsión,
+los 96 intervalos/valores horarios, el origen, la madurez, la cobertura y los
+metadatos del fallback. Los diagnósticos de la integración contienen el resumen
+acotado por día. La carga predictiva, el Retraso de Carga
+Solar y Precio Dinámico solo usan el perfil cuando cumple el contrato de madurez.

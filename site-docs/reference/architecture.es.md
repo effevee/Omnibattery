@@ -142,3 +142,20 @@ Coordinador → driver.read_telemetry → Actualización de entidades
 | `medium` | 5 s | Tensión, corriente, temperatura |
 | `low` | 30 s | Energía acumulada, alarmas |
 | `very_low` | 600 s | Info de dispositivo, firmware |
+
+## Perfil de consumo
+
+`tracking/consumption_profile.py` posee el Store independiente
+`omnibattery.<entry_id>.consumption_profile`. Captura continuamente la potencia
+corregida del hogar en arrays crudos de energía y cobertura por fecha local y 96
+intervalos, y solo construye la previsión al consultarla. El backfill del
+Recorder se ejecuta en segundo plano y nunca bloquea el arranque ni el control de
+las baterías. El tracker rechaza muestras inválidas, aísla días corruptos,
+gestiona los cambios DST locales e invalida el perfil cuando cambia la huella de
+su fuente o configuración.
+
+Todos los consumidores usan el mismo contrato: datos del perfil maduro para el
+rango solicitado o un fallback heredado explícito. La captura nunca aplica
+franjas de carga; `forecast_energy_between()` las aplica solo al solicitar una
+previsión. Así la misma señal sirve a la carga predictiva diaria, el Retraso de
+Carga Solar y Precio Dinámico sin acoplar sus decisiones de ejecución.
