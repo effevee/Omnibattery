@@ -35,6 +35,7 @@ from ..const import (
     PREDICTIVE_MODE_REALTIME_PRICE,
     T_START_FALLBACK_HOUR,
 )
+from ..solar_forecast import read_solar_forecast_kwh
 
 # Price-aware release only makes sense when charging is actually scheduled by
 # price. In time-slot mode prices drive nothing, so a configured price_sensor
@@ -161,6 +162,7 @@ class ChargeDelayManager:
             if saved_margin is not None:
                 ctrl._charge_delay_status["safety_margin_min"] = saved_margin
             ctrl._charge_delay_forecast_cache = None
+            ctrl._charge_delay_forecast_source_cache = None
             ctrl._charge_delay_balance_needs_charge = True
             self.schedule_save()
             _LOGGER.info("Charge Delay: New day - state reset")
@@ -332,7 +334,7 @@ class ChargeDelayManager:
         status["solar_t_start"] = _h_to_hhmm(ctrl._solar_t_start)
 
         # --- Exception 1: No solar forecast sensor or unavailable ---
-        if not ctrl.solar_forecast_sensor:
+        if not (getattr(ctrl, "solar_forecast_remaining_sensor", None) or ctrl.solar_forecast_sensor):
             _LOGGER.info("Charge Delay: No solar forecast sensor configured - unlocking (reason: no_forecast)")
             return _unlock("no_forecast")
 
@@ -343,13 +345,8 @@ class ChargeDelayManager:
         # current delay through a short grace window and only unlock if the sensor
         # stays unavailable. (A sensor that is not configured at all still unlocks
         # immediately above — that is a deliberate fail-safe, not a transient.)
-        forecast_state = ctrl.hass.states.get(ctrl.solar_forecast_sensor)
-        raw_forecast = None
-        if forecast_state is not None and forecast_state.state not in ("unknown", "unavailable"):
-            try:
-                raw_forecast = float(forecast_state.state)
-            except (ValueError, TypeError):
-                raw_forecast = None
+        forecast = read_solar_forecast_kwh(ctrl.hass, ctrl)
+        raw_forecast = forecast.kwh if forecast is not None else None
 
         if raw_forecast is None:
             mono = monotonic()
@@ -372,6 +369,8 @@ class ChargeDelayManager:
         # Forecast recovered / valid — clear the transient tracker.
         ctrl._forecast_unavailable_since = None
         forecast_today = raw_forecast
+        forecast_is_remaining = forecast.source == "remaining"
+        status["solar_forecast_source"] = forecast.source
         status["forecast_kwh"] = raw_forecast
 
         # --- Exception 2: Energy balance check (dynamic, recalculated only when forecast changes) ---
@@ -387,6 +386,8 @@ class ChargeDelayManager:
         if (
             ctrl._charge_delay_forecast_cache is None
             or abs(forecast_today - ctrl._charge_delay_forecast_cache) > 0.05
+            or getattr(ctrl, "_charge_delay_forecast_source_cache", None)
+            != forecast.source
         ):
             coordinators_with_data = [c for c in automatic_batteries if c.data]
             avg_soc = (
@@ -397,6 +398,10 @@ class ChargeDelayManager:
             min_soc = max(min_soc_values) if min_soc_values else 20
             usable_energy_kwh = max(0, ((avg_soc - min_soc) / 100) * total_capacity_kwh)
             avg_consumption_kwh = ctrl._consumption_tracker.get_avg_daily_consumption()
+            if forecast_is_remaining:
+                remaining_window_hours = ctrl._consumption_tracker.consumption_window_hours_in_range(now_h, 24.0)
+                window_hours = ctrl._consumption_tracker.get_consumption_window_hours_per_day()
+                avg_consumption_kwh *= remaining_window_hours / window_hours if window_hours > 0 else 0.0
             prev_cache = ctrl._charge_delay_forecast_cache
             # Binary "is grid needed today?" gate. A small deadband absorbs sensor
             # noise so a near-balanced day still holds for the cheap window.
@@ -406,6 +411,7 @@ class ChargeDelayManager:
                 < (avg_consumption_kwh - deadband_kwh)
             )
             ctrl._charge_delay_forecast_cache = forecast_today
+            ctrl._charge_delay_forecast_source_cache = forecast.source
             _LOGGER.info(
                 "Charge Delay: Forecast %s (%.2f kWh) → "
                 "balance: %.2f usable + %.2f solar = %.2f kWh vs %.2f kWh consumption "
@@ -471,7 +477,11 @@ class ChargeDelayManager:
         charge_time_h = energy_needed_kwh / (max_charge_power_kw * CHARGE_EFFICIENCY)
 
         # Remaining solar and consumption
-        if ctrl._daily_solar_energy_kwh > 0:
+        if forecast_is_remaining:
+            # This is already future solar; transforming it would double-count
+            # production that the provider has already observed.
+            remaining_solar_kwh = forecast_today
+        elif ctrl._daily_solar_energy_kwh > 0:
             # Use actual measured solar production (real solar sensor + Venus MPPT)
             # to estimate the remaining production for today.
             remaining_solar_kwh = max(0.0, forecast_today - ctrl._daily_solar_energy_kwh)
@@ -514,7 +524,8 @@ class ChargeDelayManager:
         # Estimate unlock time: earliest of time-backup and energy-balance triggers
         time_backup_unlock_h = t_end - charge_time_h - safety_margin_h
         energy_balance_unlock_h = self._estimate_energy_balance_unlock_h(
-            forecast_today, energy_needed_kwh, ctrl._solar_t_start, t_end, now_h
+            forecast_today, energy_needed_kwh, ctrl._solar_t_start, t_end, now_h,
+            forecast_is_remaining=forecast_is_remaining,
         )
         if (
             energy_balance_unlock_h is not None
@@ -561,6 +572,7 @@ class ChargeDelayManager:
                     t_end,
                     now_h,
                     safety_factor=1.0,
+                    forecast_is_remaining=forecast_is_remaining,
                 )
                 edge_h = (
                     time_backup_unlock_h
@@ -785,6 +797,7 @@ class ChargeDelayManager:
         t_end: float,
         now_h: float,
         safety_factor: float = DELAY_SAFETY_FACTOR,
+        forecast_is_remaining: bool = False,
     ) -> float | None:
         """Estimate when the energy balance condition will trigger the delay unlock.
 
@@ -813,7 +826,14 @@ class ChargeDelayManager:
             """Net solar available for battery at time t."""
             progress = max(0.0, min(1.0, (t - t_start) / daylight_hours))
             fraction_done = (1.0 - math.cos(math.pi * progress)) / 2.0
-            remaining_solar = forecast_kwh * (1.0 - fraction_done)
+            if forecast_is_remaining:
+                # Renormalize the provider's post-now energy over the remaining
+                # daylight curve, never treating it as a full-day forecast.
+                now_progress = max(0.0, min(1.0, (now_h - t_start) / daylight_hours))
+                remaining_at_now = max(1e-9, 1.0 - (1.0 - math.cos(math.pi * now_progress)) / 2.0)
+                remaining_solar = forecast_kwh * (1.0 - fraction_done) / remaining_at_now
+            else:
+                remaining_solar = forecast_kwh * (1.0 - fraction_done)
             remaining_window_hours = ctrl._consumption_tracker.consumption_window_hours_in_range(
                 t, t_end
             )

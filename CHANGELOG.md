@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- **Remaining-today solar forecasts are now supported without breaking existing setups**: a new recommended sensor field accepts the provider's production still expected today and replaces/removes the legacy whole-day forecast when saved. Intraday predictive charging, Solar Charge Delay and Smart Pre-discharge use matching remaining-energy horizons without subtracting measured production or applying the solar curve twice; untouched legacy `today` sensors continue through the existing approximation during the transition. A Home Assistant Repair guides legacy-only entries and clears automatically after migration. Forecast values are now normalized from Wh to kWh and their active source is exposed in diagnostics.
+
 ## [1.3.1] - 2026-08-15
 
 ### Fixed

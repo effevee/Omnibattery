@@ -20,7 +20,7 @@ Else:
 
 ## Live forecast
 
-The integration reads the solar forecast sensor live, with no nightly capture or storage. Most solar forecast integrations (Solcast, Forecast.Solar, etc.) update their today sensor multiple times throughout the day, becoming progressively more accurate as actual weather conditions develop.
+The integration reads the solar forecast sensor live, with no nightly capture or storage. A saved **Remaining Today** sensor is used directly and replaces the legacy whole-day setting. Untouched legacy entries remain supported during the transition and are converted to an estimate of the remaining production.
 
 Every time the sensor value changes by more than 0.05 kWh, the integration re-evaluates the energy balance:
 

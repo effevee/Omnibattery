@@ -45,16 +45,24 @@ La integración limita la carga de las baterías para que la **importación de r
 
 ---
 
-## Sensor de previsión solar *(opcional)*
+## Sensores de previsión solar *(opcional)*
 
-Sensor que proporciona la producción solar estimada para hoy, en **kWh** o **Wh**.
+Para configuraciones nuevas, selecciona el sensor que proporciona la producción
+solar **restante de hoy** en **kWh** o **Wh**. Este valor se utiliza directamente
+en las decisiones intradía, sin volver a restar la producción medida.
+
+El campo de previsión del día completo se mantiene para entradas legadas que no
+se han modificado. Al guardar **Restante de hoy**, sustituye y elimina ese campo
+legado, resolviendo el Repair de transición. Las instalaciones existentes pueden
+seguir funcionando hasta que cambien el sensor.
 
 Configurarlo aquí lo pone a disposición de:
 
 - **Carga predictiva** (modos Franja Horaria y Precio Dinámico)
 - **Retraso de carga solar**
 
-También puedes dejarlo en blanco y configurarlo más tarde en esas secciones específicas.
+También puedes dejarlo en blanco y configurarlo más tarde desde la sección
+**Sensores** de las opciones de la integración.
 
 ---
 

@@ -1,6 +1,6 @@
 # Carga predictiva
 
-La carga predictiva es una función **opcional** que carga las baterías desde la red cuando el balance energético previsto para el día siguiente es negativo.
+La carga predictiva es una función **opcional** que carga las baterías desde la red cuando el balance energético previsto para lo que queda del día es negativo.
 
 ## Lógica de decisión
 
@@ -12,7 +12,7 @@ Si no:
 ```
 
 - **Batería utilizable**: energía actual por encima del SOC mínimo configurado.
-- **Previsión solar**: producción estimada del día siguiente (sensor Solcast/Forecast.Solar).
+- **Previsión solar**: preferiblemente la producción restante de hoy (sensor Solcast/Forecast.Solar). El sensor del día completo se mantiene como fallback legado durante la transición.
 - **Consumo esperado**: media móvil de 7 días. Ver [Estimación del consumo diario](../../features/consumption-estimate.md).
 
 ---

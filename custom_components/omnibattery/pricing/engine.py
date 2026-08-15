@@ -46,6 +46,7 @@ from ..const import (
     T_START_FALLBACK_HOUR,
     FLOOR_HYSTERESIS_PCT,
 )
+from ..solar_forecast import read_solar_forecast_kwh
 from . import (
     DynamicPricingSchedule,
     PriceSlot,
@@ -1174,17 +1175,12 @@ class PricingManager:
                 )
 
     def _curtailment_forecast_model(self, now: datetime) -> tuple[float | None, object | None, float | None]:
-        """Return today's forecast, cumulative solar model and daily consumption."""
-        sensor = getattr(self._controller, "solar_forecast_sensor", None)
-        if not sensor:
+        """Return the forecast and matching future horizon for curtailment."""
+        forecast = read_solar_forecast_kwh(self._hass, self._controller)
+        if forecast is None:
             return None, None, None
-        state = self._hass.states.get(sensor)
-        if state is None or state.state in ("unknown", "unavailable"):
-            return None, None, None
-        try:
-            forecast_kwh = float(state.state)
-        except (TypeError, ValueError):
-            return None, None, None
+        forecast_kwh = forecast.kwh
+        is_remaining = forecast.source == "remaining"
 
         tracker = getattr(self._controller, "_consumption_tracker", None)
         if tracker is None:
@@ -1203,6 +1199,13 @@ class PricingManager:
                 return None, None, None
             fraction_fn = lambda hour: tracker.get_solar_fraction_done(hour, t_start, t_end)
             daily_consumption = float(tracker.get_avg_daily_consumption())
+            # A remaining solar sensor applies only to future slots.  Use the
+            # matching remaining load instead of comparing it to a full day.
+            if is_remaining:
+                now_h = now.hour + now.minute / 60.0 + now.second / 3600.0
+                window_hours = tracker.get_consumption_window_hours_per_day()
+                remaining_window = tracker.consumption_window_hours_in_range(now_h, 24.0)
+                daily_consumption *= remaining_window / window_hours if window_hours > 0 else 0.0
         except (AttributeError, TypeError, ValueError):
             return None, None, None
         return forecast_kwh, fraction_fn, daily_consumption
@@ -1288,6 +1291,11 @@ class PricingManager:
         small warm-up threshold to avoid making a decision from the first few
         watts of the day; until then the forecast remains the safe fallback.
         """
+        if getattr(plan, "solar_forecast_is_remaining", False):
+            # A daily production accumulator cannot be compared with a scalar
+            # that represents only the post-evaluation forecast horizon.
+            return None
+
         controller = self._controller
         actual_date = getattr(controller, "_daily_solar_energy_date", None)
         if actual_date is not None and actual_date != now.date():
@@ -1350,7 +1358,11 @@ class PricingManager:
         forecast_consumption = getattr(plan, "consumption_forecast_by_slot", {}) or {}
         actual_mapping = self._curtailment_actual_solar_mapping(plan)
         actual_total_ratio: float | None = None
-        if actual_mapping is None and risk_slots:
+        if (
+            actual_mapping is None
+            and risk_slots
+            and not getattr(plan, "solar_forecast_is_remaining", False)
+        ):
             for name in (
                 "_curtailment_actual_solar_kwh",
                 "curtailment_actual_solar_kwh",
@@ -1582,6 +1594,7 @@ class PricingManager:
 
         daily_slots = self._curtailment_plan_slots(slots, evaluated_at)
         forecast, solar_model, daily_consumption = self._curtailment_forecast_model(evaluated_at)
+        is_remaining = getattr(self._controller, "solar_forecast_source", None) == "remaining"
         if forecast is None or solar_model is None or daily_consumption is None:
             plan = CurtailmentPlan(
                 status="fail_safe",
@@ -1615,6 +1628,8 @@ class PricingManager:
                 max_export_power_w=export_limit_w,
                 export_mode=export_mode,
                 solar_fraction_fn=solar_model,
+                solar_forecast_is_remaining=is_remaining,
+                consumption_forecast_is_remaining=is_remaining,
                 reserved_slots=reserved,
                 now=evaluated_at,
             )
@@ -1892,7 +1907,10 @@ class PricingManager:
         # Step 1: Energy balance.  The full-day forecast is valid only for the
         # scheduled 00:05 run.  Any later reconstruction starts from the live
         # remainder, including already-produced solar.
-        if horizon is DynamicPricingEvaluationHorizon.DAILY:
+        if (
+            horizon is DynamicPricingEvaluationHorizon.DAILY
+            and not getattr(self._controller, "solar_forecast_remaining_sensor", None)
+        ):
             decision_data = await self._controller._should_activate_grid_charging()
         else:
             decision_data = await self._evaluate_remaining_grid_charging(now=now)
@@ -2477,6 +2495,16 @@ class PricingManager:
         decision["consumption_accumulator_ready"] = accumulator_ready
         return decision
 
+    async def _current_horizon_grid_charging_decision(self) -> dict:
+        """Evaluate direct Time Slot/Real-Time Price gates coherently.
+
+        These paths run during the day rather than solely at 00:05. When a
+        provider supplies ``remaining today``, pair it with remaining load too.
+        """
+        if getattr(self._controller, "solar_forecast_remaining_sensor", None):
+            return await self._evaluate_remaining_grid_charging()
+        return await self._controller._should_activate_grid_charging()
+
     @staticmethod
     def _project_remaining_consumption(
         now_h: float,
@@ -2564,13 +2592,15 @@ class PricingManager:
         After the cutoff hour with no production seen, keep the conservative
         0 (solar sensor likely broken; better to book the slots than run dry).
         """
-        if not self._controller.solar_forecast_sensor:
+        forecast = read_solar_forecast_kwh(self._hass, self._controller)
+        if forecast is None:
             return 0.0
-        forecast_state = self._hass.states.get(self._controller.solar_forecast_sensor)
-        if not forecast_state or forecast_state.state in ("unknown", "unavailable"):
-            return 0.0
+        if forecast.source == "remaining":
+            # Provider already removed production that has happened.  Do not
+            # subtract the accumulator or run a solar curve a second time.
+            return forecast.kwh
         try:
-            forecast_today = float(forecast_state.state)
+            forecast_today = forecast.kwh
             if self._controller._daily_solar_energy_kwh > 0:
                 return max(0.0, forecast_today - self._controller._daily_solar_energy_kwh)
             if self._controller._solar_t_start is not None:
@@ -3230,7 +3260,7 @@ class PricingManager:
                 )
             else:
                 # Evaluate whether charging is actually needed before starting
-                decision_data = await self._controller._should_activate_grid_charging()
+                decision_data = await self._current_horizon_grid_charging_decision()
                 self._controller._last_decision_data = decision_data
                 if decision_data["should_charge"]:
                     self._controller._realtime_price_charging = True
@@ -3362,7 +3392,7 @@ class PricingManager:
                     _LOGGER.info("RE-EVALUATING predictive grid charging due to SOC drop (%.1f%% -> %.1f%%)",
                                 self._controller.last_evaluation_soc, current_avg_soc)
 
-                decision_data = await self._controller._should_activate_grid_charging()
+                decision_data = await self._current_horizon_grid_charging_decision()
                 self._controller.grid_charging_active = decision_data["should_charge"]
                 self._controller.last_evaluation_soc = current_avg_soc
                 self._controller._last_decision_data = decision_data

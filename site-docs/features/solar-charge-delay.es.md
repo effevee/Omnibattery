@@ -20,7 +20,7 @@ Si no:
 
 ## Previsión en tiempo real
 
-La integración lee el sensor de previsión solar en tiempo real, sin captura ni almacenamiento nocturno. La mayoría de integraciones de previsión solar (Solcast, Forecast.Solar, etc.) actualizan su sensor del día actual varias veces a lo largo del día, siendo progresivamente más precisas conforme se conocen las condiciones meteorológicas reales.
+La integración lee el sensor de previsión solar en tiempo real, sin captura ni almacenamiento nocturno. Al guardar **Restante de hoy**, se usa directamente y sustituye el ajuste legado del día completo. Las entradas legadas que no se modifiquen siguen siendo compatibles durante la transición y se convierten en una estimación de la producción restante.
 
 Cada vez que el valor del sensor cambia en más de 0,05 kWh, la integración reevalúa el balance energético:
 

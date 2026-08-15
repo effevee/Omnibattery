@@ -45,16 +45,24 @@ The integration caps battery charging so that **projected grid import never exce
 
 ---
 
-## Solar forecast sensor *(optional)*
+## Solar forecast sensors *(optional)*
 
-Sensor providing today's estimated solar production in **kWh** or **Wh**.
+For new configurations, select the sensor providing the solar production
+**remaining today** in **kWh** or **Wh**. This value is used directly for
+intraday decisions, without subtracting measured production again.
+
+The whole-day forecast field remains available for untouched legacy entries.
+Saving **Remaining Today** replaces and removes that legacy field, resolving the
+transition Repair. Existing installations can continue working until their
+sensor is changed.
 
 Configuring it here makes it available to:
 
 - **Predictive charging** (Time Slot and Dynamic Pricing modes)
 - **Solar charge delay**
 
-You can also leave it blank and configure it later in those specific sections.
+You can also leave it blank and configure it later from the **Sensors** section
+of the integration options.
 
 ---
 

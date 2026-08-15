@@ -1134,6 +1134,28 @@ def test_curtailment_daily_solar_accumulator_releases_space_progressively():
     assert plan.opportunistic_charge_reason == "solar_underproduction_released_space"
 
 
+def test_remaining_forecast_is_not_scaled_against_daily_solar_accumulator():
+    now = datetime.now()
+    risk = PriceSlot(now + timedelta(minutes=5), now + timedelta(hours=1), -0.10)
+    plan = CurtailmentPlan(
+        status="protected",
+        reason="headroom_sufficient",
+        risk_slots=[risk],
+        solar_forecast_kwh=1.81,
+        solar_forecast_is_remaining=True,
+        solar_reserve_by_slot={risk: 1.5},
+        solar_forecast_by_slot={risk: 1.81},
+        consumption_forecast_by_slot={risk: 0.0},
+    )
+    manager = _solar_ctrl(forecast="20.52", produced=12.34, t_start=6.0)
+    snapshots = [BatterySnapshot("b1", 60.0, 10.0, 100.0, 10.0, 2000.0)]
+
+    manager._update_curtailment_opportunistic_diagnostics(plan, snapshots, now)
+
+    assert plan.solar_reserve_remaining_kwh == pytest.approx(1.5)
+    assert plan.opportunistic_space_kwh == pytest.approx(2.5)
+
+
 def test_curtailment_export_settings_keep_legacy_compatibility_and_modes():
     legacy_zero = _controller(predischarge_max_export_power_w=0.0)
     legacy_custom = _controller(predischarge_max_export_power_w=750.0)

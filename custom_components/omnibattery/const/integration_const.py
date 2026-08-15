@@ -76,6 +76,9 @@ MULTI_BATTERY_SELECTION_HOLD_SECONDS = 120
 CONF_ENABLE_PREDICTIVE_CHARGING = "enable_predictive_charging"
 CONF_CHARGING_TIME_SLOT = "charging_time_slot"
 CONF_SOLAR_FORECAST_SENSOR = "solar_forecast_sensor"
+# Explicit post-now forecast.  The old key remains a whole-day ``today`` value
+# for backwards compatibility and must not be silently reinterpreted.
+CONF_SOLAR_FORECAST_REMAINING_SENSOR = "solar_forecast_remaining_sensor"
 CONF_SOLAR_PRODUCTION_SENSOR = "solar_production_sensor"
 CONF_HOUSEHOLD_CONSUMPTION_SENSOR = "household_consumption_sensor"  # legacy; migrated out in v6
 CONF_MAX_CONTRACTED_POWER = "max_contracted_power"
