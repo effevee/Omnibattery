@@ -10,6 +10,7 @@
 
 - **Dynamic Pricing remaining-consumption forecast could count today's home energy twice**: Manual recalculations now subtract the full-day home energy already accumulated since midnight and plan only the consumption remaining until midnight. Notifications use the explicit remaining value, with a safe battery-window fallback during startup and diagnostics identifying the source used.
 - **Home Consumption could briefly fall to 0 W during battery charging**: the derived sensor now holds its last valid positive estimate for up to 15 seconds when independently polled grid, solar and battery telemetry produces a transient negative balance, exposes the raw balance and estimate quality for diagnostics, and becomes unknown rather than publishing a false zero when the invalid balance persists.
+- **The slow grid-sensor warning stayed after the sensor recovered**: a transient stall of three intervals raised the Repairs warning, and nothing could clear it until the integration or Home Assistant restarted, so the warning kept describing a fast meter as slow. Twenty consecutive fast intervals now clear it during the same run, and a sensor that slows down again raises it once more. Clearing deliberately needs a longer streak than raising, so a sensor hovering around the ten-second threshold does not churn the repair. A warning left over from an earlier run now also needs that longer streak, so it disappears about twenty publications into the new run instead of three.
 
 ## [1.3.0] - 2026-08-14
 

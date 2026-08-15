@@ -183,6 +183,7 @@ from .const import (
     SLOW_SENSOR_WARNING_INTERVAL_S,
     MAX_SENSOR_STALE_S,
     SLOW_SENSOR_WARN_INTERVALS,
+    SLOW_SENSOR_RECOVERY_INTERVALS,
     FORECAST_DATA_ISSUE_DELAY_S,
     HOT_PATH_READBACK_MAX_LATENCY_S,
     DISCHARGE_ENGAGE_GRACE_S,
@@ -548,9 +549,9 @@ class ChargeDischargeController:
         self._max_sensor_stale_s = MAX_SENSOR_STALE_S
         self._control_lock = asyncio.Lock()     # serialize control cycle across timer + sensor-event triggers
         self._grid_at_min_soc_last_ts = None     # last accumulation timestamp for grid-at-min-soc kWh integration
-        self._slow_sensor_issue_created = False  # at most one Repairs creation per controller run
+        self._slow_sensor_issue_created = False  # slow-sensor repair currently raised
         self._slow_sensor_intervals = 0         # consecutive slow sensor intervals
-        self._fast_sensor_intervals = 0         # startup fast intervals used to clear an old repair
+        self._fast_sensor_intervals = 0         # consecutive fast intervals used to clear the repair
 
         # Normal high-SOC charge protection. These must exist before the first
         # capacity calculation because _battery_power_limit() reads them.
@@ -5701,7 +5702,7 @@ class ChargeDischargeController:
         return self._observe_sensor_cadence(report_time)
 
     def _check_sensor_cadence(self, sensor_elapsed_s):
-        """Raise one repair per run when the main sensor cadence is slow.
+        """Raise a repair while the main sensor cadence is slow, clear it when it recovers.
 
         Slow sensors remain supported up to the stale tolerance. The repair is
         guidance about control quality, not a rejection of the sensor. Only positive,
@@ -5713,9 +5714,16 @@ class ChargeDischargeController:
         timestamp is not advanced while the sensor reads unavailable, so the first sample
         after any downtime measures the whole gap.
 
-        Once created, the issue is left untouched for the rest of this controller run.
-        On the next integration/Home Assistant restart, sustained fast updates clear a
-        persisted issue. This prevents create/delete churn and repeated log messages.
+        The repair describes the sensor as it behaves now, so a cadence that recovers
+        must clear it: SLOW_SENSOR_RECOVERY_INTERVALS consecutive fast intervals delete
+        the issue, whether it was created in this run or persisted from an earlier one.
+        Creating needs only SLOW_SENSOR_WARN_INTERVALS, so the asymmetry is the
+        hysteresis that keeps a sensor hovering around the threshold from churning
+        create/delete. Each transition acts once per streak.
+
+        A repair persisted from an earlier run is cleared by the same recovery streak,
+        so it survives roughly SLOW_SENSOR_RECOVERY_INTERVALS publications into a new
+        run before disappearing.
         """
         if sensor_elapsed_s is None or sensor_elapsed_s <= 0:
             return
@@ -5724,10 +5732,8 @@ class ChargeDischargeController:
         if sensor_elapsed_s < SLOW_SENSOR_WARNING_INTERVAL_S:
             self._slow_sensor_intervals = 0
             self._fast_sensor_intervals += 1
-            if (
-                self._fast_sensor_intervals == SLOW_SENSOR_WARN_INTERVALS
-                and not self._slow_sensor_issue_created
-            ):
+            if self._fast_sensor_intervals == SLOW_SENSOR_RECOVERY_INTERVALS:
+                self._slow_sensor_issue_created = False
                 ir.async_delete_issue(self.hass, DOMAIN, issue_id)
             return
 
