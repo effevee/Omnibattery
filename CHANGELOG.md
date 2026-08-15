@@ -1,8 +1,13 @@
 # Changelog
 
-## [Unreleased]
+## [1.4.0] - Unreleased
+
+### Changed
+
+- **Remaining-today solar forecasts are now supported without breaking existing setups**: a new recommended sensor field accepts the provider's production still expected today and replaces/removes the legacy whole-day forecast when saved. Intraday predictive charging, Solar Charge Delay and Smart Pre-discharge use matching remaining-energy horizons without subtracting measured production or applying the solar curve twice; untouched legacy `today` sensors continue through the existing approximation during the transition. A Home Assistant Repair guides legacy-only entries and clears automatically after migration. Forecast values are now normalized from Wh to kWh and their active source is exposed in diagnostics.
 
 ### Fixed
+- **Home Consumption could briefly fall to 0 W during battery charging**: the derived sensor now holds its last valid positive estimate for up to 15 seconds when independently polled grid, solar and battery telemetry produces a transient negative balance, exposes the raw balance and estimate quality for diagnostics, and becomes unknown rather than publishing a false zero when the invalid balance persists.
 - **The slow grid-sensor warning stayed after the sensor recovered**: a transient stall of three intervals raised the Repairs warning, and nothing could clear it until the integration or Home Assistant restarted, so the warning kept describing a fast meter as slow. Twenty consecutive fast intervals now clear it during the same run, and a sensor that slows down again raises it once more. Clearing deliberately needs a longer streak than raising, so a sensor hovering around the ten-second threshold does not churn the repair. A warning left over from an earlier run now also needs that longer streak, so it disappears about twenty publications into the new run instead of three.
 
 ## [1.3.0] - 2026-08-14

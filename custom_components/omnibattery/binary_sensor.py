@@ -467,6 +467,10 @@ class PredictiveChargingStatusSensor(BinarySensorEntity):
 
         if self.controller.solar_forecast_sensor:
             attrs["solar_forecast_sensor"] = self.controller.solar_forecast_sensor
+        if getattr(self.controller, "solar_forecast_remaining_sensor", None):
+            attrs["solar_forecast_remaining_sensor"] = self.controller.solar_forecast_remaining_sensor
+        if getattr(self.controller, "solar_forecast_source", None):
+            attrs["solar_forecast_source"] = self.controller.solar_forecast_source
 
         attrs["max_contracted_power"] = self.controller.max_contracted_power
 

@@ -15,6 +15,10 @@
     "solar_forecast_unusable": {
       "title": "Solarprognose unbrauchbar",
       "description": "Der konfigurierte Solarprognose-Sensor {sensor} ist seit über {minutes} Minuten nicht verfügbar oder nicht lesbar. Omnibattery läuft weiter, aber alles, was auf der Prognose beruht, arbeitet blind: die Ladeverzögerung gibt für den Rest des Tages frei, Entscheidungen zum Netzladen gehen von gar keiner Sonne aus und buchen womöglich unnötige Netzslots, und die Restsonnen-Schätzung liest 0 kWh. Prüfen Sie den Sensor oder die Integration, die ihn liefert."
+    },
+    "solar_forecast_remaining_recommended": {
+      "title": "Verbleibende Solarprognose verwenden",
+      "description": "{sensor} ist eine ältere Solarprognose für den ganzen Tag. Omnibattery unterstützt sie weiterhin, aber bereits eingetretene Prognosefehler können Entscheidungen innerhalb des Tages ungenau machen. Konfigurieren Sie in den Omnibattery-Optionen den Sensor des Anbieters für die Prognose \"heute verbleibend\", um die verbleibende Solarenergie genauer zu berechnen."
     }
   },
   "config": {
@@ -28,7 +32,8 @@
         "description": "Wählen Sie den Sensor aus, der die Netzimport-/Exportleistung misst. Optional können Sie den Solarprognose-Sensor für erweiterte Funktionen konfigurieren.",
         "data": {
           "consumption_sensor": "Netzverbrauchssensor",
-          "solar_forecast_sensor": "Solarprognose-Sensor (optional)",
+          "solar_forecast_sensor": "Solarprognose-Sensor für den gesamten Tag (veraltet)",
+          "solar_forecast_remaining_sensor": "Sensor für die heute verbleibende Solarprognose (empfohlen)",
           "solar_production_sensor": "Solarproduktionssensor (optional)",
           "meter_inverted": "Zählervorzeichen invertiert",
           "max_contracted_power": "Maximale Vertragsleistung (W)",
@@ -36,7 +41,8 @@
         },
         "data_description": {
           "consumption_sensor": "Echtzeitsensor für importierte (+) oder exportierte (-) Netzleistung. Aktualisierungen alle 1-2 Sekunden werden empfohlen. Langsamere Sensoren werden akzeptiert, verzögerte Messwerte verringern jedoch die Regelqualität; dem letzten Messwert wird bis zu 65 Sekunden lang gefolgt.",
-          "solar_forecast_sensor": "Sensor, der die Solarproduktionsprognose in kWh liefert (z.B. Solcast). Wenn hier konfiguriert, wird er automatisch für prädiktive Ladung und Solarladungsverzögerung verwendet.",
+          "solar_forecast_sensor": "Veralteter Sensor für die Solarprognose des gesamten Tages. Bestehende Installationen können ihn während der Übergangszeit weiterverwenden; für neue Konfigurationen wird Heute verbleibend empfohlen.",
+          "solar_forecast_remaining_sensor": "Sensor für die heute noch erwartete Solarproduktion in kWh. Beim Speichern ersetzt er die veraltete Ganztagesprognose und wird nicht um die bereits gemessene Produktion reduziert.",
           "solar_production_sensor": "Echtzeit-PV-Produktionsleistungssensor (W/kW) von einem externen Wechselrichter, der nicht über die MPPT-Eingänge der Batterie geführt wird. Wird verwendet, um den Solar-Knoten im Energiefluss-Diagramm des Dashboards anzuzeigen. Leer lassen, wenn deine Module direkt den MPPT der Batterie speisen.",
           "meter_inverted": "Aktivieren Sie diese Option, wenn Ihr Zähler die umgekehrte Konvention verwendet: positiv = Export, negativ = Import. Die Einheit (W/kW) wird automatisch erkannt.",
           "max_contracted_power": "Gesamt-Vertragsleistung in Watt. Das System überschreitet dieses Limit beim Laden nicht, um ein Auslösen der Sicherung zu vermeiden",
@@ -713,7 +719,8 @@
         "description": "Konfigurieren Sie die von der Integration verwendeten Sensoren.",
         "data": {
           "consumption_sensor": "Netzverbrauchssensor",
-          "solar_forecast_sensor": "Solarprognose-Sensor (optional)",
+          "solar_forecast_sensor": "Solarprognose-Sensor für den gesamten Tag (veraltet)",
+          "solar_forecast_remaining_sensor": "Sensor für die heute verbleibende Solarprognose (empfohlen)",
           "solar_production_sensor": "Solarproduktionssensor (optional)",
           "meter_inverted": "Zählervorzeichen invertiert",
           "max_contracted_power": "Maximale Vertragsleistung (W)",
@@ -721,7 +728,8 @@
         },
         "data_description": {
           "consumption_sensor": "Echtzeitsensor für importierte (+) oder exportierte (-) Netzleistung. Aktualisierungen alle 1-2 Sekunden werden empfohlen. Langsamere Sensoren werden akzeptiert, verzögerte Messwerte verringern jedoch die Regelqualität; dem letzten Messwert wird bis zu 65 Sekunden lang gefolgt.",
-          "solar_forecast_sensor": "Sensor, der die Solarproduktionsprognose in kWh liefert (z.B. Solcast). Wenn hier konfiguriert, wird er automatisch für prädiktive Ladung und Solarladungsverzögerung verwendet.",
+          "solar_forecast_sensor": "Veralteter Sensor für die Solarprognose des gesamten Tages. Bestehende Installationen können ihn während der Übergangszeit weiterverwenden; für neue Konfigurationen wird Heute verbleibend empfohlen.",
+          "solar_forecast_remaining_sensor": "Sensor für die heute noch erwartete Solarproduktion in kWh. Beim Speichern ersetzt er die veraltete Ganztagesprognose und wird nicht um die bereits gemessene Produktion reduziert.",
           "solar_production_sensor": "Echtzeit-PV-Produktionsleistungssensor (W/kW) von einem externen Wechselrichter, der nicht über die MPPT-Eingänge der Batterie geführt wird. Wird verwendet, um den Solar-Knoten im Energiefluss-Diagramm des Dashboards anzuzeigen. Leer lassen, wenn deine Module direkt den MPPT der Batterie speisen.",
           "meter_inverted": "Aktivieren Sie diese Option, wenn Ihr Zähler die umgekehrte Konvention verwendet: positiv = Export, negativ = Import. Die Einheit (W/kW) wird automatisch erkannt.",
           "max_contracted_power": "Gesamt-Vertragsleistung in Watt. Das System überschreitet dieses Limit beim Laden nicht, um ein Auslösen der Sicherung zu vermeiden",

@@ -428,6 +428,10 @@ def _dynamic_pricing_info(controller) -> dict[str, Any]:
         return {}
     schedule = getattr(controller, "_dynamic_pricing_schedule", None)
     info = {
+        "solar_forecast_source": getattr(controller, "solar_forecast_source", None),
+        "solar_forecast_remaining_sensor": getattr(
+            controller, "solar_forecast_remaining_sensor", None
+        ),
         "negative_price_charging_enabled": getattr(
             controller, "negative_price_charging_enabled", False
         ),
