@@ -3521,7 +3521,45 @@ class PricingManager:
                     _LOGGER.info("RE-EVALUATING predictive grid charging due to SOC drop (%.1f%% -> %.1f%%)",
                                 self._controller.last_evaluation_soc, current_avg_soc)
 
+                forecast_configured = bool(
+                    getattr(self._controller, "solar_forecast_remaining_sensor", None)
+                    or getattr(self._controller, "solar_forecast_sensor", None)
+                )
+                if is_initial_eval and forecast_configured:
+                    # ``_evaluate_remaining_grid_charging`` deliberately uses
+                    # zero solar as its fail-safe when a forecast read fails.
+                    # For the one-shot slot-entry evaluation, distinguish that
+                    # transient failure before it is flattened to 0 kWh so the
+                    # next cycle can retry instead of publishing a misleading
+                    # safe-mode notification.
+                    if read_solar_forecast_kwh(self._hass, self._controller) is None:
+                        _LOGGER.debug(
+                            "Predictive charging: configured solar forecast is not "
+                            "readable yet; deferring initial evaluation"
+                        )
+                        return
+
                 decision_data = await self._current_horizon_grid_charging_decision()
+
+                # A configured forecast can still be unavailable when the
+                # provider is rebuilding its state around midnight.  Do not
+                # consume the one-shot initial evaluation or publish a false
+                # safe-mode notification in that case.  Leaving
+                # ``last_evaluation_soc`` unset makes the next control cycle
+                # retry as soon as the sensor recovers.  An installation with
+                # no forecast configured keeps the existing conservative
+                # notification path.
+                if (
+                    is_initial_eval
+                    and decision_data.get("solar_forecast_kwh") is None
+                    and forecast_configured
+                ):
+                    _LOGGER.debug(
+                        "Predictive charging: configured solar forecast is not "
+                        "readable yet; deferring initial evaluation"
+                    )
+                    return
+
                 self._controller.grid_charging_active = decision_data["should_charge"]
                 self._controller.last_evaluation_soc = current_avg_soc
                 self._controller._last_decision_data = decision_data
