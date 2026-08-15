@@ -352,7 +352,7 @@ def test_pre_slot_reevaluation_uses_remaining_consumption_and_solar(monkeypatch)
 
 
 def test_midday_calendar_rebuild_uses_remaining_consumption_and_solar(monkeypatch):
-    """Manual/configuration rebuilds must use the #263 remainder, not 00:05 data."""
+    """Manual rebuilds subtract the full-day home total from the forecast."""
     import asyncio
 
     now = datetime(2026, 8, 11, 12, 0)
@@ -384,11 +384,9 @@ def test_midday_calendar_rebuild_uses_remaining_consumption_and_solar(monkeypatc
         _dp_last_eval_soc=None,
         _dp_eval_retry_count=0,
         _household_accumulator_date=now.date(),
-        _household_energy_accumulator=1.2,
-        # The full-day counter is deliberately incompatible with the historical
-        # window and must not participate in this calculation.
+        _household_energy_accumulator=0.2,
         _daily_home_energy_date=now.date(),
-        _daily_home_energy_kwh=99.0,
+        _daily_home_energy_kwh=1.2,
         _consumption_tracker=SimpleNamespace(
             get_dynamic_base_consumption=get_average_consumption,
         ),
@@ -413,6 +411,8 @@ def test_midday_calendar_rebuild_uses_remaining_consumption_and_solar(monkeypatc
     }]
     assert ctrl._last_decision_data["consumption_scope"] == "remaining"
     assert ctrl._last_decision_data["daily_avg_consumption_kwh"] == 5.8
+    assert ctrl._last_decision_data["consumed_today_kwh"] == 1.2
+    assert ctrl._last_decision_data["consumption_accumulator_source"] == "daily_home_energy"
     assert ctrl._last_decision_data["remaining_solar_kwh"] == 2.4
 
 

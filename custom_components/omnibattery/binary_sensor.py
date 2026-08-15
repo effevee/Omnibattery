@@ -401,6 +401,7 @@ class PredictiveChargingStatusSensor(BinarySensorEntity):
         "consumption_scope", "daily_avg_consumption_kwh", "consumed_today_kwh",
         "remaining_consumption_kwh", "remaining_solar_kwh",
         "consumption_rate_kwh_h", "consumption_accumulator_ready",
+        "consumption_accumulator_source",
         "decision_reason",
     })
 
@@ -509,6 +510,7 @@ class PredictiveChargingStatusSensor(BinarySensorEntity):
                 "remaining_solar_kwh": decision.get("remaining_solar_kwh"),
                 "consumption_rate_kwh_h": decision.get("consumption_rate_kwh_h"),
                 "consumption_accumulator_ready": decision.get("consumption_accumulator_ready"),
+                "consumption_accumulator_source": decision.get("consumption_accumulator_source"),
                 "total_available_kwh": decision.get("total_available_kwh"),
                 "energy_deficit_kwh": decision.get("energy_deficit_kwh"),
                 "planned_grid_charge_kwh": decision.get("planned_grid_charge_kwh"),

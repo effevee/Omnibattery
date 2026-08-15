@@ -2411,6 +2411,39 @@ class PricingManager:
         current = sum(c.data.get("battery_soc", 0) for c in coords) / len(coords)
         return (ref - current) >= SOC_REEVALUATION_THRESHOLD
 
+    @staticmethod
+    def _get_consumed_today_kwh(controller, now: datetime) -> tuple[float, bool, str]:
+        """Return today's full-day home consumption for remaining forecasts.
+
+        ``_daily_home_energy_kwh`` is the user-facing total since midnight and
+        is the correct value to subtract from the daily forecast. The older
+        ``_household_energy_accumulator`` only covers the battery consumption
+        window, so using it here can make today's total look like it is still
+        remaining. Keep that accumulator as a startup/reload fallback.
+        """
+        sources = (
+            (
+                "daily_home_energy",
+                "_daily_home_energy_date",
+                "_daily_home_energy_kwh",
+            ),
+            (
+                "household_window",
+                "_household_accumulator_date",
+                "_household_energy_accumulator",
+            ),
+        )
+        for source, date_attr, value_attr in sources:
+            if getattr(controller, date_attr, None) != now.date():
+                continue
+            try:
+                value = float(getattr(controller, value_attr, 0.0) or 0.0)
+            except (TypeError, ValueError):
+                continue
+            if math.isfinite(value) and value > 0.0:
+                return value, True, source
+        return 0.0, False, "none"
+
     async def _evaluate_remaining_grid_charging(self, *, now: datetime | None = None) -> dict:
         """Evaluate the energy still needed before the end of today's horizon.
 
@@ -2435,39 +2468,30 @@ class PricingManager:
         now = now or datetime.now()
         now_h = now.hour + now.minute / 60.0 + now.second / 3600.0
         avg_daily_kwh = await get_average()
-        # Use the same windowed/adjusted accumulator that feeds the historical
-        # average.  The full-day Home Energy counter includes charging windows
-        # and does not apply excluded/additional-load adjustments, so comparing
-        # it with the windowed seven-day average mixes two different quantities.
-        accumulator_date = getattr(controller, "_household_accumulator_date", None)
-        raw_consumed_today_kwh = getattr(
-            controller, "_household_energy_accumulator", None
+        consumed_today_kwh, accumulator_ready, consumption_source = (
+            self._get_consumed_today_kwh(controller, now)
         )
-        try:
-            consumed_today_kwh = float(raw_consumed_today_kwh)
-        except (TypeError, ValueError):
-            consumed_today_kwh = 0.0
-        accumulator_ready = (
-            accumulator_date == now.date()
-            and math.isfinite(consumed_today_kwh)
-            and consumed_today_kwh > 0.0
-        )
-        if not accumulator_ready:
-            consumed_today_kwh = 0.0
         get_window_hours = getattr(
             tracker, "get_consumption_window_hours_per_day", None
         )
         get_remaining_window_hours = getattr(
             tracker, "consumption_window_hours_in_range", None
         )
-        window_hours_per_day = (
-            get_window_hours() if callable(get_window_hours) else 24.0
-        )
-        remaining_window_hours = (
-            get_remaining_window_hours(now_h, 24.0)
-            if callable(get_remaining_window_hours)
-            else 24.0 - now_h
-        )
+        if consumption_source == "daily_home_energy":
+            # The live source is a full-day counter, so keep the projection on
+            # the same 24-hour basis instead of applying a battery-window
+            # profile to it.
+            window_hours_per_day = 24.0
+            remaining_window_hours = 24.0 - now_h
+        else:
+            window_hours_per_day = (
+                get_window_hours() if callable(get_window_hours) else 24.0
+            )
+            remaining_window_hours = (
+                get_remaining_window_hours(now_h, 24.0)
+                if callable(get_remaining_window_hours)
+                else 24.0 - now_h
+            )
         remaining_consumption_kwh, consumption_rate_kwh_h = (
             self._project_remaining_consumption(
                 now_h,
@@ -2493,6 +2517,7 @@ class PricingManager:
         decision["remaining_solar_kwh"] = remaining_solar_kwh
         decision["consumption_rate_kwh_h"] = consumption_rate_kwh_h
         decision["consumption_accumulator_ready"] = accumulator_ready
+        decision["consumption_accumulator_source"] = consumption_source
         return decision
 
     async def _current_horizon_grid_charging_decision(self) -> dict:
@@ -2681,29 +2706,19 @@ class PricingManager:
         # remaining-horizon rebuilds: never reuse consumption already spent
         # today, while retaining the normal historical remainder when today's
         # load was concentrated earlier. ---
-        accumulator_date = getattr(
-            self._controller, "_household_accumulator_date", None
+        consumed_today_kwh, accumulator_ready, _consumption_source = (
+            self._get_consumed_today_kwh(self._controller, now)
         )
-        raw_consumed_today_kwh = getattr(
-            self._controller, "_household_energy_accumulator", None
-        )
-        try:
-            consumed_today_kwh = float(raw_consumed_today_kwh)
-        except (TypeError, ValueError):
-            consumed_today_kwh = 0.0
-        accumulator_ready = (
-            accumulator_date == now.date()
-            and math.isfinite(consumed_today_kwh)
-            and consumed_today_kwh > 0.0
-        )
-        if not accumulator_ready:
-            consumed_today_kwh = 0.0
         tracker = self._controller._consumption_tracker
         avg_daily_kwh = tracker.get_avg_daily_consumption()
-        window_hours_per_day = tracker.get_consumption_window_hours_per_day()
-        remaining_window_hours = tracker.consumption_window_hours_in_range(
-            now_h, 24.0
-        )
+        if _consumption_source == "daily_home_energy":
+            window_hours_per_day = 24.0
+            remaining_window_hours = 24.0 - now_h
+        else:
+            window_hours_per_day = tracker.get_consumption_window_hours_per_day()
+            remaining_window_hours = tracker.consumption_window_hours_in_range(
+                now_h, 24.0
+            )
         remaining_consumption_kwh, consumption_rate_kwh_h = self._project_remaining_consumption(
             now_h,
             consumed_today_kwh,
