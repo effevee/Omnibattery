@@ -503,6 +503,10 @@ class ChargeDischargeController:
         self._pd_quality_rms_ema = None  # EMA of error^2 (W^2); sqrt -> RMS error
         self._pd_quality_osc_ema = 0.0   # EMA of error-sign changes per minute
         self._pd_quality_last_ts = None  # monotonic ts of last metric update
+        # Separate from _pd_quality_last_ts, which is also bumped on skipped cycles
+        # to keep the EMA step small when it resumes. Only this one marks a real
+        # advance, so it is what tells the sensor its verdict has gone stale.
+        self._pd_quality_last_advance_ts = None
         # Ignore the tracking transient after any setpoint/target step (hourly
         # balance, capacity protection, user target change, ...) so it doesn't
         # inflate RMS/oscillation. Source-agnostic: keys on active_target moving.
@@ -513,6 +517,11 @@ class ChargeDischargeController:
         # would charge, empty while it would discharge, or output pinned at the power
         # rail). Surfaced as the "battery_limited" quality state; not a tuning fault.
         self._pd_limited = False
+        # True when the direction the grid error demands is not allowed to run
+        # (charge delay, time slot, price/EV/solar-surplus block). The residual
+        # error is then a muzzled loop, not a tuning fault: the metric skips it
+        # and the sensor reports "blocked".
+        self._pd_blocked = False
 
         # Measured-power anti-windup (back-calculation): re-anchor the incremental
         # base to the battery's real AC output when commanded power is not being
@@ -1552,12 +1561,14 @@ class ChargeDischargeController:
 
         if self._pd_quality_last_ts is None:
             self._pd_quality_last_ts = now
+            self._pd_quality_last_advance_ts = now
             self._pd_quality_rms_ema = error * error
             return
         dt = now - self._pd_quality_last_ts
         self._pd_quality_last_ts = now
         if dt <= 0:
             return
+        self._pd_quality_last_advance_ts = now
         alpha = dt / (self._pd_quality_tau + dt)
         sq = error * error
         if self._pd_quality_rms_ema is None:
@@ -1575,6 +1586,20 @@ class ChargeDischargeController:
         if self._pd_quality_rms_ema is None:
             return None
         return math.sqrt(max(0.0, self._pd_quality_rms_ema))
+
+    @property
+    def pd_quality_age_s(self) -> float | None:
+        """Seconds since the quality metric last advanced, or None if never.
+
+        The metric only advances on cycles where the loop is genuinely in
+        control; a long age means the EMAs describe a situation that is hours
+        old and must not be presented as a live verdict. Skipped cycles bump
+        _pd_quality_last_ts (the EMA anchor) but not the advance timestamp, so
+        this measures the age of the numbers rather than of the last call.
+        """
+        if self._pd_quality_last_advance_ts is None:
+            return None
+        return max(0.0, time.monotonic() - self._pd_quality_last_advance_ts)
 
     @property
     def pd_quality_oscillation_per_min(self) -> float:
@@ -2291,6 +2316,33 @@ class ChargeDischargeController:
     def _is_operation_allowed(self, is_charging: bool) -> bool:
         """Return True if the refreshed blocker registry allows this operation."""
         return not (self.is_charge_blocked() if is_charging else self.is_discharge_blocked())
+
+    def _pd_demand_blocked(self, error: float, commanded_power: float) -> bool:
+        """Return True when the loop cannot act on what the grid error demands.
+
+        The cycle's own restriction check keys on the *commanded* power, which is
+        already 0 once a previous cycle was blocked: a blocked charge demand then
+        reads as "not charging", the discharge direction is checked instead, and
+        the loop counts as active while it cannot act at all. The demand direction
+        comes from the error sign (error < 0 = export = charge demand) and does
+        not decay, so it is what the quality metric must key on.
+
+        A closed gate alone is not enough, though. While discharging into house
+        load with charging blocked, an export error is answered by discharging
+        *less* — the loop has headroom in the direction it is already running, and
+        its tracking there is a fair tuning verdict. Only when the command carries
+        no such headroom (0 W, or already running into the blocked direction) is
+        the loop truly muzzled.
+        """
+        if abs(error) <= self.deadband:
+            return False
+        demand_is_charging = error < 0
+        if self._is_operation_allowed(demand_is_charging):
+            return False
+        demand_sign = 1 if demand_is_charging else -1
+        # Opposite-signed command = room to move toward the demand without
+        # entering the blocked direction.
+        return commanded_power * demand_sign >= 0
 
     def _get_active_slot(self, coordinator=None, direction: str = "any") -> dict | None:
         """Return the active slot for a battery/direction, or None.
@@ -5789,6 +5841,13 @@ class ChargeDischargeController:
         if any(c._is_shutting_down for c in self.coordinators):
             return
         self._phase_power_limiter.begin_cycle()
+        # Clear the control-quality flags for this cycle. Both are only written in
+        # the PD tail, so every early return below (max SOC reached, predictive grid
+        # charging, in-deadband, ...) used to leave the previous cycle's flag latched
+        # and the sensor stuck on "blocked"/"battery_limited" for the whole session.
+        # Cleared here, an early return falls through to the staleness guard instead.
+        self._pd_blocked = False
+        self._pd_limited = False
 
         # === HOUSEHOLD CONSUMPTION ACCUMULATION ===
         # Run before manual mode check so samples are never lost
@@ -6481,6 +6540,8 @@ class ChargeDischargeController:
             # No battery can act: demand outside the deadband is battery-limited, not
             # a tuning fault (surfaced as "battery_limited", keeps the metric clean).
             self._pd_limited = abs(error) > self.deadband
+            # Everything is at 0 W here, so there is no headroom in any direction.
+            self._pd_blocked = self._pd_demand_blocked(error, 0)
             return
         
         # Select batteries via load sharing, then distribute power
@@ -6595,7 +6656,14 @@ class ChargeDischargeController:
             )
             pd_limited = pd_limited or phase_limited
             self._pd_limited = pd_limited
-            self._update_pd_quality_metrics(error, sign_changed, active_target, pd_limited)
+            # The demand direction can be blocked while the commanded power is 0,
+            # which leaves this branch "unrestricted" even though the loop is
+            # muzzled. Skip the metric there too, else a blocked charge demand
+            # (charge delay + solar surplus) scores as sluggish tuning.
+            self._pd_blocked = self._pd_demand_blocked(error, new_power)
+            self._update_pd_quality_metrics(
+                error, sign_changed, active_target, pd_limited or self._pd_blocked
+            )
             self.previous_error = error
             # Keep the last direction of flow across idle cycles so directional
             # hysteresis still applies to the next flip. Zeroing it here made the
@@ -6609,6 +6677,7 @@ class ChargeDischargeController:
         else:
             # Controller is paused by restrictions - DO NOT update error tracking
             # This prevents false oscillation detection from natural load fluctuations
+            self._pd_blocked = True
             if DEBUG_CONTROL_LOOP_DETAIL:
                 _LOGGER.debug("ChargeDischargeController: PD state FROZEN (restricted) - error tracking paused to prevent false oscillation warnings")
         

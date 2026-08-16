@@ -1435,6 +1435,7 @@
           "oscillating": "Schwingend",
           "sluggish": "Träge",
           "battery_limited": "Batteriebegrenzt",
+          "blocked": "Blockiert",
           "collecting_data": "Daten werden gesammelt"
         }
       },

@@ -149,7 +149,9 @@ def _main_controller(state_holder, pd_calls):
         _log_power_command_plan=lambda **_kwargs: None,
         _set_battery_power=_async_noop,
         _update_pd_quality_metrics=lambda *_args, **_kwargs: None,
+        _pd_demand_blocked=lambda _error, _commanded_power: False,
         _pd_limited=False,
+        _pd_blocked=False,
         _active_discharge_batteries=[],
         _active_charge_batteries=[],
     )

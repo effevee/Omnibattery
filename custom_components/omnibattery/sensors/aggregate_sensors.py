@@ -169,7 +169,20 @@ class PdControlQualitySensor(SensorEntity):
     _RMS_HIGH_W = 150.0
     _OSC_LOW_PER_MIN = 1.0
 
-    _STATES = ["disabled", "stable", "oscillating", "sluggish", "battery_limited", "collecting_data"]
+    # The metric only advances while the loop is in control. Past this age the
+    # EMAs describe an old situation, so report "collecting_data" rather than a
+    # stale verdict (5x the 60s metric window).
+    _STALE_AFTER_S = 300.0
+
+    _STATES = [
+        "disabled",
+        "stable",
+        "oscillating",
+        "sluggish",
+        "battery_limited",
+        "blocked",
+        "collecting_data",
+    ]
 
     def __init__(self, controller) -> None:
         """Initialize the sensor."""
@@ -191,10 +204,15 @@ class PdControlQualitySensor(SensorEntity):
         c = self._controller
         if getattr(c, "no_pd_mode_enabled", False):
             return "disabled"  # No-PD direct-tracking mode: PD loop not running
+        if getattr(c, "_pd_blocked", False):
+            return "blocked"  # charge delay / time slot / price / EV: loop muzzled
         if getattr(c, "_pd_limited", False):
             return "battery_limited"
         rms = c.pd_quality_rms_error
         if rms is None:
+            return "collecting_data"
+        age = getattr(c, "pd_quality_age_s", None)
+        if age is not None and age > self._STALE_AFTER_S:
             return "collecting_data"
         return self._verdict(rms, c.pd_quality_oscillation_per_min)
 
@@ -203,9 +221,11 @@ class PdControlQualitySensor(SensorEntity):
         """Expose the raw RMS error, oscillation rate, and active params/profile."""
         c = self._controller
         rms = c.pd_quality_rms_error
+        age = getattr(c, "pd_quality_age_s", None)
         return {
             "rms_error_w": round(rms) if rms is not None else None,
             "oscillation_per_min": round(c.pd_quality_oscillation_per_min, 2),
+            "metric_age_s": round(age) if age is not None else None,
             "kp": c.kp,
             "kd": c.kd,
             "deadband_w": c.deadband,
