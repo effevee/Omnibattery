@@ -8,6 +8,70 @@ controller keeps the thin ``_send_*`` wrappers that read its config and push the
 from __future__ import annotations
 
 
+def _forecast_notification_context(decision: dict) -> dict:
+    """Describe the energy horizon and forecast source consistently."""
+    scope = str(decision.get("consumption_scope") or "daily")
+    is_remaining = scope.startswith("remaining")
+    avg_consumption = float(decision.get("avg_consumption_kwh", 0) or 0)
+    remaining_consumption = decision.get("remaining_consumption_kwh")
+    consumption_kwh = (
+        float(remaining_consumption)
+        if is_remaining and remaining_consumption is not None
+        else avg_consumption
+    )
+    consumption_source = decision.get("consumption_forecast_source")
+    days = int(decision.get("days_in_history", 0) or 0)
+    profile_days = int(decision.get("profile_days", 0) or 0)
+
+    if is_remaining:
+        consumption_label = "Home consumption remaining until midnight"
+        uses_profile = scope == "remaining_profile" or consumption_source == "profile"
+        if uses_profile:
+            basis = "learned 15-minute profile"
+        elif scope == "remaining_fallback":
+            basis = "temporary daily curve"
+        elif days > 0:
+            basis = f"remaining-day estimate from {days}-day daily average"
+        else:
+            basis = "default remaining-day estimate"
+        if not uses_profile and decision.get("consumption_accumulator_ready"):
+            basis += ", adjusted with today's consumption"
+    else:
+        consumption_label = "Expected home consumption today"
+        if scope == "daily_profile" or consumption_source == "profile":
+            sample_count = profile_days or days
+            basis = "learned 15-minute profile"
+            if sample_count > 0:
+                basis += f" ({sample_count} days)"
+        elif days > 0:
+            basis = f"{days}-day daily average"
+        else:
+            basis = "default daily estimate"
+
+    solar_source = str(
+        decision.get("solar_forecast_diagnostic_source")
+        or decision.get("solar_forecast_source")
+        or ""
+    )
+    solar_is_remaining = is_remaining or solar_source in {
+        "remaining",
+        "remaining_sensor",
+    }
+    if is_remaining:
+        solar_label = "Solar remaining until midnight"
+    elif solar_is_remaining:
+        solar_label = "Solar remaining today"
+    else:
+        solar_label = "Solar forecast today"
+    return {
+        "is_remaining": is_remaining,
+        "consumption_kwh": consumption_kwh,
+        "consumption_label": consumption_label,
+        "consumption_basis": basis,
+        "solar_label": solar_label,
+    }
+
+
 def format_predictive_notification_message(
     decision_data: dict,
     is_daily_evaluation: bool = False,
@@ -31,15 +95,16 @@ def format_predictive_notification_message(
     solar_forecast = decision_data["solar_forecast_kwh"]
     usable_energy = decision_data["usable_energy_kwh"]
     avg_soc = decision_data["avg_soc"]
-    avg_consumption = decision_data["avg_consumption_kwh"]
     total_available = decision_data["total_available_kwh"]
     energy_deficit = decision_data["energy_deficit_kwh"]
-    days_in_history = decision_data["days_in_history"]
+    context = _forecast_notification_context(decision_data)
+    consumption_for_horizon = context["consumption_kwh"]
 
     solar_str = f"{solar_forecast:.2f} kWh" if solar_forecast is not None else "unavailable"
-    consumption_str = (
-        f"{avg_consumption:.2f} kWh (default)" if days_in_history == 0
-        else f"{avg_consumption:.2f} kWh ({days_in_history}-day avg)"
+    forecast_lines = (
+        f"☀️ {context['solar_label']}: {solar_str}\n"
+        f"📊 {context['consumption_label']}: {consumption_for_horizon:.2f} kWh\n"
+        f"   Basis: {context['consumption_basis']}\n"
     )
     effective_power = min(max_contracted_power, max_charge_capacity)
     power_str = (
@@ -52,7 +117,8 @@ def format_predictive_notification_message(
         message = (
             f"⚠️ No solar forecast available — conservative mode\n\n"
             f"🔋 Battery: {avg_soc:.0f}% ({usable_energy:.2f} kWh usable)\n"
-            f"📊 Consumption: {consumption_str}\n\n"
+            f"📊 {context['consumption_label']}: {consumption_for_horizon:.2f} kWh\n"
+            f"   Basis: {context['consumption_basis']}\n\n"
             f"Grid charging NOT activated."
         )
         return (title, message)
@@ -60,13 +126,18 @@ def format_predictive_notification_message(
     # Sufficient energy — no charging needed
     if not should_charge:
         title = "Predictive Charging: Not required"
+        horizon_text = "the rest of today" if context["is_remaining"] else "today"
         message = (
-            f"✓ Sufficient energy for today\n\n"
+            f"✓ Sufficient energy for {horizon_text}\n\n"
             f"🔋 Battery: {avg_soc:.0f}% ({usable_energy:.2f} kWh usable)\n"
-            f"☀️ Solar forecast: {solar_str}\n"
-            f"📊 Consumption: {consumption_str}\n"
-            f"✅ Available: {total_available:.2f} kWh ≥ {avg_consumption:.2f} kWh needed\n\n"
-            f"No grid charging required."
+            f"{forecast_lines}"
+            f"✅ Available for this horizon: {total_available:.2f} kWh ≥ "
+            f"{consumption_for_horizon:.2f} kWh needed\n\n"
+            + (
+                "No additional grid charging required."
+                if context["is_remaining"]
+                else "No grid charging required."
+            )
         )
         return (title, message)
 
@@ -106,7 +177,8 @@ def format_predictive_notification_message(
         # that the remainder of today's battery headroom will be solar-charged.
         charge_split_line = (
             f"🔌 Planned grid charge: {planned_grid_charge:.2f} kWh\n"
-            f"☀️ Forecast solar surplus: {solar_surplus:.2f} kWh (after expected consumption)\n"
+            f"☀️ Forecast {'remaining ' if context['is_remaining'] else ''}solar surplus: "
+            f"{solar_surplus:.2f} kWh (after expected consumption)\n"
         )
     else:
         charge_split_line = f"⚡ Deficit: {energy_deficit:.2f} kWh\n"
@@ -114,8 +186,7 @@ def format_predictive_notification_message(
     message = (
         f"⚡ Energy deficit — grid charging needed\n\n"
         f"🔋 Battery: {avg_soc:.0f}% ({usable_energy:.2f} kWh usable)\n"
-        f"☀️ Solar forecast: {solar_str}\n"
-        f"📊 Consumption: {consumption_str}\n"
+        f"{forecast_lines}"
         f"{charge_split_line}\n"
         f"{timing_line}"
         f"Max charge power: {power_str}"
@@ -139,40 +210,16 @@ def format_dynamic_pricing_notification(
     avg_soc = decision_data.get("avg_soc", 0)
     usable_energy = decision_data.get("usable_energy_kwh", 0)
     solar_forecast = decision_data.get("solar_forecast_kwh")
-    avg_consumption = decision_data.get("avg_consumption_kwh", 0)
     energy_deficit = decision_data.get("energy_deficit_kwh", 0)
     planned_grid_charge = decision_data.get("planned_grid_charge_kwh", energy_deficit)
-    days_in_history = decision_data.get("days_in_history", 0)
-
+    context = _forecast_notification_context(decision_data)
     solar_str = f"{solar_forecast:.2f} kWh" if solar_forecast is not None else "N/A"
-    is_remaining = decision_data.get("consumption_scope") == "remaining"
-    consumption_for_horizon = avg_consumption
-    solar_label = "Solar remaining" if is_remaining else "Solar forecast"
-    if is_remaining:
-        # ``avg_consumption_kwh`` is the legacy field and may still contain the
-        # full-day average in callers that preserve it for diagnostics.  The
-        # notification must show the explicit remaining-horizon value.
-        consumption_for_horizon = decision_data.get(
-            "remaining_consumption_kwh", avg_consumption
-        )
-        if consumption_for_horizon is None:
-            consumption_for_horizon = avg_consumption
-        daily_average = decision_data.get("daily_avg_consumption_kwh")
-        average_source = (
-            f"{days_in_history}-day avg" if days_in_history > 0 else "default"
-        )
-        consumption_str = (
-            f"{float(consumption_for_horizon):.2f} kWh remaining until midnight"
-        )
-        if daily_average is not None:
-            consumption_str += (
-                f" ({float(daily_average):.2f} kWh {average_source})"
-            )
-    else:
-        consumption_str = (
-            f"{avg_consumption:.2f} kWh ({days_in_history}-day avg)"
-            if days_in_history > 0 else f"{avg_consumption:.2f} kWh (default)"
-        )
+    consumption_for_horizon = context["consumption_kwh"]
+    forecast_lines = (
+        f"☀️ {context['solar_label']}: {solar_str}\n"
+        f"📊 {context['consumption_label']}: {consumption_for_horizon:.2f} kWh\n"
+        f"   Basis: {context['consumption_basis']}\n"
+    )
     # The arbitrage ceiling is only the binding constraint when it undercuts the
     # static one; otherwise it is reported for information but decided nothing.
     arbitrage_binding = arbitrage_ceiling is not None and (
@@ -192,22 +239,27 @@ def format_dynamic_pricing_notification(
     if schedule is None or not schedule.selected_slots:
         if not decision_data.get("should_charge", False):
             title = "Predictive Charging: Price Optimization - NOT needed"
+            horizon_text = "the rest of today" if context["is_remaining"] else "today"
             message = (
-                f"✓ Sufficient energy for today\n\n"
+                f"✓ Sufficient energy for {horizon_text}\n\n"
                 f"🔋 Battery: {avg_soc:.0f}% ({usable_energy:.2f} kWh usable)\n"
-                f"☀️ {solar_label}: {solar_str}\n"
-                f"📊 Consumption: {consumption_str}\n\n"
-                f"✅ Available: {decision_data.get('total_available_kwh', 0):.2f} kWh ≥ {float(consumption_for_horizon):.2f} kWh needed\n"
+                f"{forecast_lines}\n"
+                f"✅ Available for this horizon: "
+                f"{decision_data.get('total_available_kwh', 0):.2f} kWh ≥ "
+                f"{consumption_for_horizon:.2f} kWh needed\n"
                 f"{price_config_line}"
-                f"No grid charging required."
+                + (
+                    "No additional grid charging required."
+                    if context["is_remaining"]
+                    else "No grid charging required."
+                )
             )
         else:
             title = "Predictive Charging: Price Optimization - No slots available"
             message = (
                 f"⚠️ Charging needed but no valid price slots found\n\n"
                 f"🔋 Battery: {avg_soc:.0f}% ({usable_energy:.2f} kWh usable)\n"
-                f"☀️ {solar_label}: {solar_str}\n"
-                f"📊 Consumption: {consumption_str}\n"
+                f"{forecast_lines}"
                 f"⚡ Energy deficit: {energy_deficit:.2f} kWh\n\n"
                 f"{price_config_line}"
                 + (
@@ -253,12 +305,14 @@ def format_dynamic_pricing_notification(
             )
         elif not schedule.charging_needed:
             title = f"Predictive Charging: Price Info - {hours_label} cheapest"
+            horizon_text = "for the rest of today" if context["is_remaining"] else "today"
             message = (
-                f"✓ No grid charging needed today\n\n"
+                f"✓ No grid charging needed {horizon_text}\n\n"
                 f"🔋 Battery: {avg_soc:.0f}% ({usable_energy:.2f} kWh usable)\n"
-                f"☀️ {solar_label}: {solar_str}\n"
-                f"📊 Consumption: {consumption_str}\n"
-                f"✅ Available: {decision_data.get('total_available_kwh', 0):.2f} kWh ≥ {float(consumption_for_horizon):.2f} kWh needed\n\n"
+                f"{forecast_lines}"
+                f"✅ Available for this horizon: "
+                f"{decision_data.get('total_available_kwh', 0):.2f} kWh ≥ "
+                f"{consumption_for_horizon:.2f} kWh needed\n\n"
                 f"💰 Cheapest hours today (informational):\n{slot_lines}\n\n"
                 f"Average price: {schedule.average_price:.4f} {unit}\n"
                 f"{price_config_line}"
@@ -273,8 +327,7 @@ def format_dynamic_pricing_notification(
                 )
             message = (
                 f"🔋 Battery: {avg_soc:.0f}% ({usable_energy:.2f} kWh usable)\n"
-                f"☀️ {solar_label}: {solar_str}\n"
-                f"📊 Consumption: {consumption_str}\n"
+                f"{forecast_lines}"
                 f"⚡ Energy deficit: {energy_deficit:.2f} kWh\n"
                 f"{opportunity_line}"
                 f"🔌 Grid charge planned: {planned_grid_charge:.2f} kWh → "
@@ -332,28 +385,16 @@ def format_dp_pre_slot_reevaluation_notification(
     avg_soc = decision.get("avg_soc", 0)
     usable_energy = decision.get("usable_energy_kwh", 0)
     solar_forecast = decision.get("solar_forecast_kwh")
-    avg_consumption = decision.get("avg_consumption_kwh", 0)
     energy_deficit = decision.get("energy_deficit_kwh", 0)
-    days_in_history = decision.get("days_in_history", 0)
-    is_remaining = decision.get("consumption_scope") == "remaining"
-
+    context = _forecast_notification_context(decision)
     solar_str = f"{solar_forecast:.2f} kWh" if solar_forecast is not None else "N/A"
-    solar_label = "Solar remaining" if is_remaining else "Solar forecast"
-    if is_remaining:
-        daily_average = decision.get("daily_avg_consumption_kwh")
-        consumption_str = f"{avg_consumption:.2f} kWh (remaining until midnight)"
-        if daily_average is not None:
-            consumption_str += f"; daily average: {float(daily_average):.2f} kWh"
-    elif days_in_history > 0:
-        consumption_str = f"{avg_consumption:.2f} kWh ({days_in_history}-day avg)"
-    else:
-        consumption_str = f"{avg_consumption:.2f} kWh (default)"
 
     title = f"Predictive Charging: slot {slot.start.strftime('%H:%M')} confirmed — charging needed"
     message = (
         f"🔋 Battery: {avg_soc:.0f}% ({usable_energy:.2f} kWh usable)\n"
-        f"☀️ {solar_label}: {solar_str}\n"
-        f"📊 Consumption: {consumption_str}\n"
+        f"☀️ {context['solar_label']}: {solar_str}\n"
+        f"📊 {context['consumption_label']}: {context['consumption_kwh']:.2f} kWh\n"
+        f"   Basis: {context['consumption_basis']}\n"
         f"⚡ Energy deficit: {energy_deficit:.2f} kWh\n\n"
         f"Slot: {slot.start.strftime('%H:%M')}–{slot.end.strftime('%H:%M')} "
         f"@ {slot.price:.4f} {unit}\n"

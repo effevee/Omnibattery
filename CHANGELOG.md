@@ -10,6 +10,7 @@
 
 ### Fixed
 
+- **Predictive charging notifications could mix daily and remaining forecast labels**: Predictive Charging, Dynamic Pricing and pre-slot confirmations now identify whether solar and household consumption cover today or only the period until midnight, recognize learned-profile and temporary-curve scopes, and show the forecast basis on a separate line instead of presenting remaining consumption as a seven-day average.
 - **Predictive charging windows could truncate daily household consumption**: the legacy daily history, same-day accumulator, Recorder backfill and quarter-hour forecast consumers now keep the full 24-hour household demand, including weekends and predictive grid-charging windows. Battery charging itself is still excluded naturally because negative battery AC power cancels the matching grid import. Existing windowed totals are rebuilt from Recorder instead of mixing partial-day and full-day data.
 - **Grid at Min SOC could remain at zero with a disabled manual timeslot**: merely retaining a disabled or charge-only timeslot in configuration no longer suppresses the accumulator. Only enabled slots that allow discharge restrict it to their active window; with no such slot, unmet grid demand is counted all day.
 - **Predictive charging could report a missing solar forecast during a transient midnight update**: when the configured remaining-today sensor was temporarily unavailable, the one-shot slot evaluation now waits and retries instead of consuming the evaluation with a misleading safe-mode notification.
