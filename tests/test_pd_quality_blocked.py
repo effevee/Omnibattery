@@ -153,8 +153,8 @@ def _sensor(controller):
 def _quality_ctrl(**kwargs):
     defaults = dict(
         no_pd_mode_enabled=False,
-        _pd_blocked=False,
-        _pd_limited=False,
+        pd_blocked=False,
+        pd_limited=False,
         pd_quality_rms_error=2687.0,
         pd_quality_oscillation_per_min=0.0,
         pd_quality_age_s=1.0,
@@ -166,7 +166,7 @@ def _quality_ctrl(**kwargs):
 def test_sensor_reports_blocked_over_a_tuning_verdict():
     # The exact regression: high RMS, no oscillation, loop muzzled. Without the
     # blocked check this reads "sluggish" on the most aggressive profile.
-    sensor = _sensor(_quality_ctrl(_pd_blocked=True))
+    sensor = _sensor(_quality_ctrl(pd_blocked=True))
     assert sensor.native_value == "blocked"
 
 
@@ -176,7 +176,7 @@ def test_sensor_still_reports_sluggish_when_free_to_act():
 
 
 def test_blocked_outranks_battery_limited():
-    sensor = _sensor(_quality_ctrl(_pd_blocked=True, _pd_limited=True))
+    sensor = _sensor(_quality_ctrl(pd_blocked=True, pd_limited=True))
     assert sensor.native_value == "blocked"
 
 
@@ -189,33 +189,37 @@ def test_blocked_is_a_declared_option():
     assert "blocked" in PdControlQualitySensor._STATES
 
 
-async def test_early_return_clears_the_latched_flags():
-    """Both flags are written only in the PD tail, so an early return would leave
-    the previous cycle's verdict latched (e.g. "blocked" for a whole predictive
-    grid-charge session). Manual mode stands in for any of those early returns.
+def test_flags_expire_instead_of_latching():
+    """Both flags are written only in the PD tail, which many cycles never reach
+    (weekly full charge or predictive charging owning the cycle, max SOC handling,
+    manual mode). Clearing them at the top of every cycle erased a verdict that
+    was still true, and never clearing them latched a stale one for the whole
+    session. They are stamped when set and expire on their own instead.
     """
-    async def _noop(*_args, **_kwargs):
-        return None
-
-    controller = SimpleNamespace(
-        coordinators=[],
-        _phase_power_limiter=SimpleNamespace(begin_cycle=lambda: None),
-        _consumption_tracker=None,
-        _balance_monitor=None,
-        _pricing_mgr=SimpleNamespace(
-            maybe_check_price_data_health=lambda: None,
-            clear_curtailment_runtime=lambda _source: None,
-        ),
-        manual_mode_enabled=True,
-        _apply_software_manual_setpoints=_noop,
-        _phase_safety_pending=False,
-        _pd_blocked=True,   # latched by the previous cycle
-        _pd_limited=True,
+    ctrl = SimpleNamespace(
+        _pd_flag_ttl_s=60.0,
+        _pd_blocked=False,
+        _pd_blocked_ts=None,
     )
-    await ChargeDischargeController._run_control_cycle(controller)
+    ctrl._pd_flag_live = lambda value, ts: ChargeDischargeController._pd_flag_live(ctrl, value, ts)
 
-    assert controller._pd_blocked is False
-    assert controller._pd_limited is False
+    def live():
+        return ChargeDischargeController.pd_blocked.fget(ctrl)
+
+    assert live() is False
+    ChargeDischargeController._set_pd_blocked(ctrl, True)
+    assert live() is True
+
+    ctrl._pd_blocked_ts -= 30.0  # a cycle that skipped the tail 30s ago
+    assert live() is True
+
+    ctrl._pd_blocked_ts -= 40.0  # 70s: nothing confirmed it, so it lapses
+    assert live() is False
+
+    ChargeDischargeController._set_pd_blocked(ctrl, True)
+    ChargeDischargeController._set_pd_blocked(ctrl, False)
+    assert ctrl._pd_blocked_ts is None
+    assert live() is False
 
 
 if __name__ == "__main__":
@@ -234,5 +238,5 @@ if __name__ == "__main__":
     test_blocked_outranks_battery_limited()
     test_stale_metric_is_not_presented_as_a_live_verdict()
     test_blocked_is_a_declared_option()
-    # test_early_return_clears_the_latched_flags is async; run it under pytest
+    test_flags_expire_instead_of_latching()
     print("ok")

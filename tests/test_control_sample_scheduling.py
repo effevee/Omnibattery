@@ -150,6 +150,8 @@ def _main_controller(state_holder, pd_calls):
         _set_battery_power=_async_noop,
         _update_pd_quality_metrics=lambda *_args, **_kwargs: None,
         _pd_demand_blocked=lambda _error, _commanded_power: False,
+        _set_pd_limited=lambda _value: None,
+        _set_pd_blocked=lambda _value: None,
         _pd_limited=False,
         _pd_blocked=False,
         _active_discharge_batteries=[],

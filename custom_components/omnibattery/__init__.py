@@ -522,6 +522,15 @@ class ChargeDischargeController:
         # error is then a muzzled loop, not a tuning fault: the metric skips it
         # and the sensor reports "blocked".
         self._pd_blocked = False
+        # Both flags are written only in the PD tail, which many cycles never
+        # reach (weekly full charge or predictive charging owning the cycle, max
+        # SOC handling, manual mode, ...). Clearing them at the top of the cycle
+        # therefore erased a verdict that was still true, while never clearing
+        # them latched a stale one for the whole session. Each is instead stamped
+        # when set and expires on its own; see pd_blocked / pd_limited.
+        self._pd_flag_ttl_s = 60.0
+        self._pd_limited_ts = None
+        self._pd_blocked_ts = None
 
         # Measured-power anti-windup (back-calculation): re-anchor the incremental
         # base to the battery's real AC output when commanded power is not being
@@ -1579,6 +1588,32 @@ class ChargeDischargeController:
         # (60/dt) when a sign change occurred this cycle, 0 otherwise; smoothed.
         inst_per_min = (60.0 / dt) if sign_changed else 0.0
         self._pd_quality_osc_ema += alpha * (inst_per_min - self._pd_quality_osc_ema)
+
+    def _set_pd_limited(self, value: bool) -> None:
+        """Set the battery-limited flag and stamp it for the TTL."""
+        self._pd_limited = value
+        self._pd_limited_ts = time.monotonic() if value else None
+
+    def _set_pd_blocked(self, value: bool) -> None:
+        """Set the demand-blocked flag and stamp it for the TTL."""
+        self._pd_blocked = value
+        self._pd_blocked_ts = time.monotonic() if value else None
+
+    def _pd_flag_live(self, value: bool, stamped_at: float | None) -> bool:
+        """Return True while a set flag is still within its TTL."""
+        if not value or stamped_at is None:
+            return False
+        return (time.monotonic() - stamped_at) <= self._pd_flag_ttl_s
+
+    @property
+    def pd_limited(self) -> bool:
+        """Battery-limited, as long as a cycle confirmed it recently."""
+        return self._pd_flag_live(self._pd_limited, self._pd_limited_ts)
+
+    @property
+    def pd_blocked(self) -> bool:
+        """Demand-blocked, as long as a cycle confirmed it recently."""
+        return self._pd_flag_live(self._pd_blocked, self._pd_blocked_ts)
 
     @property
     def pd_quality_rms_error(self) -> float | None:
@@ -5841,13 +5876,6 @@ class ChargeDischargeController:
         if any(c._is_shutting_down for c in self.coordinators):
             return
         self._phase_power_limiter.begin_cycle()
-        # Clear the control-quality flags for this cycle. Both are only written in
-        # the PD tail, so every early return below (max SOC reached, predictive grid
-        # charging, in-deadband, ...) used to leave the previous cycle's flag latched
-        # and the sensor stuck on "blocked"/"battery_limited" for the whole session.
-        # Cleared here, an early return falls through to the staleness guard instead.
-        self._pd_blocked = False
-        self._pd_limited = False
 
         # === HOUSEHOLD CONSUMPTION ACCUMULATION ===
         # Run before manual mode check so samples are never lost
@@ -6539,9 +6567,9 @@ class ChargeDischargeController:
             self._active_charge_batteries = []
             # No battery can act: demand outside the deadband is battery-limited, not
             # a tuning fault (surfaced as "battery_limited", keeps the metric clean).
-            self._pd_limited = abs(error) > self.deadband
+            self._set_pd_limited(abs(error) > self.deadband)
             # Everything is at 0 W here, so there is no headroom in any direction.
-            self._pd_blocked = self._pd_demand_blocked(error, 0)
+            self._set_pd_blocked(self._pd_demand_blocked(error, 0))
             return
         
         # Select batteries via load sharing, then distribute power
@@ -6655,12 +6683,12 @@ class ChargeDischargeController:
                 or (error > 0 and new_power <= -max_total_discharge + 1)
             )
             pd_limited = pd_limited or phase_limited
-            self._pd_limited = pd_limited
+            self._set_pd_limited(pd_limited)
             # The demand direction can be blocked while the commanded power is 0,
             # which leaves this branch "unrestricted" even though the loop is
             # muzzled. Skip the metric there too, else a blocked charge demand
             # (charge delay + solar surplus) scores as sluggish tuning.
-            self._pd_blocked = self._pd_demand_blocked(error, new_power)
+            self._set_pd_blocked(self._pd_demand_blocked(error, new_power))
             self._update_pd_quality_metrics(
                 error, sign_changed, active_target, pd_limited or self._pd_blocked
             )
@@ -6677,7 +6705,7 @@ class ChargeDischargeController:
         else:
             # Controller is paused by restrictions - DO NOT update error tracking
             # This prevents false oscillation detection from natural load fluctuations
-            self._pd_blocked = True
+            self._set_pd_blocked(True)
             if DEBUG_CONTROL_LOOP_DETAIL:
                 _LOGGER.debug("ChargeDischargeController: PD state FROZEN (restricted) - error tracking paused to prevent false oscillation warnings")
         

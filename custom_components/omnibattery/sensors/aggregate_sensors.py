@@ -204,9 +204,9 @@ class PdControlQualitySensor(SensorEntity):
         c = self._controller
         if getattr(c, "no_pd_mode_enabled", False):
             return "disabled"  # No-PD direct-tracking mode: PD loop not running
-        if getattr(c, "_pd_blocked", False):
+        if getattr(c, "pd_blocked", False):
             return "blocked"  # charge delay / time slot / price / EV: loop muzzled
-        if getattr(c, "_pd_limited", False):
+        if getattr(c, "pd_limited", False):
             return "battery_limited"
         rms = c.pd_quality_rms_error
         if rms is None:
