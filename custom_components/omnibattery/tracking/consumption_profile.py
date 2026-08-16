@@ -37,16 +37,19 @@ PROFILE_STORE_VERSION = 1
 PROFILE_STORE_KEY = "consumption_profile"
 # Temporary household-shape fallback used until the learned profile is mature.
 # Values are relative hourly demand, not kWh.  The six quiet overnight hours
-# stay at the lowest level; midday carries the strongest weight and dinner gets
-# a smaller evening lift.  The values are normalized when converted to energy,
-# so this heuristic never changes the daily total.
+# stay at the lowest level, breakfast has a small lift, daytime demand rises
+# around lunch and dinner is the strongest peak.  The values are normalized
+# when converted to energy, so this heuristic never changes the daily total.
 FALLBACK_HOURLY_WEIGHTS = (
     0.35, 0.35, 0.35, 0.35, 0.35, 0.35,
-    0.60, 0.80, 0.95, 1.10, 1.25, 1.35,
-    1.35, 1.25, 1.10, 1.00, 0.95, 1.00,
-    1.10, 1.20, 1.30, 1.15, 0.80, 0.50,
+    0.60, 0.90, 1.10, 0.95, 1.00, 1.10,
+    1.20, 1.25, 1.20, 1.05, 1.00, 1.05,
+    1.15, 1.30, 1.45, 1.40, 1.00, 0.60,
 )
 FALLBACK_WEIGHT_SUM = sum(FALLBACK_HOURLY_WEIGHTS)
+FALLBACK_LIVE_ADJUSTMENT_LIMIT = 0.30
+FALLBACK_LIVE_ADJUSTMENT_START_HOUR = 3.0
+FALLBACK_LIVE_ADJUSTMENT_FULL_HOUR = 12.0
 # Descriptive aliases kept public so tests and diagnostics can refer to the
 # policy without depending on the internal constant spelling.
 MIN_COVERAGE_SECONDS = MIN_INTERVAL_COVERAGE_S
@@ -378,6 +381,47 @@ def fallback_daily_intervals(daily_kwh: float) -> list[float]:
         for weight in FALLBACK_HOURLY_WEIGHTS
         for _ in range(INTERVALS_PER_HOUR)
     ]
+
+
+def adjust_remaining_fallback_energy(
+    baseline_remaining_kwh: float,
+    daily_expected_kwh: float,
+    consumed_today_kwh: float,
+    elapsed_hours: float,
+) -> tuple[float, float]:
+    """Condition a shaped daily fallback on today's observed consumption.
+
+    The curve remains the primary forecast.  After the first three hours, a
+    progressively stronger part of the deviation from the curve is carried
+    into the remaining horizon.  The correction reaches full strength at noon
+    and is capped to 30% of the baseline remainder so a one-off appliance spike
+    cannot dominate the rest of the day.
+
+    Return ``(adjusted_energy, applied_correction)`` for diagnostics.
+    """
+    baseline = _finite_non_negative(baseline_remaining_kwh) or 0.0
+    daily = _finite_non_negative(daily_expected_kwh) or 0.0
+    consumed = _finite_non_negative(consumed_today_kwh)
+    elapsed = _finite_non_negative(elapsed_hours) or 0.0
+    if baseline <= 0.0 or daily <= 0.0 or consumed is None:
+        return baseline, 0.0
+
+    confidence = max(
+        0.0,
+        min(
+            1.0,
+            (elapsed - FALLBACK_LIVE_ADJUSTMENT_START_HOUR)
+            / (
+                FALLBACK_LIVE_ADJUSTMENT_FULL_HOUR
+                - FALLBACK_LIVE_ADJUSTMENT_START_HOUR
+            ),
+        ),
+    )
+    expected_elapsed = max(0.0, daily - baseline)
+    raw_correction = (consumed - expected_elapsed) * confidence
+    limit = baseline * FALLBACK_LIVE_ADJUSTMENT_LIMIT
+    correction = max(-limit, min(limit, raw_correction))
+    return max(0.0, baseline + correction), correction
 
 
 def _series_to_bins(states: list[Any], tz: Any = None) -> dict[date, ProfileDay]:
@@ -1122,22 +1166,19 @@ class ConsumptionProfileTracker:
                 return True
         return False
 
-    def _legacy_fallback_scale(
+    def _legacy_fallback_day_scale(
         self,
         local_date: date,
         forecast: ConsumptionForecast,
-        *,
-        exclude_charging_windows: bool,
     ) -> float:
-        """Scale a legacy daily fallback across the active home-load window.
+        """Keep the legacy fallback daily total across local DST transitions.
 
-        Legacy daily history is measured outside configured grid-charging
-        windows.  The fallback shape is initially a 24-hour curve, so when a
-        range query masks those windows, renormalize the remaining portions to
-        preserve the historical daily total.  Mature profiles are already
-        measured for all 24 hours and never pass through this path.
+        The stored shape has 24 nominal hours.  A local day can contain 23 or 25
+        real hours, so normalize the actually traversed wall-clock segments.
+        Charging-window masks intentionally do not affect this scale: excluded
+        hours must remove their household demand rather than redistribute it.
         """
-        if not exclude_charging_windows or forecast.source != "legacy_daily":
+        if forecast.source != "legacy_daily":
             return 1.0
 
         timezone = self._timezone()
@@ -1147,21 +1188,19 @@ class ConsumptionProfileTracker:
             time.min,
             tzinfo=timezone,
         )
-        active_weighted_energy = 0.0
+        local_day_energy = 0.0
         fallback_intervals = forecast.intervals_kwh
         for segment_start, segment_end, midpoint in _local_segments(day_start, next_day):
-            if not self._day_has_operating_slot(local_date) or self._slot_active(midpoint):
-                continue
             index = _interval_index(midpoint.timetz().replace(tzinfo=None))
-            active_weighted_energy += (
+            local_day_energy += (
                 fallback_intervals[index]
                 * (segment_end - segment_start)
                 / INTERVAL_SECONDS
             )
 
-        if active_weighted_energy <= 0.0:
+        if local_day_energy <= 0.0:
             return 0.0
-        return forecast.energy_kwh / active_weighted_energy
+        return forecast.energy_kwh / local_day_energy
 
     def forecast_energy_between(
         self,
@@ -1247,11 +1286,7 @@ class ConsumptionProfileTracker:
             index = _interval_index(midpoint.timetz().replace(tzinfo=None))
             scale = fallback_scales.get(local_date)
             if scale is None:
-                scale = self._legacy_fallback_scale(
-                    local_date,
-                    forecast,
-                    exclude_charging_windows=exclude_charging_windows,
-                )
+                scale = self._legacy_fallback_day_scale(local_date, forecast)
                 fallback_scales[local_date] = scale
             portion = (
                 forecast.intervals_kwh[index]

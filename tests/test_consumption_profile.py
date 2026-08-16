@@ -15,6 +15,7 @@ from custom_components.omnibattery.tracking.consumption_profile import (
     ConsumptionProfileTracker,
     ProfileDay,
     _series_to_bins,
+    adjust_remaining_fallback_energy,
     fallback_daily_intervals,
     split_sample_across_bins,
 )
@@ -331,11 +332,31 @@ def test_legacy_fallback_uses_household_shape_without_changing_daily_total():
     assert len(FALLBACK_HOURLY_WEIGHTS) == 24
     assert sum(intervals) == pytest.approx(30.0)
     assert min(hourly[:6]) == pytest.approx(hourly[0])
-    assert hourly[12] > hourly[20] > hourly[2]
+    assert hourly[8] > hourly[9] > hourly[2]
+    assert hourly[20] > hourly[12] > hourly[2]
     assert hourly[22] > hourly[2]
 
 
-def test_legacy_fallback_preserves_daily_total_when_charging_window_is_masked():
+def test_live_fallback_adjustment_tracks_today_without_following_spikes():
+    adjusted, correction = adjust_remaining_fallback_energy(10.0, 20.0, 15.0, 12.0)
+
+    assert correction == pytest.approx(3.0)
+    assert adjusted == pytest.approx(13.0)
+
+    adjusted, correction = adjust_remaining_fallback_energy(10.0, 20.0, 5.0, 12.0)
+
+    assert correction == pytest.approx(-3.0)
+    assert adjusted == pytest.approx(7.0)
+
+
+def test_live_fallback_adjustment_waits_for_enough_observation():
+    adjusted, correction = adjust_remaining_fallback_energy(18.0, 20.0, 8.0, 3.0)
+
+    assert correction == 0.0
+    assert adjusted == pytest.approx(18.0)
+
+
+def test_legacy_fallback_does_not_redistribute_masked_charging_window():
     monday = date(2026, 8, 17)
     profile = _profile(
         slots=[{
@@ -355,6 +376,29 @@ def test_legacy_fallback_preserves_daily_total_when_charging_window_is_masked():
     )
 
     assert result.source == "legacy_daily"
+    full_day = fallback_daily_intervals(30.0)
+    assert result.energy_kwh == pytest.approx(sum(full_day[24:]))
+
+
+@pytest.mark.parametrize(
+    "local_date",
+    [date(2026, 3, 29), date(2026, 10, 25)],
+)
+def test_legacy_fallback_preserves_daily_total_across_dst(local_date):
+    profile = _profile(fallback_daily=30.0)
+    start = datetime.combine(local_date, datetime.min.time()).replace(tzinfo=MADRID)
+    end = datetime.combine(
+        local_date + timedelta(days=1),
+        datetime.min.time(),
+    ).replace(tzinfo=MADRID)
+
+    result = profile.forecast_energy_between(
+        start,
+        end,
+        exclude_charging_windows=False,
+        fallback="legacy_daily",
+    )
+
     assert result.energy_kwh == pytest.approx(30.0)
 
 

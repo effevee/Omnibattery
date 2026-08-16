@@ -471,6 +471,50 @@ def test_midday_calendar_rebuild_uses_remaining_consumption_and_solar(monkeypatc
     assert ctrl._last_decision_data["remaining_solar_kwh"] == 2.4
 
 
+def test_remaining_fallback_is_conditioned_on_today_consumption():
+    async def get_average_consumption():
+        return 20.0
+
+    calls = []
+
+    async def should_activate(**overrides):
+        calls.append(overrides)
+        return {"should_charge": False}
+
+    forecast = SimpleNamespace(
+        energy_kwh=10.0,
+        source="legacy_daily",
+        coverage_ratio=0.0,
+        total_days=2,
+        fallback_reason="insufficient_days",
+    )
+    profile = SimpleNamespace(
+        _timezone=lambda: None,
+        forecast_energy_between=lambda *_args, **_kwargs: forecast,
+    )
+    now = datetime(2026, 8, 11, 12, 0)
+    ctrl = _controller(
+        _daily_home_energy_date=now.date(),
+        _daily_home_energy_kwh=15.0,
+        _consumption_tracker=SimpleNamespace(
+            consumption_profile=profile,
+            get_dynamic_base_consumption=get_average_consumption,
+        ),
+        _should_activate_grid_charging=should_activate,
+    )
+    manager = _mgr(ctrl)
+    manager._remaining_solar_today_kwh = lambda _now_h: 0.0
+
+    decision = asyncio.run(manager._evaluate_remaining_grid_charging(now=now))
+
+    assert calls == [{
+        "consumption_override_kwh": pytest.approx(13.0),
+        "solar_forecast_override_kwh": 0.0,
+    }]
+    assert decision["consumption_scope"] == "remaining_fallback"
+    assert decision["consumption_fallback_correction_kwh"] == pytest.approx(3.0)
+
+
 def test_manual_button_uses_remaining_horizon_at_midday():
     import asyncio
 

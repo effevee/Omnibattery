@@ -50,6 +50,7 @@ from ..solar_forecast import (
     get_configured_solar_forecast_sensor,
     read_solar_forecast_kwh,
 )
+from ..tracking.consumption_profile import adjust_remaining_fallback_energy
 from . import (
     DynamicPricingSchedule,
     PriceSlot,
@@ -2535,6 +2536,17 @@ class PricingManager:
         profile_forecast = self._profile_remaining_consumption(local_now, end_of_day)
         if profile_forecast is not None:
             remaining_consumption_kwh = profile_forecast.energy_kwh
+            fallback_correction_kwh = 0.0
+            if profile_forecast.source == "legacy_daily" and accumulator_ready:
+                (
+                    remaining_consumption_kwh,
+                    fallback_correction_kwh,
+                ) = adjust_remaining_fallback_energy(
+                    remaining_consumption_kwh,
+                    avg_daily_kwh,
+                    consumed_today_kwh,
+                    now_h,
+                )
             consumption_rate_kwh_h = (
                 remaining_consumption_kwh / remaining_window_hours
                 if remaining_window_hours > 0
@@ -2546,6 +2558,7 @@ class PricingManager:
                 else "remaining_fallback"
             )
         else:
+            fallback_correction_kwh = 0.0
             remaining_consumption_kwh, consumption_rate_kwh_h = (
                 self._project_remaining_consumption(
                     now_h,
@@ -2569,6 +2582,7 @@ class PricingManager:
         decision["daily_avg_consumption_kwh"] = avg_daily_kwh
         decision["consumed_today_kwh"] = consumed_today_kwh
         decision["remaining_consumption_kwh"] = remaining_consumption_kwh
+        decision["consumption_fallback_correction_kwh"] = fallback_correction_kwh
         decision["remaining_solar_kwh"] = remaining_solar_kwh
         decision["consumption_rate_kwh_h"] = consumption_rate_kwh_h
         decision["consumption_accumulator_ready"] = accumulator_ready

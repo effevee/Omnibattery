@@ -4,10 +4,17 @@ Predictive charging needs to know how much energy your home consumes to decide w
 
 While the learned profile is immature, that daily total is not distributed
 completely flat: a temporary household-shaped curve is used. Overnight
-(00:00–06:00) receives the minimum weight, the middle of the day receives more
-weight, and dinner gets a moderate evening lift. The curve is normalized so the
-total remains exactly the estimated daily consumption, and disappears as soon
-as a learned profile with real data is available.
+(00:00–06:00) receives the minimum weight, breakfast has a small lift, the
+middle of the day receives more weight, and dinner is the main peak. The curve
+is normalized so the total remains exactly the estimated daily consumption,
+including on daylight-saving transition days, and disappears as soon as a
+learned profile with real data is available.
+
+For Dynamic Pricing intraday re-evaluations that forecast from now until
+midnight, the curve is also adjusted gradually using today's accumulated real
+consumption. The adjustment starts after the first three hours, reaches full
+strength at noon and is capped at 30% of the forecast remainder so a one-off
+spike cannot distort the rest of the day.
 
 ---
 

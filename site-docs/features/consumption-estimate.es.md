@@ -4,10 +4,17 @@ La carga predictiva necesita saber cuánta energía consume tu hogar para decidi
 
 Mientras el perfil aprendido no está maduro, ese total diario no se reparte de
 forma completamente plana: se usa una curva temporal provisional de hogar. La
-noche (00:00–06:00) recibe el peso mínimo, las horas centrales del día reciben
-más peso y la cena tiene un repunte moderado. La curva se normaliza para que el
-total siga siendo exactamente el consumo diario estimado y desaparece en cuanto
-hay un perfil aprendido con datos reales.
+noche (00:00–06:00) recibe el peso mínimo, el desayuno tiene un pequeño repunte,
+las horas centrales del día reciben más peso y la cena es el pico principal. La
+curva se normaliza para que el total siga siendo exactamente el consumo diario
+estimado, incluidos los días de cambio horario, y desaparece en cuanto hay un
+perfil aprendido con datos reales.
+
+En las reevaluaciones intradía de Precio Dinámico que calculan lo que queda
+hasta medianoche, la curva también se corrige de forma gradual con el consumo
+real acumulado del día. La corrección empieza tras las tres primeras horas,
+alcanza toda su fuerza al mediodía y se limita al 30 % del consumo restante
+previsto para que un pico puntual no distorsione el resto del día.
 
 ---
 
