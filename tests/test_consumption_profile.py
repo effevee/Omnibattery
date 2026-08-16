@@ -8,12 +8,14 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from custom_components.omnibattery.tracking.consumption_profile import (
+    FALLBACK_HOURLY_WEIGHTS,
     INTERVAL_COUNT,
     INTERVAL_SECONDS,
     MIN_INTERVAL_COVERAGE_S,
     ConsumptionProfileTracker,
     ProfileDay,
     _series_to_bins,
+    fallback_daily_intervals,
     split_sample_across_bins,
 )
 
@@ -21,14 +23,14 @@ from custom_components.omnibattery.tracking.consumption_profile import (
 MADRID = ZoneInfo("Europe/Madrid")
 
 
-def _profile(days=None, *, slots=None):
+def _profile(days=None, *, slots=None, fallback_daily=5.0):
     profile = ConsumptionProfileTracker.__new__(ConsumptionProfileTracker)
     profile._days = days or {}
     profile._controller = SimpleNamespace(
         charging_time_slots=slots or [],
-        get_avg_daily_consumption=lambda: 5.0,
+        get_avg_daily_consumption=lambda: fallback_daily,
     )
-    profile._fallback_daily_kwh = 5.0
+    profile._fallback_daily_kwh = fallback_daily
     profile._last_error = None
     profile._hass = SimpleNamespace(
         config=SimpleNamespace(time_zone="Europe/Madrid")
@@ -317,6 +319,43 @@ def test_immature_profile_uses_coherent_legacy_fallback():
     assert forecast.source == "legacy_daily"
     assert forecast.fallback_reason == "insufficient_days"
     assert forecast.energy_kwh == pytest.approx(5.0)
+
+
+def test_legacy_fallback_uses_household_shape_without_changing_daily_total():
+    intervals = fallback_daily_intervals(30.0)
+    hourly = [
+        sum(intervals[index:index + 4])
+        for index in range(0, INTERVAL_COUNT, 4)
+    ]
+
+    assert len(FALLBACK_HOURLY_WEIGHTS) == 24
+    assert sum(intervals) == pytest.approx(30.0)
+    assert min(hourly[:6]) == pytest.approx(hourly[0])
+    assert hourly[12] > hourly[20] > hourly[2]
+    assert hourly[22] > hourly[2]
+
+
+def test_legacy_fallback_preserves_daily_total_when_charging_window_is_masked():
+    monday = date(2026, 8, 17)
+    profile = _profile(
+        slots=[{
+            "days": ["mon"],
+            "start_time": "00:00",
+            "end_time": "06:00",
+        }],
+        fallback_daily=30.0,
+    )
+    start = datetime.combine(monday, datetime.min.time()).replace(tzinfo=MADRID)
+
+    result = profile.forecast_energy_between(
+        start,
+        start + timedelta(days=1),
+        exclude_charging_windows=True,
+        fallback="legacy_daily",
+    )
+
+    assert result.source == "legacy_daily"
+    assert result.energy_kwh == pytest.approx(30.0)
 
 
 def test_range_query_prorates_partial_interval_and_masks_slot_days():

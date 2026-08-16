@@ -2,6 +2,13 @@
 
 Predictive charging needs to know how much energy your home consumes to decide whether grid charging is needed. The integration learns a **15-minute consumption profile** from up to 28 complete local days. Until that profile is mature, the existing 7-day daily estimate remains the safe fallback.
 
+While the learned profile is immature, that daily total is not distributed
+completely flat: a temporary household-shaped curve is used. Overnight
+(00:00–06:00) receives the minimum weight, the middle of the day receives more
+weight, and dinner gets a moderate evening lift. The curve is normalized so the
+total remains exactly the estimated daily consumption, and disappears as soon
+as a learned profile with real data is available.
+
 ---
 
 ## What the estimate measures

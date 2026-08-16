@@ -2454,7 +2454,7 @@ class PricingManager:
         start: datetime,
         end: datetime,
     ):
-        """Return a mature profile forecast for a remaining local-time range."""
+        """Return the learned profile or its explicit daily fallback."""
         tracker = getattr(self._controller, "_consumption_tracker", None)
         profile = getattr(tracker, "consumption_profile", None)
         if profile is None or end <= start:
@@ -2471,7 +2471,7 @@ class PricingManager:
                 exclude_charging_windows=True,
                 fallback="legacy_daily",
             )
-            if forecast.mature and forecast.source == "profile":
+            if forecast.source in {"profile", "legacy_daily"}:
                 return forecast
         except Exception as exc:  # noqa: BLE001
             _LOGGER.debug("Pricing: profile forecast failed: %s", exc)
@@ -2541,7 +2541,11 @@ class PricingManager:
                 if remaining_window_hours > 0
                 else 0.0
             )
-            consumption_scope = "remaining_profile"
+            consumption_scope = (
+                "remaining_profile"
+                if profile_forecast.source == "profile"
+                else "remaining_fallback"
+            )
         else:
             remaining_consumption_kwh, consumption_rate_kwh_h = (
                 self._project_remaining_consumption(
@@ -2810,7 +2814,11 @@ class PricingManager:
                 if remaining_window_hours > 0
                 else 0.0
             )
-            consumption_scope = "remaining_profile"
+            consumption_scope = (
+                "remaining_profile"
+                if profile_forecast.source == "profile"
+                else "remaining_fallback"
+            )
         else:
             remaining_consumption_kwh, consumption_rate_kwh_h = self._project_remaining_consumption(
                 now_h,

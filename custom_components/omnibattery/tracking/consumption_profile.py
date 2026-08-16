@@ -29,11 +29,24 @@ _LOGGER = logging.getLogger(__name__)
 INTERVAL_MINUTES = 15
 INTERVAL_SECONDS = INTERVAL_MINUTES * 60
 INTERVAL_COUNT = 24 * 60 // INTERVAL_MINUTES
+INTERVALS_PER_HOUR = 60 // INTERVAL_MINUTES
 PROFILE_RETENTION_DAYS = 28
 MIN_INTERVAL_COVERAGE_S = INTERVAL_SECONDS * 0.75
 MAX_SAMPLE_GAP_SECONDS = 5 * 60
 PROFILE_STORE_VERSION = 1
 PROFILE_STORE_KEY = "consumption_profile"
+# Temporary household-shape fallback used until the learned profile is mature.
+# Values are relative hourly demand, not kWh.  The six quiet overnight hours
+# stay at the lowest level; midday carries the strongest weight and dinner gets
+# a smaller evening lift.  The values are normalized when converted to energy,
+# so this heuristic never changes the daily total.
+FALLBACK_HOURLY_WEIGHTS = (
+    0.35, 0.35, 0.35, 0.35, 0.35, 0.35,
+    0.60, 0.80, 0.95, 1.10, 1.25, 1.35,
+    1.35, 1.25, 1.10, 1.00, 0.95, 1.00,
+    1.10, 1.20, 1.30, 1.15, 0.80, 0.50,
+)
+FALLBACK_WEIGHT_SUM = sum(FALLBACK_HOURLY_WEIGHTS)
 # Descriptive aliases kept public so tests and diagnostics can refer to the
 # policy without depending on the internal constant spelling.
 MIN_COVERAGE_SECONDS = MIN_INTERVAL_COVERAGE_S
@@ -347,6 +360,24 @@ def _state_timestamp(state: Any) -> datetime | None:
     if timestamp is None:
         timestamp = getattr(state, "last_changed", None)
     return timestamp if isinstance(timestamp, datetime) else None
+
+
+def fallback_daily_intervals(daily_kwh: float) -> list[float]:
+    """Distribute a daily fallback total over the 96 local quarter-hours.
+
+    The shape is deliberately a short-lived heuristic.  It is normalized by
+    the sum of its hourly weights, so callers can safely use it with any daily
+    total without creating or losing energy.
+    """
+    daily = _finite_non_negative(daily_kwh) or 0.0
+    if FALLBACK_WEIGHT_SUM <= 0.0:
+        return [daily / INTERVAL_COUNT] * INTERVAL_COUNT
+    per_weighted_hour = daily / FALLBACK_WEIGHT_SUM
+    return [
+        per_weighted_hour * weight / INTERVALS_PER_HOUR
+        for weight in FALLBACK_HOURLY_WEIGHTS
+        for _ in range(INTERVALS_PER_HOUR)
+    ]
 
 
 def _series_to_bins(states: list[Any], tz: Any = None) -> dict[date, ProfileDay]:
@@ -849,8 +880,7 @@ class ConsumptionProfileTracker:
     def _fallback_intervals(self, fallback: FallbackKind) -> list[float]:
         if fallback == "current_rate":
             return [self._current_rate_value() * INTERVAL_SECONDS / 3600.0] * INTERVAL_COUNT
-        per_interval = self._fallback_daily_value() / INTERVAL_COUNT
-        return [per_interval] * INTERVAL_COUNT
+        return fallback_daily_intervals(self._fallback_daily_value())
 
     def _usable_days(self) -> list[ProfileDay]:
         # The current day remains persisted and receives live samples, but it
@@ -1092,6 +1122,47 @@ class ConsumptionProfileTracker:
                 return True
         return False
 
+    def _legacy_fallback_scale(
+        self,
+        local_date: date,
+        forecast: ConsumptionForecast,
+        *,
+        exclude_charging_windows: bool,
+    ) -> float:
+        """Scale a legacy daily fallback across the active home-load window.
+
+        Legacy daily history is measured outside configured grid-charging
+        windows.  The fallback shape is initially a 24-hour curve, so when a
+        range query masks those windows, renormalize the remaining portions to
+        preserve the historical daily total.  Mature profiles are already
+        measured for all 24 hours and never pass through this path.
+        """
+        if not exclude_charging_windows or forecast.source != "legacy_daily":
+            return 1.0
+
+        timezone = self._timezone()
+        day_start = datetime.combine(local_date, time.min, tzinfo=timezone)
+        next_day = datetime.combine(
+            local_date + timedelta(days=1),
+            time.min,
+            tzinfo=timezone,
+        )
+        active_weighted_energy = 0.0
+        fallback_intervals = forecast.intervals_kwh
+        for segment_start, segment_end, midpoint in _local_segments(day_start, next_day):
+            if not self._day_has_operating_slot(local_date) or self._slot_active(midpoint):
+                continue
+            index = _interval_index(midpoint.timetz().replace(tzinfo=None))
+            active_weighted_energy += (
+                fallback_intervals[index]
+                * (segment_end - segment_start)
+                / INTERVAL_SECONDS
+            )
+
+        if active_weighted_energy <= 0.0:
+            return 0.0
+        return forecast.energy_kwh / active_weighted_energy
+
     def forecast_energy_between(
         self,
         start: datetime,
@@ -1147,6 +1218,7 @@ class ConsumptionProfileTracker:
         day_type_samples: list[int] = []
         total_days = 0
         newest: date | None = None
+        fallback_scales: dict[date, float] = {}
         for segment_start, segment_end, midpoint in usable_segments:
             local_date = midpoint.date()
             forecast = forecasts.get(local_date)
@@ -1173,7 +1245,20 @@ class ConsumptionProfileTracker:
 
             seconds = segment_end - segment_start
             index = _interval_index(midpoint.timetz().replace(tzinfo=None))
-            portion = forecast.intervals_kwh[index] * seconds / INTERVAL_SECONDS
+            scale = fallback_scales.get(local_date)
+            if scale is None:
+                scale = self._legacy_fallback_scale(
+                    local_date,
+                    forecast,
+                    exclude_charging_windows=exclude_charging_windows,
+                )
+                fallback_scales[local_date] = scale
+            portion = (
+                forecast.intervals_kwh[index]
+                * seconds
+                / INTERVAL_SECONDS
+                * scale
+            )
             energy += max(0.0, portion)
             aggregate_intervals[index] += max(0.0, portion)
             expected_seconds += seconds

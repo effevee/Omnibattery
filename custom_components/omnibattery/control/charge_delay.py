@@ -342,7 +342,7 @@ class ChargeDelayManager:
                 exclude_charging_windows=True,
                 fallback="legacy_daily",
             )
-            if forecast.mature and forecast.source == "profile":
+            if forecast.source in {"profile", "legacy_daily"}:
                 return forecast
         except Exception as exc:  # noqa: BLE001
             _LOGGER.debug("Charge Delay: profile forecast failed: %s", exc)
@@ -472,7 +472,7 @@ class ChargeDelayManager:
                     profile_balance.coverage_ratio, 3
                 )
                 status["profile_days"] = profile_balance.total_days
-                status["profile_fallback_reason"] = None
+                status["profile_fallback_reason"] = profile_balance.fallback_reason
             else:
                 avg_consumption_kwh = ctrl._consumption_tracker.get_avg_daily_consumption()
             if profile_balance is None and forecast_is_remaining:
@@ -586,7 +586,7 @@ class ChargeDelayManager:
                 profile_forecast.coverage_ratio, 3
             )
             status["profile_days"] = profile_forecast.total_days
-            status["profile_fallback_reason"] = None
+            status["profile_fallback_reason"] = profile_forecast.fallback_reason
         elif window_hours_per_day > 0 and hours_to_t_end > 0:
             avg_consumption = ctrl._consumption_tracker.get_avg_daily_consumption()
             remaining_window_hours = ctrl._consumption_tracker.consumption_window_hours_in_range(
