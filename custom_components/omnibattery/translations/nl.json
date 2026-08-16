@@ -1438,6 +1438,9 @@
       "expected_home_consumption_profile": {
         "name": "Verwacht huishoudelijk verbruiksprofiel"
       },
+      "consumption_profile_capture": {
+        "name": "Huidige verbruiksprofielregistratie"
+      },
       "system_pd_control_quality": {
         "name": "PD-Regelkwaliteit",
         "state": {

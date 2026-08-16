@@ -1438,6 +1438,9 @@
       "expected_home_consumption_profile": {
         "name": "Perfil de consum domèstic esperat"
       },
+      "consumption_profile_capture": {
+        "name": "Captura del perfil de consum actual"
+      },
       "system_pd_control_quality": {
         "name": "Qualitat de Control PD",
         "state": {

@@ -1438,6 +1438,9 @@
       "expected_home_consumption_profile": {
         "name": "Erwartetes Haushaltsverbrauchsprofil"
       },
+      "consumption_profile_capture": {
+        "name": "Aktuelle Verbrauchsprofilerfassung"
+      },
       "system_pd_control_quality": {
         "name": "PD-Regelqualität",
         "state": {

@@ -754,6 +754,50 @@ class ConsumptionProfileTracker:
                 existing.coverage_s[index] = parsed.coverage_s[index]
         existing.complete = existing.complete or parsed.complete
 
+    def current_day_capture(self, local_date: date | None = None) -> dict[str, Any]:
+        """Return the raw live capture for one local day.
+
+        This is intentionally separate from the forecast: the current day is
+        persisted while it is being collected, but it is not eligible for
+        training until it is complete. The bounded snapshot is used by the
+        diagnostic capture sensor so users can verify the learning stream.
+        """
+        local_date = local_date or self._today()
+        day = self._days.get(local_date)
+        energy = list(day.energy_kwh) if day is not None else [0.0] * INTERVAL_COUNT
+        coverage = (
+            list(day.coverage_s)
+            if day is not None
+            else [0.0] * INTERVAL_COUNT
+        )
+        safe_energy = []
+        for value in energy:
+            parsed = _finite_non_negative(value)
+            safe_energy.append(round(parsed, 6) if parsed is not None else 0.0)
+        safe_coverage = []
+        for value in coverage:
+            parsed = _finite_non_negative(value)
+            safe_coverage.append(round(parsed, 3) if parsed is not None else 0.0)
+        total_coverage = sum(safe_coverage)
+        coverage_ratio = min(
+            1.0,
+            max(0.0, total_coverage / (INTERVAL_COUNT * INTERVAL_SECONDS)),
+        )
+        hourly = [
+            round(sum(safe_energy[index:index + 4]), 6)
+            for index in range(0, INTERVAL_COUNT, 4)
+        ]
+        return {
+            "date": local_date.isoformat(),
+            "complete": bool(day.complete) if day is not None else False,
+            "energy_kwh": round(sum(safe_energy), 6),
+            "hourly_energy_kwh": hourly,
+            "interval_energy_kwh": safe_energy,
+            "interval_coverage_s": safe_coverage,
+            "valid_intervals": day.valid_interval_count() if day is not None else 0,
+            "coverage_ratio": round(coverage_ratio, 6),
+        }
+
     # ------------------------------------------------------------------
     # Forecast construction
     # ------------------------------------------------------------------

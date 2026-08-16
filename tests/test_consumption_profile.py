@@ -229,6 +229,42 @@ def test_partial_current_day_is_kept_but_not_used_as_training_sample():
     assert forecast.source == "legacy_daily"
 
 
+def test_current_day_capture_exposes_raw_energy_and_coverage():
+    profile = _profile()
+    today = date.today()
+    start = datetime.combine(today, datetime.min.time()).replace(
+        hour=10,
+        tzinfo=MADRID,
+    )
+    profile.record_power_sample(1.0, local_time=start, monotonic_time=0.0)
+    profile.record_power_sample(
+        1.0,
+        local_time=start + timedelta(minutes=5),
+        monotonic_time=300.0,
+    )
+    profile.record_power_sample(
+        1.0,
+        local_time=start + timedelta(minutes=10),
+        monotonic_time=600.0,
+    )
+    profile.record_power_sample(
+        1.0,
+        local_time=start + timedelta(minutes=15),
+        monotonic_time=900.0,
+    )
+
+    capture = profile.current_day_capture(today)
+
+    assert capture["date"] == today.isoformat()
+    assert capture["complete"] is False
+    assert capture["energy_kwh"] == pytest.approx(0.25)
+    assert capture["hourly_energy_kwh"][10] == pytest.approx(0.25)
+    assert capture["interval_energy_kwh"][40] == pytest.approx(0.25)
+    assert capture["interval_coverage_s"][40] == pytest.approx(900.0)
+    assert capture["valid_intervals"] == 1
+    assert capture["coverage_ratio"] == pytest.approx(round(900 / 86400, 6))
+
+
 def test_four_weekday_samples_are_weighted_by_age_and_profile_becomes_mature():
     # The current date in the test environment is a Saturday.  These four
     # Mondays therefore receive weights 1, .75, .50 and .25.

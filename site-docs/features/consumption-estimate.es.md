@@ -131,3 +131,10 @@ los 96 intervalos/valores horarios, el origen, la madurez, la cobertura y los
 metadatos del fallback. Los diagnósticos de la integración contienen el resumen
 acotado por día. La carga predictiva, el Retraso de Carga
 Solar y Precio Dinámico solo usan el perfil cuando cumple el contrato de madurez.
+
+Para comprobar cómo se llena el día actual, el sensor de diagnóstico
+`sensor.omnibattery_consumption_profile_capture` muestra los kWh capturados hasta
+el momento. Sus atributos `hourly_capture_kwh`, `interval_capture_kwh` e
+`interval_coverage_s` permiten localizar el consumo en las 24 horas y en los 96
+intervalos de 15 minutos. Este sensor muestra la captura cruda del día actual;
+no es la previsión y se reinicia al comenzar el siguiente día local.

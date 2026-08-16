@@ -130,3 +130,10 @@ forecast, 96-interval/hourly values, source, maturity, coverage and fallback
 metadata. The integration diagnostics endpoint contains the bounded day-level
 learning summary. Predictive charging, Solar Charge Delay and Dynamic Pricing
 use the profile only when the maturity contract is satisfied.
+
+To check how the current day is being captured, the diagnostic sensor
+`sensor.omnibattery_consumption_profile_capture` reports the kWh captured so far.
+Its `hourly_capture_kwh`, `interval_capture_kwh` and `interval_coverage_s`
+attributes locate that energy across the 24 hours and 96 quarter-hour bins. This
+sensor exposes the raw current-day capture rather than the forecast and resets at
+the next local day.

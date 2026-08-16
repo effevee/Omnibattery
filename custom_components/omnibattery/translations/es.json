@@ -1438,6 +1438,9 @@
       "expected_home_consumption_profile": {
         "name": "Perfil de consumo doméstico esperado"
       },
+      "consumption_profile_capture": {
+        "name": "Captura del perfil de consumo actual"
+      },
       "home_consumption": {
         "name": "Consumo de la Casa"
       },

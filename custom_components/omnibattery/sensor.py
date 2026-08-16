@@ -188,6 +188,7 @@ async def async_setup_entry(
     # available even while it is learning; control consumers explicitly inspect
     # the maturity/source metadata before using it.
     if controller and getattr(controller, "_consumption_tracker", None) is not None:
+        entities.append(ConsumptionProfileCaptureSensor(controller))
         entities.append(ConsumptionProfileSensor(controller))
 
 
@@ -1150,6 +1151,67 @@ class ConsumptionProfileSensor(SensorEntity):
             "fallback_reason": forecast.fallback_reason,
             "peak_hour": peak_index,
             "peak_hour_kwh": round(hourly[peak_index], 6) if hourly else 0.0,
+        }
+
+    @property
+    def device_info(self):
+        return {
+            "identifiers": {(DOMAIN, "marstek_venus_system")},
+            "name": "Omnibattery System",
+            "manufacturer": "Omnibattery",
+            "model": "Multi-Battery System",
+        }
+
+
+class ConsumptionProfileCaptureSensor(SensorEntity):
+    """Live raw energy captured for the current profile day."""
+
+    _attr_has_entity_name = True
+    _attr_translation_key = "consumption_profile_capture"
+    _attr_unique_id = f"{SYSTEM_UNIQUE_ID_PREFIX}consumption_profile_capture"
+    _attr_device_class = SensorDeviceClass.ENERGY
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = "kWh"
+    _attr_suggested_display_precision = 3
+    _attr_icon = "mdi:chart-timeline-variant-shimmer"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_should_poll = True
+
+    def __init__(self, controller) -> None:
+        """Initialize the live profile-capture sensor."""
+        self._controller = controller
+        self.entity_id = system_entity_id("sensor", "consumption_profile_capture")
+
+    def _capture(self):
+        tracker = getattr(self._controller, "_consumption_tracker", None)
+        profile = getattr(tracker, "consumption_profile", None)
+        if profile is None:
+            return None
+        try:
+            return profile.current_day_capture()
+        except Exception as exc:  # noqa: BLE001
+            _LOGGER.debug("Consumption profile capture unavailable: %s", exc)
+            return None
+
+    @property
+    def native_value(self) -> float | None:
+        capture = self._capture()
+        return round(capture["energy_kwh"], 3) if capture is not None else None
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        capture = self._capture()
+        if capture is None:
+            return {"state": "unavailable"}
+        return {
+            "capture_date": capture["date"],
+            "capture_complete": capture["complete"],
+            "interval_minutes": INTERVAL_MINUTES,
+            "capture_valid_intervals": capture["valid_intervals"],
+            "capture_coverage_ratio": capture["coverage_ratio"],
+            "hourly_capture_kwh": capture["hourly_energy_kwh"],
+            "interval_capture_kwh": capture["interval_energy_kwh"],
+            "interval_coverage_s": capture["interval_coverage_s"],
         }
 
     @property
