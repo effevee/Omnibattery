@@ -139,9 +139,10 @@ El sensor también expone diagnósticos del registro de bloqueos como atributos:
 | `oscillating` | Cabeceo — usa un perfil más suave o sube el deadband |
 | `sluggish` | Demasiado lento — usa un perfil más agresivo |
 | `battery_limited` | Batería llena/vacía o en su límite de potencia; el PD no puede actuar (no es problema de ajuste) |
-| `collecting_data` | Calentando |
+| `blocked` | La dirección que exige el error de red no está permitida (retardo de carga, franja horaria, precio, pausa por VE); el PD está bloqueado, no mal ajustado |
+| `collecting_data` | Calentando, o la métrica lleva más de 5 min sin avanzar |
 
-Atributos: `rms_error_w` (error medio de seguimiento), `oscillation_per_min`, los `kp` / `kd` / `deadband_w` / `max_power_change_w` activos, y `active_profile`. La métrica es una media móvil de 60 s y se pausa brevemente tras un cambio de objetivo y mientras está limitada por batería, así que espera 1–2 min tras un cambio.
+Atributos: `rms_error_w` (error medio de seguimiento), `oscillation_per_min`, `metric_age_s` (segundos desde el último avance de la métrica), los `kp` / `kd` / `deadband_w` / `max_power_change_w` activos, y `active_profile`. La métrica es una media móvil de 60 s y se pausa brevemente tras un cambio de objetivo y mientras está limitada por batería o bloqueada, así que espera 1–2 min tras un cambio.
 
 ### Sensores agregados
 

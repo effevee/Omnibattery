@@ -151,9 +151,10 @@ The sensor also exposes blocker diagnostics as attributes:
 | `oscillating` | Hunting — use a smoother profile or raise the deadband |
 | `sluggish` | Too slow — use a more aggressive profile |
 | `battery_limited` | Battery full/empty or at its power rail; the PD cannot act (not a tuning issue) |
-| `collecting_data` | Warming up |
+| `blocked` | The direction the grid error demands is not allowed (charge delay, time slot, price, EV pause); the PD is muzzled, not mistuned |
+| `collecting_data` | Warming up, or the metric has not advanced for more than 5 min |
 
-Attributes: `rms_error_w` (average grid-tracking error), `oscillation_per_min`, the active `kp` / `kd` / `deadband_w` / `max_power_change_w`, and `active_profile`. The metric is a 60 s rolling average and is paused briefly after a target change and while battery-limited, so allow 1–2 min after a change.
+Attributes: `rms_error_w` (average grid-tracking error), `oscillation_per_min`, `metric_age_s` (seconds since the metric last advanced), the active `kp` / `kd` / `deadband_w` / `max_power_change_w`, and `active_profile`. The metric is a 60 s rolling average and is paused briefly after a target change and while battery-limited or blocked, so allow 1–2 min after a change.
 
 ### Aggregate sensors
 

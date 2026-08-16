@@ -1449,6 +1449,7 @@
           "oscillating": "Oscillerend",
           "sluggish": "Traag",
           "battery_limited": "Batterijbegrensd",
+          "blocked": "Geblokkeerd",
           "collecting_data": "Gegevens verzamelen"
         }
       },

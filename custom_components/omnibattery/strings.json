@@ -1455,6 +1455,7 @@
           "oscillating": "Oscillating",
           "sluggish": "Sluggish",
           "battery_limited": "Battery limited",
+          "blocked": "Blocked",
           "collecting_data": "Collecting data"
         }
       },

@@ -1461,6 +1461,7 @@
           "oscillating": "Oscillant",
           "sluggish": "Lent",
           "battery_limited": "Limité par batterie",
+          "blocked": "Bloqué",
           "collecting_data": "Collecte de données"
         }
       },

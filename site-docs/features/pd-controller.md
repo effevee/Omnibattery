@@ -91,9 +91,10 @@ The **state is a verdict**, not a number:
 | Oscillating | Hunting (frequent charge↔discharge) | Use a smoother profile, or raise the deadband |
 | Sluggish | Too slow to catch up | Use a more aggressive profile |
 | Battery limited | Battery full/empty or at its power rail — the PD cannot act | Not a tuning issue |
-| Collecting data | Warming up (just started) | Wait |
+| Blocked | The needed direction is not allowed (charge delay, time slot, price, EV pause) — the PD is muzzled | Not a tuning issue |
+| Collecting data | Warming up (just started), or the metric has not advanced for over 5 min | Wait |
 
-The attributes carry the raw figures: `rms_error_w` (average grid-tracking error), `oscillation_per_min`, the active gains, and `active_profile`.
+The attributes carry the raw figures: `rms_error_w` (average grid-tracking error), `oscillation_per_min`, `metric_age_s`, the active gains, and `active_profile`.
 
 **How to tune:**
 
