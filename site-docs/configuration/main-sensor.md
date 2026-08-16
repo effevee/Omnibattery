@@ -45,16 +45,24 @@ The integration caps battery charging so that **projected grid import never exce
 
 ---
 
-## Solar forecast sensor *(optional)*
+## Solar forecast sensors *(optional)*
 
-Sensor providing today's estimated solar production in **kWh** or **Wh**.
+For new configurations, select the sensor providing the solar production
+**remaining today** in **kWh** or **Wh**. This value is used directly for
+intraday decisions, without subtracting measured production again.
+
+The whole-day forecast field remains available for untouched legacy entries.
+Saving **Remaining Today** replaces and removes that legacy field, resolving the
+transition Repair. Existing installations can continue working until their
+sensor is changed.
 
 Configuring it here makes it available to:
 
 - **Predictive charging** (Time Slot and Dynamic Pricing modes)
 - **Solar charge delay**
 
-You can also leave it blank and configure it later in those specific sections.
+You can also leave it blank and configure it later from the **Sensors** section
+of the integration options.
 
 ---
 
@@ -70,4 +78,4 @@ There is **no household consumption sensor field** in setup — the integration 
 
 **Home consumption = Grid power + Battery AC power + Solar power**
 
-This is the value shown by the energy-flow diagram and the `sensor.marstek_venus_system_home_consumption` sensor, and it feeds the 7-day history used by predictive charging and charge delay. Accumulation runs during the solar+battery window only (outside the configured charging time slot; all day if none); the counter resets at midnight and survives HA restarts.
+This is the value shown by the energy-flow diagram and the `sensor.marstek_venus_system_home_consumption` sensor, and it feeds the 7-day history used by predictive charging and charge delay. Accumulation runs for the full local day, including predictive charging windows; the battery's negative AC power cancels grid energy used to charge it. The counter resets at midnight and survives HA restarts.

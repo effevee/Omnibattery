@@ -509,7 +509,10 @@ class HoymilesMqttDriver(BatteryDriver):
 
     def _ensure_keepalive(self) -> None:
         if self._keepalive_task is None or self._keepalive_task.done():
-            self._keepalive_task = self.hass.async_create_task(self._keepalive_loop())
+            self._keepalive_task = self.hass.async_create_background_task(
+                self._keepalive_loop(),
+                "omnibattery_hoymiles_keepalive",
+            )
 
     async def _keepalive_loop(self) -> None:
         delay_s = _KEEPALIVE_S

@@ -64,6 +64,15 @@ La integración monitoriza los registros `Alarm Status` y `Fault Status` de la b
 3. Revisa las notificaciones de HA: la evaluación de las 00:05 reporta el resultado.
 4. Asegúrate de que el balance energético realmente requiere carga (puede que haya suficiente energía).
 
+### El origen del consumo indica `legacy_daily`
+
+Es normal mientras el perfil de 28 días está aprendiendo o cuando los intervalos
+solicitados no cumplen su contrato de cobertura. Comprueba
+`sensor.omnibattery_expected_home_consumption_profile` y los diagnósticos de la
+integración. Cambiar la fuente, un ajuste de cargas o la zona horaria
+invalida deliberadamente el perfil guardado; después el backfill del Recorder lo
+reconstruye en segundo plano. Los huecos de más de cinco minutos no se interpolan.
+
 ---
 
 ## El dispositivo de medida no está disponible o pierde conexión

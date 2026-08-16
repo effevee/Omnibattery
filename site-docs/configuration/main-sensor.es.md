@@ -45,16 +45,24 @@ La integración limita la carga de las baterías para que la **importación de r
 
 ---
 
-## Sensor de previsión solar *(opcional)*
+## Sensores de previsión solar *(opcional)*
 
-Sensor que proporciona la producción solar estimada para hoy, en **kWh** o **Wh**.
+Para configuraciones nuevas, selecciona el sensor que proporciona la producción
+solar **restante de hoy** en **kWh** o **Wh**. Este valor se utiliza directamente
+en las decisiones intradía, sin volver a restar la producción medida.
+
+El campo de previsión del día completo se mantiene para entradas legadas que no
+se han modificado. Al guardar **Restante de hoy**, sustituye y elimina ese campo
+legado, resolviendo el Repair de transición. Las instalaciones existentes pueden
+seguir funcionando hasta que cambien el sensor.
 
 Configurarlo aquí lo pone a disposición de:
 
 - **Carga predictiva** (modos Franja Horaria y Precio Dinámico)
 - **Retraso de carga solar**
 
-También puedes dejarlo en blanco y configurarlo más tarde en esas secciones específicas.
+También puedes dejarlo en blanco y configurarlo más tarde desde la sección
+**Sensores** de las opciones de la integración.
 
 ---
 
@@ -70,4 +78,4 @@ Sensor de potencia de producción fotovoltaica (W o kW) en tiempo real de un inv
 
 **Consumo del hogar = Potencia de red + Potencia AC de baterías + Producción solar**
 
-Es el valor que muestra el diagrama de flujo de energía y el sensor `sensor.marstek_venus_system_home_consumption`, y alimenta el historial de 7 días que usan la carga predictiva y el retraso de carga. La acumulación corre solo durante la franja solar+batería (fuera de la franja de carga; todo el día si no hay franja); el contador se reinicia a medianoche y sobrevive reinicios de HA.
+Es el valor que muestra el diagrama de flujo de energía y el sensor `sensor.marstek_venus_system_home_consumption`, y alimenta el historial de 7 días que usan la carga predictiva y el retraso de carga. La acumulación cubre todo el día local, incluidas las franjas de carga predictiva; la potencia AC negativa de la batería cancela la energía de red usada para cargarla. El contador se reinicia a medianoche y sobrevive reinicios de HA.

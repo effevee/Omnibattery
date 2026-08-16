@@ -95,6 +95,14 @@ AGGREGATE_SENSOR_DEFINITIONS = [
 ]
 
 
+# Grid, solar and battery telemetry arrive on independent schedules. During a
+# battery poll, their instantaneous balance can therefore become briefly
+# negative even though the household is still consuming power. Keep the last
+# coherent positive estimate for the duration of one normal telemetry gap;
+# after that, expose the estimate as unknown instead of publishing a false 0 W.
+HOME_CONSUMPTION_HOLD_S = 15.0
+
+
 # Signed net cell power across all batteries (+charge / -discharge), added only
 # for systems with DC-coupled PV (vA/vD). Mirrors the dashboard's per-battery
 # cell-power formula so the SOC card's Charge/Discharge blocks can link to a value
@@ -285,6 +293,11 @@ class MarstekVenusAggregateSensor(RestoreEntity, SensorEntity):
         self._daily_source_key = _DAILY_AGGREGATE_SOURCE_KEYS.get(definition["key"])
         self._daily_value: float | None = None
         self._daily_reset_date = dt_util.now().date().isoformat()
+
+        self._last_valid_home_consumption: float | None = None
+        self._last_valid_home_consumption_at = None
+        self._home_consumption_raw_balance: float | None = None
+        self._home_consumption_quality = "unknown"
 
     async def async_added_to_hass(self) -> None:
         """Restore daily aggregates before coordinator callbacks can publish."""
@@ -567,10 +580,18 @@ class MarstekVenusAggregateSensor(RestoreEntity, SensorEntity):
 
     @property
     def extra_state_attributes(self):
-        """Expose the local reset date for safe same-day restoration."""
-        if self._daily_source_key is None:
-            return None
-        return {"reset_date": self._daily_reset_date}
+        """Expose diagnostics for restored daily values and home estimates."""
+        attributes = {}
+        if self._daily_source_key is not None:
+            attributes["reset_date"] = self._daily_reset_date
+
+        if self.definition["key"] == "home_consumption":
+            raw_balance = self._home_consumption_raw_balance
+            if raw_balance is not None:
+                attributes["raw_balance_w"] = raw_balance
+            attributes["balance_quality"] = self._home_consumption_quality
+
+        return attributes or None
 
     def _read_power_w(self, entity_id: str) -> float | None:
         """Read a power entity and return its value in Watts, or None if unusable."""
@@ -620,7 +641,42 @@ class MarstekVenusAggregateSensor(RestoreEntity, SensorEntity):
             if solar_w is not None:
                 total += solar_w
 
-        return round(max(0.0, total))
+        raw_balance = round(total, self.definition.get("precision", 0))
+        self._home_consumption_raw_balance = raw_balance
+
+        # A negative household load is physically impossible. It is normally
+        # caused here by the independently polled grid/solar/battery values
+        # being sampled at different instants while the batteries are charging.
+        # Do not turn that transient into a false 0 W reading: hold the last
+        # positive estimate for one normal telemetry gap instead.
+        if total <= 0:
+            last_value = self._last_valid_home_consumption
+            last_at = self._last_valid_home_consumption_at
+            if last_value is not None and last_at is not None:
+                held_s = (dt_util.utcnow() - last_at).total_seconds()
+                if 0 <= held_s <= HOME_CONSUMPTION_HOLD_S:
+                    self._home_consumption_quality = "held_last_valid"
+                    _LOGGER.debug(
+                        "Holding last valid home consumption %.0f W for %.1f s "
+                        "after negative balance %.0f W",
+                        last_value,
+                        held_s,
+                        raw_balance,
+                    )
+                    return last_value
+
+            self._home_consumption_quality = "invalid_balance"
+            return None
+
+        value = round(total, self.definition.get("precision", 0))
+        if value <= 0:
+            self._home_consumption_quality = "invalid_balance"
+            return None
+
+        self._last_valid_home_consumption = value
+        self._last_valid_home_consumption_at = dt_util.utcnow()
+        self._home_consumption_quality = "calculated"
+        return value
 
     @property
     def device_info(self):

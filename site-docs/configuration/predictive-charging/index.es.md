@@ -1,6 +1,6 @@
 # Carga predictiva
 
-La carga predictiva es una función **opcional** que carga las baterías desde la red cuando el balance energético previsto para el día siguiente es negativo.
+La carga predictiva es una función **opcional** que carga las baterías desde la red cuando el balance energético previsto para lo que queda del día es negativo.
 
 ## Lógica de decisión
 
@@ -12,7 +12,7 @@ Si no:
 ```
 
 - **Batería utilizable**: energía actual por encima del SOC mínimo configurado.
-- **Previsión solar**: producción estimada del día siguiente (sensor Solcast/Forecast.Solar).
+- **Previsión solar**: preferiblemente la producción restante de hoy (sensor Solcast/Forecast.Solar). El sensor del día completo se mantiene como fallback legado durante la transición.
 - **Consumo esperado**: media móvil de 7 días. Ver [Estimación del consumo diario](../../features/consumption-estimate.md).
 
 ---
@@ -56,6 +56,16 @@ El slider **SOC Mínimo Garantizado** opcional (pestaña Control, `0` = desactiv
 Se reactiva con histéresis: una vez que el SOC recupera el suelo configurado, la carga se detiene si el suelo era la única razón para cargar; se rearma cuando el SOC baja a `suelo − 5 %`. Configúralo con el slider `number.*_predictive_min_soc_floor`, junto al switch **SOC Mínimo Garantizado**.
 
 ---
+
+## Origen de la previsión de consumo
+
+La estimación diaria se conserva como fallback de compatibilidad, pero las
+instalaciones maduras usan el perfil local de 15 minutos descrito en
+[Estimación diaria y horaria del consumo](../../features/consumption-estimate.es.md).
+Precio Dinámico y sus reevaluaciones intradía solicitan únicamente el horizonte
+local restante. Las franjas de carga predictiva no se restan de la demanda del hogar. Los atributos de la
+decisión identifican el origen como `profile` o `legacy_daily`, junto con la
+cobertura y el número de días aprendidos.
 
 ## Modos disponibles
 

@@ -76,6 +76,9 @@ MULTI_BATTERY_SELECTION_HOLD_SECONDS = 120
 CONF_ENABLE_PREDICTIVE_CHARGING = "enable_predictive_charging"
 CONF_CHARGING_TIME_SLOT = "charging_time_slot"
 CONF_SOLAR_FORECAST_SENSOR = "solar_forecast_sensor"
+# Explicit post-now forecast.  The old key remains a whole-day ``today`` value
+# for backwards compatibility and must not be silently reinterpreted.
+CONF_SOLAR_FORECAST_REMAINING_SENSOR = "solar_forecast_remaining_sensor"
 CONF_SOLAR_PRODUCTION_SENSOR = "solar_production_sensor"
 CONF_HOUSEHOLD_CONSUMPTION_SENSOR = "household_consumption_sensor"  # legacy; migrated out in v6
 CONF_MAX_CONTRACTED_POWER = "max_contracted_power"
@@ -325,10 +328,17 @@ SLOW_SENSOR_WARNING_INTERVAL_S = 10.0
 # shorten the promised tolerance.
 MAX_SENSOR_STALE_S = 65.0
 
-# Consecutive real main-sensor intervals at the same cadence class before creating
-# or clearing the slow-sensor repair. Debouncing prevents a single outage/restart
-# gap from flagging an otherwise fast sensor.
+# Consecutive slow main-sensor intervals before the slow-sensor repair is raised.
+# Debouncing prevents a single outage/restart gap from flagging an otherwise fast
+# sensor. Clearing uses SLOW_SENSOR_RECOVERY_INTERVALS instead.
 SLOW_SENSOR_WARN_INTERVALS = 3
+
+# Consecutive fast intervals before an existing slow-sensor repair is cleared.
+# Deliberately much longer than SLOW_SENSOR_WARN_INTERVALS: clearing is the
+# hysteresis side, and a sensor hovering around the threshold would otherwise
+# create and delete the repair over and over. At a 3 s meter this is about a
+# minute of sustained fast cadence.
+SLOW_SENSOR_RECOVERY_INTERVALS = 20
 
 # How often the dynamic-pricing handler re-parses the price sensor purely to
 # refresh _price_data_status for the health check. The parse itself is cheap but

@@ -168,6 +168,17 @@ Available under the `sensor.marstek_venus_system_*` prefix, summing values acros
 - `system_alarm_status` — Aggregated alarm state across all batteries (`OK` / `Warning` / `Fault`); attributes list active conditions per battery
 - `system_home_consumption` — Instantaneous home consumption (W). Reads the household sensor when configured, otherwise derives it from `grid + battery AC + solar`.
 - `system_daily_home_energy` — Today's home consumption (kWh), integrated from the Home Consumption value above. Resets at midnight (local time).
+
+### Expected home consumption profile
+
+`sensor.omnibattery_expected_home_consumption_profile` is a diagnostic
+sensor for the learned 28-day profile. Its state is today's forecast in kWh.
+Attributes include `interval_profile_kwh`, `hourly_profile_kwh`, `target_date`,
+`source`, `mature`, `coverage_ratio`, `weekday_samples`, `day_type_samples`,
+`total_profile_days` and `newest_profile_date`. The bounded day-level summary is
+available through the integration diagnostics endpoint.
+The source is `profile` only when the maturity contract is satisfied;
+`legacy_daily` identifies the fallback.
 - `system_battery_power` — Total system power
 - `system_battery_soc` — System average SOC
 - `system_total_charging_energy` — Total system charging energy

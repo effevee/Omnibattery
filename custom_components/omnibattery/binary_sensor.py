@@ -392,6 +392,7 @@ class PredictiveChargingStatusSensor(BinarySensorEntity):
         "daily_consumption_history", "history_days",
         "predictive_target_soc_pct", "selected_hours",
         # per-cycle accumulators
+        "household_consumption_full_day_kwh",
         "household_consumption_battery_window_kwh", "solar_production_today_kwh",
         # last-decision diagnostic dump (changes on every evaluation)
         "stored_energy_kwh", "usable_energy_kwh", "min_reserve_kwh",
@@ -401,6 +402,7 @@ class PredictiveChargingStatusSensor(BinarySensorEntity):
         "consumption_scope", "daily_avg_consumption_kwh", "consumed_today_kwh",
         "remaining_consumption_kwh", "remaining_solar_kwh",
         "consumption_rate_kwh_h", "consumption_accumulator_ready",
+        "consumption_accumulator_source",
         "decision_reason",
     })
 
@@ -467,13 +469,24 @@ class PredictiveChargingStatusSensor(BinarySensorEntity):
 
         if self.controller.solar_forecast_sensor:
             attrs["solar_forecast_sensor"] = self.controller.solar_forecast_sensor
+        if getattr(self.controller, "solar_forecast_remaining_sensor", None):
+            attrs["solar_forecast_remaining_sensor"] = self.controller.solar_forecast_remaining_sensor
+        if getattr(self.controller, "solar_forecast_source", None):
+            attrs["solar_forecast_source"] = self.controller.solar_forecast_source
+        if getattr(self.controller, "solar_forecast_diagnostic_source", None):
+            attrs["solar_forecast_diagnostic_source"] = self.controller.solar_forecast_diagnostic_source
 
         attrs["max_contracted_power"] = self.controller.max_contracted_power
 
         # Home consumption diagnostics: home power is always derived
         # (grid + battery AC + solar); the household sensor was removed.
         attrs["consumption_source"] = "derived (grid + battery AC + solar)"
-        attrs["household_consumption_battery_window_kwh"] = round(self.controller._household_energy_accumulator, 2)
+        full_day_consumption = round(self.controller._household_energy_accumulator, 2)
+        attrs["household_consumption_full_day_kwh"] = full_day_consumption
+        # Compatibility alias retained for existing dashboards. The value now
+        # follows the corrected full-day contract despite the legacy name.
+        attrs["household_consumption_battery_window_kwh"] = full_day_consumption
+        attrs["consumption_history_scope"] = "full_day_home"
         if self.controller._household_accumulator_date is not None:
             attrs["household_accumulator_date"] = self.controller._household_accumulator_date.isoformat()
         # Measured solar produced today (real solar sensor + Venus MPPT)
@@ -505,6 +518,7 @@ class PredictiveChargingStatusSensor(BinarySensorEntity):
                 "remaining_solar_kwh": decision.get("remaining_solar_kwh"),
                 "consumption_rate_kwh_h": decision.get("consumption_rate_kwh_h"),
                 "consumption_accumulator_ready": decision.get("consumption_accumulator_ready"),
+                "consumption_accumulator_source": decision.get("consumption_accumulator_source"),
                 "total_available_kwh": decision.get("total_available_kwh"),
                 "energy_deficit_kwh": decision.get("energy_deficit_kwh"),
                 "planned_grid_charge_kwh": decision.get("planned_grid_charge_kwh"),

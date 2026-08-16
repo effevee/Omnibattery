@@ -48,6 +48,7 @@ const I18N = {
     placeholderMsg: "This view is coming in a future phase. For now, use the Overview view.",
     cardFlow: "Energy flow", cardSoc: "System status", cardDaily: "Energy today",
     cardWeekly: "Weekly energy", cardPower: "Power", cardSocToday: "SOC · today",
+    cardProfile: "Expected consumption", profileLearning: "Learning", profileMature: "Mature", profileFallback: "Fallback", profileSource: "Source",
     grid: "Grid", solar: "Solar", home: "Home", battery: "Battery",
     excludedDevices: "Excluded devices",
     importing: "Importing", exporting: "Exporting",
@@ -119,6 +120,7 @@ const I18N = {
     placeholderMsg: "Esta vista llegará en una próxima fase. Por ahora, usa la vista Resumen.",
     cardFlow: "Flujo de energía", cardSoc: "Estado del sistema", cardDaily: "Energía hoy",
     cardWeekly: "Energía semanal", cardPower: "Potencias", cardSocToday: "SOC · hoy",
+    cardProfile: "Consumo esperado", profileLearning: "Aprendiendo", profileMature: "Maduro", profileFallback: "Fallback", profileSource: "Fuente",
     grid: "Red", solar: "Solar", home: "Casa", battery: "Batería",
     excludedDevices: "Disp. excluidos",
     importing: "Importando", exporting: "Exportando",
@@ -190,6 +192,7 @@ const I18N = {
     placeholderMsg: "Aquesta vista arribarà en una fase futura. De moment, fes servir la vista Resum.",
     cardFlow: "Flux d'energia", cardSoc: "Estat del sistema", cardDaily: "Energia avui",
     cardWeekly: "Energia setmanal", cardPower: "Potències", cardSocToday: "SOC · avui",
+    cardProfile: "Consum esperat", profileLearning: "Aprenent", profileMature: "Madur", profileFallback: "Fallback", profileSource: "Font",
     grid: "Xarxa", solar: "Solar", home: "Casa", battery: "Bateria",
     excludedDevices: "Disp. exclosos",
     importing: "Important", exporting: "Exportant",
@@ -257,6 +260,7 @@ const I18N = {
     placeholderMsg: "Diese Ansicht kommt in einer späteren Phase. Nutze vorerst die Übersicht.",
     cardFlow: "Energiefluss", cardSoc: "Systemstatus", cardDaily: "Energie heute",
     cardWeekly: "Wochenenergie", cardPower: "Leistung", cardSocToday: "SOC · heute",
+    cardProfile: "Erwarteter Verbrauch", profileLearning: "Lernt", profileMature: "Ausgereift", profileFallback: "Fallback", profileSource: "Quelle",
     grid: "Netz", solar: "Solar", home: "Haus", battery: "Batterie",
     excludedDevices: "Ausgeschl. Geräte",
     importing: "Bezug", exporting: "Einspeisung",
@@ -324,6 +328,7 @@ const I18N = {
     placeholderMsg: "Cette vue arrivera dans une phase ultérieure. Pour l'instant, utilisez la vue Résumé.",
     cardFlow: "Flux d'énergie", cardSoc: "État du système", cardDaily: "Énergie aujourd'hui",
     cardWeekly: "Énergie hebdomadaire", cardPower: "Puissances", cardSocToday: "SOC · aujourd'hui",
+    cardProfile: "Consommation prévue", profileLearning: "Apprentissage", profileMature: "Mature", profileFallback: "Secours", profileSource: "Source",
     grid: "Réseau", solar: "Solaire", home: "Maison", battery: "Batterie",
     excludedDevices: "Appareils exclus",
     importing: "Importation", exporting: "Exportation",
@@ -391,6 +396,7 @@ const I18N = {
     placeholderMsg: "Deze weergave komt in een latere fase. Gebruik voorlopig het Overzicht.",
     cardFlow: "Energiestroom", cardSoc: "Systeemstatus", cardDaily: "Energie vandaag",
     cardWeekly: "Energie per week", cardPower: "Vermogen", cardSocToday: "SOC · vandaag",
+    cardProfile: "Verwacht verbruik", profileLearning: "Leren", profileMature: "Volwassen", profileFallback: "Fallback", profileSource: "Bron",
     grid: "Net", solar: "Zon", home: "Huis", battery: "Batterij",
     excludedDevices: "Uitgesloten app.",
     importing: "Invoer", exporting: "Teruglevering",
@@ -504,6 +510,7 @@ const K = {
   sysDailyHome: "system_daily_home_energy", // exact daily home consumption (kWh)
   sysDailyGridImport: "system_daily_grid_import_energy", // exact daily grid import (kWh)
   sysDailyGridExport: "system_daily_grid_export_energy", // exact daily grid export (kWh)
+  consumptionProfile: "expected_home_consumption_profile",
   sysAlarm: "system_alarm_status",
   pdQuality: "system_pd_control_quality", // PD control-quality verdict
   // diagnostics / flags
@@ -1302,6 +1309,57 @@ class MarstekVenusPanel extends HTMLElement {
   _lang() {
     return (this._hass && this._hass.locale && this._hass.locale.language) || "es-ES";
   }
+  /** Time zone selected in the HA user profile. `local` deliberately leaves
+   *  Intl on the browser zone; `server` follows Home Assistant's configured
+   *  IANA zone even when the browser or host runs in UTC. */
+  _timeZone() {
+    const locale = this._hass && this._hass.locale;
+    if (!locale || locale.time_zone === "local") return undefined;
+    return this._hass && this._hass.config && this._hass.config.time_zone;
+  }
+  _dateTimeOptions(options = {}) {
+    const timeZone = this._timeZone();
+    return timeZone ? { ...options, timeZone } : options;
+  }
+  /** Calendar fields for an instant in the time zone shown by Home Assistant. */
+  _dateParts(epochMs = Date.now()) {
+    const formatter = new Intl.DateTimeFormat("en-CA", this._dateTimeOptions({
+      year: "numeric", month: "2-digit", day: "2-digit",
+      hour: "2-digit", minute: "2-digit", second: "2-digit",
+      hourCycle: "h23",
+    }));
+    return Object.fromEntries(
+      formatter.formatToParts(new Date(epochMs))
+        .filter((part) => part.type !== "literal")
+        .map((part) => [part.type, Number(part.value)])
+    );
+  }
+  /** Convert a wall-clock midnight in an IANA zone to its real UTC instant. */
+  _zonedMidnight(year, month, day) {
+    const timeZone = this._timeZone();
+    if (!timeZone) return new Date(year, month - 1, day).getTime();
+    const targetAsUtc = Date.UTC(year, month - 1, day);
+    const offsetAt = (epochMs) => {
+      const p = this._dateParts(epochMs);
+      return Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second) - epochMs;
+    };
+    let instant = targetAsUtc - offsetAt(targetAsUtc);
+    // Re-evaluate at the candidate so transitions near the target use the
+    // offset that actually applies to that local date.
+    instant = targetAsUtc - offsetAt(instant);
+    return instant;
+  }
+  /** Start of the selected HA calendar day, optionally shifted by N days. */
+  _dayStartEpoch(offsetDays = 0, epochMs = Date.now()) {
+    const p = this._dateParts(epochMs);
+    const shifted = new Date(Date.UTC(p.year, p.month - 1, p.day + offsetDays));
+    return this._zonedMidnight(
+      shifted.getUTCFullYear(), shifted.getUTCMonth() + 1, shifted.getUTCDate()
+    );
+  }
+  _localHour(epochMs = Date.now()) {
+    return this._dateParts(epochMs).hour;
+  }
   /** Two-letter UI language for i18n lookups ("es-ES" -> "es"). */
   _lang2() {
     return String(this._lang()).split("-")[0].toLowerCase();
@@ -1634,6 +1692,16 @@ class MarstekVenusPanel extends HTMLElement {
     const dailyHome = this._num(this._stateFor(byKey, K.sysDailyHome));
     const dailyGridImport = this._num(this._stateFor(byKey, K.sysDailyGridImport));
     const dailyGridExport = this._num(this._stateFor(byKey, K.sysDailyGridExport));
+    const profileObj = this._stateFor(byKey, K.consumptionProfile);
+    const profileAttrs = profileObj && profileObj.attributes ? profileObj.attributes : {};
+    const profile = {
+      energy: this._num(profileObj),
+      hourly: Array.isArray(profileAttrs.hourly_profile_kwh) ? profileAttrs.hourly_profile_kwh : [],
+      source: profileAttrs.source || null,
+      mature: profileAttrs.mature === true,
+      coverage: Number(profileAttrs.coverage_ratio),
+      days: Number(profileAttrs.total_profile_days),
+    };
 
     return {
       nBat,
@@ -1653,6 +1721,7 @@ class MarstekVenusPanel extends HTMLElement {
       dailyHome,
       dailyGridImport,
       dailyGridExport,
+      profile,
       active,
       offline,
       netBalance,
@@ -1798,7 +1867,7 @@ class MarstekVenusPanel extends HTMLElement {
       c.soc,
       wrap("resumen-lower", [
         c.flow,
-        wrap("charts-2x2", [c.daily, c.weekly, c.power, c.mini]),
+        wrap("charts-2x2", [c.daily, c.weekly, c.power, c.mini, c.profile]),
       ]),
     ]);
   }
@@ -1821,7 +1890,32 @@ class MarstekVenusPanel extends HTMLElement {
       weekly: this._buildWeeklyCard(),
       power: this._buildPowerHistoryCard(),
       mini: this._buildMiniHistory(),
+      profile: this._buildProfileCard(),
     };
+  }
+
+  _buildProfileCard() {
+    const { card, head } = this._card(this._t("cardProfile"), "mdi:chart-bar");
+    card.classList.add("chart-card", "profile-card");
+    const meta = document.createElement("div");
+    meta.className = "profile-meta dim";
+    meta.innerHTML = `<span class="profile-state">—</span><span class="profile-source"></span>`;
+    const bars = document.createElement("div");
+    bars.className = "profile-bars";
+    for (let i = 0; i < 24; i++) {
+      const bar = document.createElement("span");
+      bar.className = "profile-bar";
+      bar.title = `${String(i).padStart(2, "0")}:00`;
+      bars.appendChild(bar);
+    }
+    const axis = document.createElement("div");
+    axis.className = "chart-xaxis dim profile-axis";
+    axis.innerHTML = "<span>00:00</span><span>12:00</span><span>24:00</span>";
+    card.append(meta, bars, axis);
+    this._r.profileState = meta.querySelector(".profile-state");
+    this._r.profileSource = meta.querySelector(".profile-source");
+    this._r.profileBars = [...bars.children];
+    return card;
   }
 
   // ----- Flow card -----
@@ -1952,7 +2046,7 @@ class MarstekVenusPanel extends HTMLElement {
   _isDaytime() {
     const sun = this._hass && this._hass.states && this._hass.states["sun.sun"];
     if (sun) return sun.state !== "below_horizon";
-    const h = new Date().getHours();
+    const h = this._localHour();
     return h >= 7 && h < 20;
   }
 
@@ -2185,9 +2279,7 @@ class MarstekVenusPanel extends HTMLElement {
       return;
     }
     // SOC samples are evenly spaced from 00:00 → now; map an original index → clock.
-    const mid = new Date();
-    mid.setHours(0, 0, 0, 0);
-    const startS = mid.getTime() / 1000;
+    const startS = this._dayStartEpoch() / 1000;
     const elapsed = Date.now() / 1000 - startS;
     const fullLast = full.length - 1;
     const clockOf = (origIdx) => startS + (fullLast > 0 ? origIdx / fullLast : 0) * elapsed;
@@ -2289,7 +2381,9 @@ class MarstekVenusPanel extends HTMLElement {
   /** Local clock "HH:MM" for an epoch-seconds value. */
   _fmtClock(s) {
     if (s == null) return "";
-    return new Date(s * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    return new Date(s * 1000).toLocaleTimeString(
+      this._lang(), this._dateTimeOptions({ hour: "2-digit", minute: "2-digit" })
+    );
   }
 
   /** Attach a hover readout to a STABLE element (the .chart-plot or .mini-spark
@@ -2470,11 +2564,11 @@ class MarstekVenusPanel extends HTMLElement {
     const fullSeries = avail.map((d) => ({ color: d.color, data: ps[d.key].map((v) => (v == null ? 0 : v)) }));
     // Anchor each sample to its real time-of-day so a partial day (e.g. 03:00)
     // only fills the left of the fixed 00–24 axis instead of stretching across it.
-    const dayStart = new Date();
-    dayStart.setHours(0, 0, 0, 0);
-    const startS = dayStart.getTime() / 1000;
+    const startS = this._dayStartEpoch() / 1000;
+    const endS = this._dayStartEpoch(1) / 1000;
+    const daySpan = endS - startS;
     const t = Array.isArray(ps.t) ? ps.t : null;
-    const fullXs = t && t.length ? t.map((ts) => (ts - startS) / 86400) : null;
+    const fullXs = t && t.length ? t.map((ts) => (ts - startS) / daySpan) : null;
 
     // apply the active zoom window (fraction of the 24 h day), if set
     const z = plot.__zoom;
@@ -2511,7 +2605,7 @@ class MarstekVenusPanel extends HTMLElement {
       decimals: 2,
       xLabel: (i) => (times ? this._fmtClock(times[i]) : ""),
     };
-    this._updatePowerXaxis(z, startS);
+    this._updatePowerXaxis(z, startS, endS);
   }
 
   // ----- Energía semanal (7 días, barras agrupadas) -----
@@ -2578,11 +2672,13 @@ class MarstekVenusPanel extends HTMLElement {
   /** Natural time domain (epoch s) for a chart: Potencias spans the full day,
    *  SOC spans midnight -> now. */
   _chartDomain(kind) {
-    const mid = new Date();
-    mid.setHours(0, 0, 0, 0);
-    const startS = mid.getTime() / 1000;
+    const startS = this._dayStartEpoch() / 1000;
     const nowS = Date.now() / 1000;
-    return { startS, nowS, endS: kind === "power" ? startS + 86400 : nowS };
+    return {
+      startS,
+      nowS,
+      endS: kind === "power" ? this._dayStartEpoch(1) / 1000 : nowS,
+    };
   }
   /** Range-preset buttons + reset, placed under the chart. */
   _buildZoomBar(host, kind) {
@@ -2689,14 +2785,15 @@ class MarstekVenusPanel extends HTMLElement {
     host.addEventListener("pointerup", onUp);
     window.addEventListener("pointerup", onUp);
   }
-  _updatePowerXaxis(z, startS) {
+  _updatePowerXaxis(z, startS, endS) {
     const ax = this._r.powerXaxis;
     if (!ax) return;
     if (!z) {
       ax.innerHTML = `<span>00</span><span>06</span><span>12</span><span>18</span><span>24</span>`;
       return;
     }
-    const t0 = startS + z.lo * 86400, t1 = startS + z.hi * 86400;
+    const span = endS - startS;
+    const t0 = startS + z.lo * span, t1 = startS + z.hi * span;
     ax.innerHTML = Array.from({ length: 5 }, (_, i) =>
       `<span>${this._fmtClock(t0 + ((t1 - t0) * i) / 4)}</span>`
     ).join("");
@@ -3029,6 +3126,24 @@ class MarstekVenusPanel extends HTMLElement {
       r.dExpBar.style.width = (exp / max) * 100 + "%";
     }
 
+    // ----- expected quarter-hour consumption profile -----
+    const profile = m.profile || {};
+    const hourly = Array.isArray(profile.hourly) ? profile.hourly : [];
+    const peak = Math.max(0.01, ...hourly.map((v) => Number(v) || 0));
+    (r.profileBars || []).forEach((bar, index) => {
+      const value = Number(hourly[index]) || 0;
+      bar.style.height = `${Math.max(2, (value / peak) * 100)}%`;
+      bar.classList.toggle("current", index === this._localHour());
+      bar.title = `${String(index).padStart(2, "0")}:00 · ${this._nf(value, 2)} kWh`;
+    });
+    if (r.profileState) {
+      r.profileState.textContent = profile.mature ? this._t("profileMature") : this._t("profileLearning");
+    }
+    if (r.profileSource) {
+      const coverage = Number.isFinite(profile.coverage) ? ` · ${Math.round(profile.coverage * 100)}%` : "";
+      r.profileSource.textContent = `${this._t("profileSource")}: ${profile.source || this._t("profileFallback")}${coverage}`;
+    }
+
     // ----- diagnostics (section 2, two columns) -----
     const ds = m.diagStates || {};
     for (const row of DIAG_ROWS) {
@@ -3122,13 +3237,12 @@ class MarstekVenusPanel extends HTMLElement {
 
   /** Build a step-hold sampler grid from local midnight to now (N+1 points). */
   _historyGrid(n = 144) {
-    const start = new Date();
-    start.setHours(0, 0, 0, 0);
-    const startS = start.getTime() / 1000;
+    const startMs = this._dayStartEpoch();
+    const startS = startMs / 1000;
     const nowS = Date.now() / 1000;
     const grid = [];
     for (let i = 0; i <= n; i++) grid.push(startS + (nowS - startS) * (i / n));
-    return { grid, startISO: start.toISOString() };
+    return { grid, startISO: new Date(startMs).toISOString() };
   }
 
   /** Resample one entity's recorder history onto `grid` (step-hold), in kW. */
@@ -3293,11 +3407,11 @@ class MarstekVenusPanel extends HTMLElement {
     const impIds = impSys ? [impSys] : [];
     const expIds = expSys ? [expSys] : [];
     const days = 7;
-    const start = new Date();
-    start.setHours(0, 0, 0, 0);
-    start.setDate(start.getDate() - (days - 1));
+    const boundaries = Array.from(
+      { length: days + 1 }, (_, k) => this._dayStartEpoch(k - (days - 1))
+    );
     const allIds = [...new Set([...chIds, ...diIds, ...impIds, ...expIds])];
-    const startISO = start.toISOString();
+    const startISO = new Date(boundaries[0]).toISOString();
     const endISO = new Date().toISOString();
     // These sources reset at midnight.  Their Recorder ``sum`` is a
     // lifetime-normalized value, so its daily ``change`` can include reset
@@ -3324,8 +3438,9 @@ class MarstekVenusPanel extends HTMLElement {
       }
     }
     if (!statistics && !history) return;
-    const startMs = start.getTime();
-    const dayIndex = (ms) => Math.floor((ms - startMs) / 86400000);
+    const dayIndex = (ms) => boundaries.findIndex(
+      (start, k) => k < days && ms >= start && ms < boundaries[k + 1]
+    );
     // Prefer each entity's final daily statistics state, then sum across ids.
     // Raw history fallbacks retain the former daily-maximum calculation.
     const dailyTotals = (entIds) => {
@@ -3393,8 +3508,10 @@ class MarstekVenusPanel extends HTMLElement {
     if (expTot && liveExport != null) expTot[todayIndex] = liveExport;
     const labels = [];
     for (let k = 0; k < days; k++) {
-      const dd = new Date(startMs + k * 86400000);
-      labels.push(dd.toLocaleDateString(this._lang(), { weekday: "short" }));
+      const dd = new Date(boundaries[k]);
+      labels.push(dd.toLocaleDateString(
+        this._lang(), this._dateTimeOptions({ weekday: "short" })
+      ));
     }
     this._weekly = {
       days: labels,
@@ -4972,6 +5089,12 @@ class MarstekVenusPanel extends HTMLElement {
 
       /* chart cards (Potencias / Energía semanal / SOC hoy) */
       .chart-card { display: flex; flex-direction: column; min-height: 0; }
+      .profile-card { min-height: 190px; }
+      .profile-meta { display: flex; justify-content: space-between; gap: 8px; margin: 2px 0 10px; font-size: 11px; }
+      .profile-bars { display: flex; align-items: flex-end; gap: 3px; height: 112px; padding: 8px 4px 0; border-bottom: 1px solid var(--line); }
+      .profile-bar { flex: 1 1 0; min-height: 2px; border-radius: 3px 3px 0 0; background: var(--home); opacity: .72; transition: height .25s ease, background .25s ease; }
+      .profile-bar.current { background: var(--accent); opacity: 1; }
+      .profile-axis { margin-top: 5px; padding-left: 4px; }
       .chart-plot { flex: 1 1 auto; min-height: 96px; position: relative; }
       .chart-canvas { display: flex; height: 100%; min-height: 0; }
       .chart-yaxis { display: flex; flex: 0 0 48px; flex-direction: column; align-items: flex-end; justify-content: space-between; padding: 1px 8px 1px 0; color: var(--ink-dim); font-size: 10px; line-height: 1; white-space: nowrap; }

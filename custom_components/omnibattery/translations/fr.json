@@ -15,6 +15,10 @@
     "solar_forecast_unusable": {
       "title": "Prévision solaire inutilisable",
       "description": "Le capteur de prévision solaire configuré {sensor} est indisponible ou illisible depuis plus de {minutes} minutes. Omnibattery continue de fonctionner, mais tout ce qui dépend de la prévision avance à l'aveugle : le report de charge se libère pour le reste de la journée, les décisions de charge depuis le réseau supposent une absence totale de soleil et peuvent réserver des créneaux inutiles, et l'estimation du solaire restant indique 0 kWh. Vérifiez le capteur ou l'intégration qui le fournit."
+    },
+    "solar_forecast_remaining_recommended": {
+      "title": "Utiliser une prévision solaire restante",
+      "description": "{sensor} est une ancienne prévision solaire pour toute la journée. Omnibattery la prend toujours en charge, mais les erreurs de prévision déjà survenues peuvent rendre les décisions intrajournalières imprécises. Configurez dans les options d'Omnibattery le capteur du fournisseur pour la prévision \"restant aujourd'hui\" afin de calculer plus précisément le solaire restant."
     }
   },
   "config": {
@@ -28,7 +32,8 @@
         "description": "Sélectionnez le capteur qui mesure l'importation/exportation du réseau électrique. Optionnellement, configurez le capteur de prévision solaire pour les fonctionnalités avancées.",
         "data": {
           "consumption_sensor": "Capteur de consommation réseau",
-          "solar_forecast_sensor": "Capteur de prévision solaire (optionnel)",
+          "solar_forecast_sensor": "Capteur de prévision solaire de la journée entière (ancien)",
+          "solar_forecast_remaining_sensor": "Capteur de prévision solaire restante aujourd'hui (recommandé)",
           "solar_production_sensor": "Capteur de production solaire (optionnel)",
           "meter_inverted": "Signe du compteur inversé",
           "max_contracted_power": "Puissance maximale souscrite (W)",
@@ -36,7 +41,8 @@
         },
         "data_description": {
           "consumption_sensor": "Capteur temps réel de puissance importée (+) ou exportée (-) vers le réseau. Des mises à jour toutes les 1-2 secondes sont recommandées. Les capteurs plus lents sont acceptés, mais les mesures retardées réduisent la qualité de régulation ; la dernière mesure est suivie pendant 65 secondes au maximum.",
-          "solar_forecast_sensor": "Capteur fournissant la prévision de production solaire en kWh (ex : Solcast). S'il est configuré ici, il sera utilisé automatiquement pour la charge prédictive et le retard de charge solaire.",
+          "solar_forecast_sensor": "Ancien capteur fournissant la prévision solaire de la journée entière. Les installations existantes peuvent continuer à l'utiliser pendant la transition ; pour les nouvelles configurations, préférez Restant aujourd'hui.",
+          "solar_forecast_remaining_sensor": "Capteur fournissant la production solaire encore attendue aujourd'hui en kWh. Lors de l'enregistrement, il remplace l'ancienne prévision de la journée entière et n'est jamais diminué de la production déjà mesurée.",
           "solar_production_sensor": "Capteur de puissance de production photovoltaïque en temps réel (W/kW) d'un onduleur externe non raccordé aux entrées MPPT de la batterie. Utilisé pour afficher le nœud Solaire dans le diagramme de flux d'énergie du tableau de bord. Laissez vide si vos panneaux alimentent directement le MPPT de la batterie.",
           "meter_inverted": "Activez cette option si votre compteur utilise la convention opposée : positif = exportation, négatif = importation. L'unité (W/kW) est détectée automatiquement.",
           "max_contracted_power": "Puissance totale souscrite en watts. Le système ne dépassera pas cette limite lors de la charge pour éviter de déclencher le disjoncteur",
@@ -720,7 +726,8 @@
         "description": "Configurez les capteurs utilisés par l'intégration.",
         "data": {
           "consumption_sensor": "Capteur de consommation réseau",
-          "solar_forecast_sensor": "Capteur de prévision solaire (optionnel)",
+          "solar_forecast_sensor": "Capteur de prévision solaire de la journée entière (ancien)",
+          "solar_forecast_remaining_sensor": "Capteur de prévision solaire restante aujourd'hui (recommandé)",
           "solar_production_sensor": "Capteur de production solaire (optionnel)",
           "meter_inverted": "Signe du compteur inversé",
           "max_contracted_power": "Puissance maximale souscrite (W)",
@@ -728,7 +735,8 @@
         },
         "data_description": {
           "consumption_sensor": "Capteur temps réel de puissance importée (+) ou exportée (-) vers le réseau. Des mises à jour toutes les 1-2 secondes sont recommandées. Les capteurs plus lents sont acceptés, mais les mesures retardées réduisent la qualité de régulation ; la dernière mesure est suivie pendant 65 secondes au maximum.",
-          "solar_forecast_sensor": "Capteur fournissant la prévision de production solaire en kWh (ex : Solcast). S'il est configuré ici, il sera utilisé automatiquement pour la charge prédictive et le retard de charge solaire.",
+          "solar_forecast_sensor": "Ancien capteur fournissant la prévision solaire de la journée entière. Les installations existantes peuvent continuer à l'utiliser pendant la transition ; pour les nouvelles configurations, préférez Restant aujourd'hui.",
+          "solar_forecast_remaining_sensor": "Capteur fournissant la production solaire encore attendue aujourd'hui en kWh. Lors de l'enregistrement, il remplace l'ancienne prévision de la journée entière et n'est jamais diminué de la production déjà mesurée.",
           "solar_production_sensor": "Capteur de puissance de production photovoltaïque en temps réel (W/kW) d'un onduleur externe non raccordé aux entrées MPPT de la batterie. Utilisé pour afficher le nœud Solaire dans le diagramme de flux d'énergie du tableau de bord. Laissez vide si vos panneaux alimentent directement le MPPT de la batterie.",
           "meter_inverted": "Activez cette option si votre compteur utilise la convention opposée : positif = exportation, négatif = importation. L'unité (W/kW) est détectée automatiquement.",
           "max_contracted_power": "Puissance totale souscrite en watts. Le système ne dépassera pas cette limite lors de la charge pour éviter de déclencher le disjoncteur",
@@ -1438,6 +1446,12 @@
       },
       "system_daily_home_energy": {
         "name": "Consommation Domestique Quotidienne"
+      },
+      "expected_home_consumption_profile": {
+        "name": "Profil de consommation domestique prévu"
+      },
+      "consumption_profile_capture": {
+        "name": "Capture actuelle du profil de consommation"
       },
       "system_pd_control_quality": {
         "name": "Qualité du Contrôle PD",

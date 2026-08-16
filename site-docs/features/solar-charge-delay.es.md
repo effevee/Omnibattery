@@ -20,7 +20,7 @@ Si no:
 
 ## Previsión en tiempo real
 
-La integración lee el sensor de previsión solar en tiempo real, sin captura ni almacenamiento nocturno. La mayoría de integraciones de previsión solar (Solcast, Forecast.Solar, etc.) actualizan su sensor del día actual varias veces a lo largo del día, siendo progresivamente más precisas conforme se conocen las condiciones meteorológicas reales.
+La integración lee el sensor de previsión solar en tiempo real, sin captura ni almacenamiento nocturno. Al guardar **Restante de hoy**, se usa directamente y sustituye el ajuste legado del día completo. Las entradas legadas que no se modifiquen siguen siendo compatibles durante la transición y se convierten en una estimación de la producción restante.
 
 Cada vez que el valor del sensor cambia en más de 0,05 kWh, la integración reevalúa el balance energético:
 
@@ -28,6 +28,18 @@ Cada vez que el valor del sensor cambia en más de 0,05 kWh, la integración ree
 - **La previsión mejora** mientras el retraso sigue activo → el sistema sigue esperando a que el sol cargue la batería.
 
 Una vez que el retraso se desbloquea, permanece desbloqueado el resto del día.
+
+## Horizonte de demanda del hogar
+
+Cuando el perfil horario de consumo de 28 días está maduro, el Retraso de Carga
+Solar usa el mismo rango local de consumo restante que la carga predictiva. El
+perfil mantiene las franjas de carga predictiva dentro del rango solicitado
+porque el hogar sigue consumiendo mientras opera la batería; la energía usada
+para cargarla desde la red ya queda cancelada por el término de potencia AC. La
+demanda ya observada hoy no se cuenta de nuevo. Mientras aprende, el retraso vuelve a
+la estimación diaria heredada. Los atributos del sensor de Retraso de Carga
+exponen `consumption_forecast_source`, `profile_coverage_ratio` y `profile_days`
+para verificar esta transición.
 
 !!! note "Cortes transitorios de la previsión y reevaluación manual"
     Que un sensor de previsión configurado lea `unavailable`/`unknown` por un instante —mientras se actualiza, o durante la ventana tras reiniciar Home Assistant antes de que todos los sensores hayan cargado— ya **no** desactiva el retraso durante todo el día. El retraso se mantiene mediante una breve ventana de gracia (estado del sensor `Waiting for forecast`) y solo se desbloquea si el sensor sigue no disponible al superarla. Si el retraso ya se había desbloqueado y quieres recuperarlo el mismo día, **desactiva y vuelve a activar el switch de Retraso de Carga Solar**: eso reevalúa el retraso desde cero en lugar de esperar al reinicio de medianoche.
