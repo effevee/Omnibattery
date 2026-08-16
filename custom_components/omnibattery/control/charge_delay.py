@@ -339,7 +339,7 @@ class ChargeDelayManager:
             forecast = profile.forecast_energy_between(
                 start,
                 end,
-                exclude_charging_windows=True,
+                exclude_charging_windows=False,
                 fallback="legacy_daily",
             )
             if forecast.source in {"profile", "legacy_daily"}:
@@ -573,10 +573,9 @@ class ChargeDelayManager:
             remaining_solar_kwh = forecast_today * (1.0 - solar_fraction_done)
 
         hours_to_t_end = max(0, t_end - now_h)
-        # avg_consumption is measured over the consumption window (outside any
-        # charging_time_slot, or 24h if none is configured) — see
-        # ConsumptionTracker.is_in_consumption_window. Prorate against the
-        # portion of [now, t_end] that overlaps that same window.
+        # Household demand is measured over all 24 hours. Grid-charging energy
+        # is already cancelled by the battery AC term, so predictive charging
+        # windows must remain part of the consumption forecast.
         window_hours_per_day = ctrl._consumption_tracker.get_consumption_window_hours_per_day()
         profile_forecast = self._profile_forecast_between(now_h, t_end)
         if profile_forecast is not None:
@@ -919,7 +918,7 @@ class ChargeDelayManager:
             return None
 
         # Keep this aligned with _should_delay_charge(): avg_consumption is
-        # measured over the configured consumption window, not daylight hours.
+        # measured over the full local day, not daylight hours.
         avg_consumption = ctrl._consumption_tracker.get_avg_daily_consumption()
         window_hours_per_day = ctrl._consumption_tracker.get_consumption_window_hours_per_day()
         threshold = energy_needed_kwh * safety_factor
@@ -954,7 +953,7 @@ class ChargeDelayManager:
                 result = profile.forecast_energy_between(
                     start,
                     end,
-                    exclude_charging_windows=True,
+                    exclude_charging_windows=False,
                     fallback="legacy_daily",
                 )
                 if result.mature and result.source == "profile":

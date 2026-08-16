@@ -17,7 +17,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import math
-from datetime import date, datetime, time as dt_time, timedelta
+from datetime import date, datetime, timedelta
 from time import monotonic
 from typing import TYPE_CHECKING, Any, Optional
 
@@ -33,37 +33,7 @@ if TYPE_CHECKING:
 
 _LOGGER = logging.getLogger(__name__)
 
-
-def _merge_window_hours(slots) -> list[list[float]]:
-    """Charging windows → merged, non-overlapping [start_h, end_h] intervals in [0, 24].
-
-    Day-agnostic union (matches the original single-slot hour math, which ignored
-    days). Overnight windows (start > end) are split at midnight before merging.
-    """
-    subs: list[tuple[float, float]] = []
-    for slot in slots:
-        try:
-            s = dt_time.fromisoformat(slot["start_time"])
-            e = dt_time.fromisoformat(slot["end_time"])
-        except Exception:
-            continue
-        s_h = s.hour + s.minute / 60.0
-        e_h = e.hour + e.minute / 60.0
-        if s_h <= e_h:
-            subs.append((s_h, e_h))
-        else:
-            subs.append((s_h, 24.0))
-            subs.append((0.0, e_h))
-    if not subs:
-        return []
-    subs.sort()
-    merged = [list(subs[0])]
-    for a, b in subs[1:]:
-        if a <= merged[-1][1]:
-            merged[-1][1] = max(merged[-1][1], b)
-        else:
-            merged.append([a, b])
-    return merged
+CONSUMPTION_HISTORY_SCOPE = "full_day_home"
 
 
 class ConsumptionTracker:
@@ -135,6 +105,7 @@ class ConsumptionTracker:
         """Persist consumption history to disk via HA Store."""
         try:
             data = {
+                "consumption_scope": CONSUMPTION_HISTORY_SCOPE,
                 "history": [
                     (d.isoformat(), c)
                     for d, c in self._controller._daily_consumption_history
@@ -149,19 +120,34 @@ class ConsumptionTracker:
         """Load consumption history from HA Store. Returns True if data was loaded."""
         try:
             data = await self._consumption_store.async_load()
+            if data and "grid_at_min_soc_kwh" in data:
+                # This accumulator has its own measurement scope and remains
+                # valid when legacy windowed household history is invalidated.
+                self._controller._daily_grid_at_min_soc_kwh = round(
+                    float(data["grid_at_min_soc_kwh"]), 2
+                )
+                _LOGGER.info(
+                    "Loaded grid-at-min-soc accumulator from store: %.2f kWh",
+                    self._controller._daily_grid_at_min_soc_kwh,
+                )
             if data and "history" in data and data["history"]:
+                if data.get("consumption_scope") != CONSUMPTION_HISTORY_SCOPE:
+                    # Historical versions excluded predictive grid-charging
+                    # windows and even whole weekdays not selected by a window.
+                    # Those totals cannot be mixed with the new 24-hour contract.
+                    # Returning True prevents restoration from the equally stale
+                    # entity attributes; setup seeds placeholders and Recorder
+                    # backfill replaces them with complete daily totals.
+                    self._controller._daily_consumption_history = []
+                    _LOGGER.info(
+                        "Discarded legacy windowed consumption history; "
+                        "the last seven days will be rebuilt as full-day totals"
+                    )
+                    return True
                 self._controller._daily_consumption_history = [
                     (date.fromisoformat(date_str), round(consumption, 2))
                     for date_str, consumption in data["history"]
                 ]
-                if "grid_at_min_soc_kwh" in data:
-                    self._controller._daily_grid_at_min_soc_kwh = round(
-                        float(data["grid_at_min_soc_kwh"]), 2
-                    )
-                    _LOGGER.info(
-                        "Loaded grid-at-min-soc accumulator from store: %.2f kWh",
-                        self._controller._daily_grid_at_min_soc_kwh,
-                    )
                 history = self._controller._daily_consumption_history
                 _LOGGER.info(
                     "Loaded consumption history from store: %d days (oldest: %s, newest: %s)",
@@ -205,12 +191,13 @@ class ConsumptionTracker:
     async def async_save_accumulators(self) -> None:
         """Await-able persist of the home-consumption accumulator (used on unload).
 
-        The accumulator holds the derived home-consumption total over the
-        solar+battery window.
+        The accumulator holds adjusted derived home consumption for the full
+        local day.
         """
         ctrl = self._controller
         try:
             await self._accumulator_store.async_save({
+                "consumption_scope": CONSUMPTION_HISTORY_SCOPE,
                 "date": ctrl._household_accumulator_date.isoformat() if ctrl._household_accumulator_date else None,
                 "household_kwh": round(ctrl._household_energy_accumulator, 4),
             })
@@ -228,6 +215,26 @@ class ConsumptionTracker:
                 return
             today = date.today()
             ctrl = self._controller
+            if data.get("consumption_scope") != CONSUMPTION_HISTORY_SCOPE:
+                # The old same-day accumulator may exclude hours inside a
+                # predictive charging window. Rebuild today's elapsed total so
+                # an upgrade/reload does not produce one more partial day.
+                rebuilt = await self.backfill_home_from_history(today)
+                if rebuilt is None:
+                    _LOGGER.warning(
+                        "Could not rebuild today's legacy windowed consumption "
+                        "accumulator from Recorder; starting a new full-day total"
+                    )
+                    return
+                ctrl._household_energy_accumulator = rebuilt
+                ctrl._household_accumulator_date = today
+                _LOGGER.info(
+                    "Rebuilt today's home-consumption accumulator from Recorder: "
+                    "%.2f kWh",
+                    rebuilt,
+                )
+                await self.async_save_accumulators()
+                return
             ctrl._household_energy_accumulator = float(data.get("household_kwh", 0.0))
             ctrl._household_accumulator_date = today
             _LOGGER.info(
@@ -427,7 +434,7 @@ class ConsumptionTracker:
         """Return household demand adjusted for configured external loads.
 
         This is intentionally side-effect free and is the single input shared
-        by the legacy windowed accumulator and the 24-hour profile.
+        by the legacy daily accumulator and the quarter-hour profile.
         """
         power_kw = self._derive_home_power_kw()
         if power_kw is None:
@@ -530,7 +537,7 @@ class ConsumptionTracker:
     async def get_dynamic_base_consumption(self) -> float:
         """Get dynamic base consumption from the 7-day average of daily home consumption.
 
-        Daily values are captured at 23:55 from the windowed home-energy
+        Daily values are captured at 23:55 from the full-day home-energy
         accumulator; this method opportunistically backfills missing days from
         the Home Consumption sensor's recorder history.
         """
@@ -538,14 +545,14 @@ class ConsumptionTracker:
 
         # OPPORTUNISTIC BACKFILL: Replace default entries with real data from HA history
         # This recovers real data after restarts or when defaults were pre-populated.
-        # Window = the 7 most recent operating days (skips non-operating days).
+        # Window = the 7 most recent calendar days.
         # Gate on <7 real entries so a permanently unfillable day (no recorder
         # data) isn't re-queried on every predictive evaluation.
         real_data_dates = {
             d for d, c in ctrl._daily_consumption_history if c != DEFAULT_BASE_CONSUMPTION_KWH
         }
         if len(real_data_dates) < 7:
-            for past_date in self._recent_operating_days(7):
+            for past_date in self._recent_history_days(7):
                 if past_date not in real_data_dates:
                     value = await self.backfill_home_from_history(past_date)
                     if value is not None and value >= 1.5:
@@ -592,39 +599,17 @@ class ConsumptionTracker:
 
         return average
 
-    def _is_operating_day(self, d: date) -> bool:
-        """True if the battery operates on ``d`` (a charging window covers that weekday).
+    def _recent_history_days(
+        self, n: int = 7, *, before: Optional[date] = None
+    ) -> list[date]:
+        """Return the ``n`` calendar dates before ``before`` (default today).
 
-        No ``charging_time_slots`` configured = the battery runs every day. Days not
-        covered by any window are non-operating: home consumption is only measured
-        inside the solar+battery window (see ``accumulate_household_consumption``),
-        so history must never hold synthetic entries for them — a default like
-        5.0 kWh would only skew the 7-day average.
-        """
-        slots = self._controller.charging_time_slots
-        if not slots:
-            return True
-        day_name = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"][d.weekday()]
-        return any(day_name in s.get("days", []) for s in slots)
-
-    def _recent_operating_days(self, n: int = 7, *, before: Optional[date] = None) -> list[date]:
-        """The ``n`` most recent operating dates strictly before ``before`` (default today).
-
-        Walks the calendar backwards skipping non-operating days, so the history
-        window always spans ``n`` days the battery actually ran — reaching past
-        weekends into the previous week rather than shrinking. Bounded so an
-        unusual slot config (few operating days per week) can't loop unboundedly;
-        returns fewer than ``n`` only if the bound is hit.
+        Predictive charging windows control when grid charging may run; they do
+        not make the household or battery inactive. Every calendar day therefore
+        belongs in the consumption history.
         """
         before = before or date.today()
-        limit = before - timedelta(days=n * 7 + 7)  # worst case ~1 operating day/week
-        days: list[date] = []
-        d = before - timedelta(days=1)
-        while len(days) < n and d > limit:
-            if self._is_operating_day(d):
-                days.append(d)
-            d -= timedelta(days=1)
-        return days
+        return [before - timedelta(days=offset) for offset in range(1, n + 1)]
 
     def _home_consumption_entity_id(self) -> Optional[str]:
         """Resolve the aggregate Home Consumption power sensor's entity_id.
@@ -645,20 +630,12 @@ class ConsumptionTracker:
 
         Integrates the aggregate Home Consumption sensor, which already resolves to
         the household sensor or the derived value (grid + battery AC + solar) per the
-        active precedence. Only counts time intervals that fall OUTSIDE the
-        charging_time_slot (the solar+battery window). Returns None if no usable data.
+        active precedence. Predictive grid-charging windows do not mask household
+        demand: battery charging is already cancelled by the battery AC term in
+        ``grid + battery AC + solar``. Returns None if no usable data.
         """
-        ctrl = self._controller
-
         source_entity = self._home_consumption_entity_id()
         if not source_entity:
-            return None
-
-        day_names = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
-        day_name = day_names[target_date.weekday()]
-        # Skip days not covered by any charging window (battery doesn't operate those days)
-        if not self._is_operating_day(target_date):
-            _LOGGER.debug("Household backfill: skipping %s (not a slot day)", target_date)
             return None
 
         try:
@@ -670,16 +647,6 @@ class ConsumptionTracker:
         local_tz = dt_util.get_time_zone(self._hass.config.time_zone) or dt_util.UTC
         start_time = datetime.combine(target_date, datetime.min.time()).replace(tzinfo=local_tz)
         end_time = datetime.combine(target_date, datetime.max.time()).replace(tzinfo=local_tz)
-
-        # Charging windows active on the target weekday (per-window days respected)
-        day_intervals = ctrl._slots_for_day(day_name)
-
-        def _in_consumption_window(ts: datetime) -> bool:
-            """True when ts falls outside every charging window active that day."""
-            if not day_intervals:
-                return True
-            t = ts.time().replace(tzinfo=None)
-            return not any(ctrl._time_in_window(t, s, e) for s, e in day_intervals)
 
         try:
             recorder_instance = get_instance(self._hass)
@@ -699,7 +666,7 @@ class ConsumptionTracker:
             _LOGGER.debug("No home consumption history for %s", target_date)
             return None
 
-        # Integrate power × dt over the consumption window
+        # Integrate power × dt over the full local day.
         energy_kwh = 0.0
         prev_ts: Optional[datetime] = None
         prev_kw: Optional[float] = None
@@ -721,11 +688,8 @@ class ConsumptionTracker:
             ts = state.last_updated
 
             if prev_ts is not None and prev_kw is not None:
-                # Use the midpoint timestamp to decide if interval is in consumption window
-                mid_ts = prev_ts + (ts - prev_ts) / 2
-                if _in_consumption_window(mid_ts):
-                    dt_hours = (ts - prev_ts).total_seconds() / 3600.0
-                    energy_kwh += max(0.0, prev_kw) * dt_hours
+                dt_hours = (ts - prev_ts).total_seconds() / 3600.0
+                energy_kwh += max(0.0, prev_kw) * dt_hours
 
             prev_ts = ts
             prev_kw = power_kw
@@ -780,10 +744,8 @@ class ConsumptionTracker:
                 dev_kw = dev_w / 1000.0 if dev_unit == "W" else dev_w
                 ts = dev_state.last_updated
                 if prev_ts is not None and prev_kw is not None:
-                    mid_ts = prev_ts + (ts - prev_ts) / 2
-                    if _in_consumption_window(mid_ts):
-                        dt_hours = (ts - prev_ts).total_seconds() / 3600.0
-                        dev_kwh += max(0.0, prev_kw) * dt_hours
+                    dt_hours = (ts - prev_ts).total_seconds() / 3600.0
+                    dev_kwh += max(0.0, prev_kw) * dt_hours
                 prev_ts = ts
                 prev_kw = dev_kw
 
@@ -819,17 +781,6 @@ class ConsumptionTracker:
         # the new Store learns in the background.
         self.start_consumption_profile_backfill()
 
-        # Drop stale synthetic entries for non-operating days (e.g. weekends
-        # outside the charging window) left by an earlier default-seeding run.
-        # These are never measured, so a 5.0 kWh default only skews the average.
-        before = len(ctrl._daily_consumption_history)
-        ctrl._daily_consumption_history = [
-            (d, c) for d, c in ctrl._daily_consumption_history if self._is_operating_day(d)
-        ]
-        purged = before - len(ctrl._daily_consumption_history)
-        if purged:
-            _LOGGER.info("Startup backfill: dropped %d non-operating-day entries", purged)
-
         _LOGGER.info(
             "Startup backfill: attempting to replace defaults with real data "
             "(current history: %d entries, %d real)",
@@ -838,8 +789,8 @@ class ConsumptionTracker:
         )
 
         # Try to backfill past days from recorder history.
-        # Window = the 7 most recent operating days (skips non-operating days).
-        target_days = self._recent_operating_days(7)
+        # Window = the 7 most recent calendar days.
+        target_days = self._recent_history_days(7)
         real_data_dates = {
             d for d, c in ctrl._daily_consumption_history if c != DEFAULT_BASE_CONSUMPTION_KWH
         }
@@ -861,7 +812,7 @@ class ConsumptionTracker:
                 await asyncio.sleep(0.1)
                 backfill_count += 1
 
-        # Fill any remaining gaps in the window so we always have 7 operating days.
+        # Fill any remaining gaps in the window so we always have 7 calendar days.
         # Use the average of real entries as the gap value; fall back to
         # DEFAULT_BASE_CONSUMPTION_KWH only if there are no real entries at all.
         real_values = [
@@ -912,10 +863,8 @@ class ConsumptionTracker:
             DEFAULT_BASE_CONSUMPTION_KWH,
         )
 
-        # Pre-populate the 7 most recent operating days with fallback values.
-        # Non-operating days (e.g. weekends outside the charging window) are never
-        # measured, so the window skips them and reaches further back instead.
-        for past_date in self._recent_operating_days(7):
+        # Pre-populate the 7 most recent calendar days with fallback values.
+        for past_date in self._recent_history_days(7):
             ctrl._daily_consumption_history.append((past_date, DEFAULT_BASE_CONSUMPTION_KWH))
 
         _LOGGER.info(
@@ -926,7 +875,7 @@ class ConsumptionTracker:
     async def capture_daily_consumption(self, now=None) -> None:
         """Scheduled task to capture daily home consumption.
 
-        Runs daily at 23:55 to snapshot the windowed home-energy accumulator
+        Runs daily at 23:55 to snapshot the full-day home-energy accumulator
         into the 7-day history before it resets at midnight, so predictive
         charging always has historical data.
 
@@ -940,10 +889,9 @@ class ConsumptionTracker:
 
         today = date.today()
 
-        # Consumption comes from the windowed home-energy accumulator, which
-        # integrates the household sensor when configured, otherwise the derived
-        # home power (grid + battery AC + solar). Both measure the same quantity:
-        # total home load during the solar+battery window.
+        # Consumption comes from the adjusted full-day home-energy accumulator.
+        # Grid charging is not household demand: the negative battery AC term
+        # cancels it in the derived ``grid + battery AC + solar`` power.
         current_value = round(ctrl._household_energy_accumulator, 2)
         if current_value < 1.5:
             _LOGGER.info(
@@ -1201,68 +1149,34 @@ class ConsumptionTracker:
             ctrl._household_accumulator_date = today
 
     def is_in_consumption_window(self) -> bool:
-        """Return True when we are OUTSIDE the charging_time_slot (solar+battery window).
+        """Return True because household consumption is measured all day.
 
-        If no charging_time_slot is configured, the consumption window is 24 h.
-        On days NOT covered by the slot, the battery is not in use → return False.
-        On days covered by the slot, return True only during the hours outside the slot.
+        Kept as a compatibility helper for consumers and third-party tests that
+        used the former windowed contract.
         """
-        ctrl = self._controller
-        if not ctrl.charging_time_slots:
-            return True
-
-        now = datetime.now()
-        current_day = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"][now.weekday()]
-
-        # Battery only operates on days covered by at least one charging window
-        if not any(current_day in s.get("days", []) for s in ctrl.charging_time_slots):
-            return False
-
-        return not ctrl._check_time_window()
+        return True
 
     def get_consumption_window_hours_per_day(self) -> float:
-        """Total daily duration (hours) of the window over which avg_consumption is measured.
-
-        Mirrors is_in_consumption_window: 24h if no charging_time_slot, otherwise
-        24h minus the slot duration. Used to prorate avg_consumption against the
-        portion of the day still ahead in the charge-delay energy balance check.
-        """
-        slots = self._controller.charging_time_slots
-        if not slots:
-            return 24.0
-        slot_h = sum(b - a for a, b in _merge_window_hours(slots))
-        return max(0.0, 24.0 - slot_h)
+        """Return the 24-hour basis used by daily consumption history."""
+        return 24.0
 
     def consumption_window_hours_in_range(self, from_h: float, to_h: float) -> float:
-        """Hours within [from_h, to_h] that fall OUTSIDE the charging_time_slot.
-
-        from_h/to_h are hours of the same day in [0, 24]. Returns 0 when the
-        range is empty. When no slot is configured, returns the full range.
-        """
-        if to_h <= from_h:
-            return 0.0
-        slots = self._controller.charging_time_slots
-        if not slots:
-            return to_h - from_h
-        overlap = sum(
-            max(0.0, min(to_h, b) - max(from_h, a))
-            for a, b in _merge_window_hours(slots)
-        )
-        return max(0.0, (to_h - from_h) - overlap)
+        """Return all hours in a same-day range, including charging windows."""
+        return max(0.0, to_h - from_h)
 
     async def accumulate_household_consumption(self) -> None:
         """Integrate home power → kWh accumulator (called every control cycle).
 
         Derives the home power the dashboard shows (grid + battery AC + solar) so
-        predictive charging gets an accurate consumption estimate. Only accumulates
-        during the solar+battery window (outside charging_time_slot). Uses monotonic
-        time to avoid issues with system clock changes.
+        predictive charging gets an accurate consumption estimate. Accumulates
+        throughout the day; battery grid-charging power is cancelled by the
+        battery AC term in the home-power derivation. Uses monotonic time to
+        avoid issues with system clock changes.
         """
         ctrl = self._controller
 
-        # Capture the adjusted demand before applying the legacy battery-window
-        # mask.  A profile sample is valid 24 hours a day; the mask is applied
-        # only by forecast consumers.
+        # Capture the same adjusted 24-hour demand for both the legacy total and
+        # the quarter-hour profile.
         profile_now = dt_util.now()
         profile_mono = monotonic()
         power_kw = self.get_adjusted_home_power_kw()
@@ -1271,11 +1185,6 @@ class ConsumptionTracker:
             local_time=profile_now,
             monotonic_time=profile_mono,
         )
-
-        if not self.is_in_consumption_window():
-            # Outside measurement window — pause accumulation but don't reset timer
-            self._household_last_accumulation_time = None
-            return
 
         if power_kw is None:
             return

@@ -33,9 +33,10 @@ Once the delay is unlocked it stays unlocked for the rest of the day.
 
 When the 28-day quarter-hour household profile is mature, Solar Charge Delay uses
 the same local-time remaining-consumption range as predictive charging. The
-profile is queried with charging windows excluded at read time, so demand already
-observed today is never counted again and the source remains a full 24-hour
-learning signal. During learning, the delay falls back to the legacy daily
+profile keeps predictive charging windows in the requested range because the
+household keeps consuming while the battery operates; battery grid-charging
+energy is already cancelled by the AC-power term. Demand already observed today
+is never counted again. During learning, the delay falls back to the legacy daily
 estimate. The Charge Delay sensor attributes expose `consumption_forecast_source`,
 `profile_coverage_ratio` and `profile_days` for this handoff.
 

@@ -392,6 +392,7 @@ class PredictiveChargingStatusSensor(BinarySensorEntity):
         "daily_consumption_history", "history_days",
         "predictive_target_soc_pct", "selected_hours",
         # per-cycle accumulators
+        "household_consumption_full_day_kwh",
         "household_consumption_battery_window_kwh", "solar_production_today_kwh",
         # last-decision diagnostic dump (changes on every evaluation)
         "stored_energy_kwh", "usable_energy_kwh", "min_reserve_kwh",
@@ -480,7 +481,12 @@ class PredictiveChargingStatusSensor(BinarySensorEntity):
         # Home consumption diagnostics: home power is always derived
         # (grid + battery AC + solar); the household sensor was removed.
         attrs["consumption_source"] = "derived (grid + battery AC + solar)"
-        attrs["household_consumption_battery_window_kwh"] = round(self.controller._household_energy_accumulator, 2)
+        full_day_consumption = round(self.controller._household_energy_accumulator, 2)
+        attrs["household_consumption_full_day_kwh"] = full_day_consumption
+        # Compatibility alias retained for existing dashboards. The value now
+        # follows the corrected full-day contract despite the legacy name.
+        attrs["household_consumption_battery_window_kwh"] = full_day_consumption
+        attrs["consumption_history_scope"] = "full_day_home"
         if self.controller._household_accumulator_date is not None:
             attrs["household_accumulator_date"] = self.controller._household_accumulator_date.isoformat()
         # Measured solar produced today (real solar sensor + Venus MPPT)

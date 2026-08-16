@@ -33,9 +33,10 @@ Una vez que el retraso se desbloquea, permanece desbloqueado el resto del día.
 
 Cuando el perfil horario de consumo de 28 días está maduro, el Retraso de Carga
 Solar usa el mismo rango local de consumo restante que la carga predictiva. El
-perfil se consulta excluyendo las franjas de carga en el momento de la consulta,
-por lo que la demanda ya observada hoy no se cuenta de nuevo y la señal de
-aprendizaje sigue cubriendo las 24 horas. Mientras aprende, el retraso vuelve a
+perfil mantiene las franjas de carga predictiva dentro del rango solicitado
+porque el hogar sigue consumiendo mientras opera la batería; la energía usada
+para cargarla desde la red ya queda cancelada por el término de potencia AC. La
+demanda ya observada hoy no se cuenta de nuevo. Mientras aprende, el retraso vuelve a
 la estimación diaria heredada. Los atributos del sensor de Retraso de Carga
 exponen `consumption_forecast_source`, `profile_coverage_ratio` y `profile_days`
 para verificar esta transición.

@@ -13,7 +13,7 @@ as a learned profile with real data is available.
 
 ## What the estimate measures
 
-The estimate is the **total home consumption during the solar+battery window** — the hours outside the grid-charging time slot, when the battery is expected to cover the house. It is averaged over the last 7 days.
+The estimate is the **total home consumption over the full local day**, including predictive grid-charging windows. It is averaged over the last 7 calendar days.
 
 ### Home consumption source
 
@@ -24,6 +24,8 @@ home = grid + Σ(battery AC power) + solar
 ```
 
 This is the same value shown by the energy-flow diagram and the **`sensor.marstek_venus_system_home_consumption`** (Home Consumption, W) sensor. DC-coupled PV (MPPT) does not appear here — it is already netted into each battery's AC power at the inverter.
+
+When the battery charges from the grid, its AC power is negative. That term cancels the corresponding grid import, so battery-charging energy is not mistaken for household consumption. For example, 2.8 kW imported while the battery charges at 2.5 kW produces 0.3 kW of home demand.
 
 !!! note "Legacy household sensor"
     A `household_consumption_sensor` saved on an older install is read directly **instead** of deriving, but **only when no solar production sensor is configured** — with a solar sensor the derived value is exact and preferred. The field is no longer offered in setup.
@@ -39,13 +41,13 @@ If you have configured [excluded or additional devices](excluded-devices.md), th
 
 ## Real-time accumulation
 
-On every control cycle (event-driven, at the grid sensor's cadence), the home power is integrated into a daily accumulator **only while `is_in_consumption_window()` is true**: all 24 hours when no charging time slot is configured, or the hours outside the charging slot on slot days. This scoping ensures the measured window matches what predictive charging expects when it later projects remaining demand.
+On every control cycle (event-driven, at the grid sensor's cadence), the adjusted home power is integrated throughout the full local day. Predictive charging windows only schedule when the battery may charge from the grid; they never pause household-consumption learning.
 
 ```
 increment (kWh) = home_power (W) × Δt (s) / 3,600,000
 ```
 
-`Δt` is the real elapsed time since the previous sample, so it adapts to the variable cadence. The running daily value is exposed as the `household_consumption_battery_window_kwh` attribute on `binary_sensor.marstek_venus_system_predictive_charging_active`, and is persisted so it survives restarts within the same day.
+`Δt` is the real elapsed time since the previous sample, so it adapts to the variable cadence. The running daily value is exposed as `household_consumption_full_day_kwh` on `binary_sensor.marstek_venus_system_predictive_charging_active`, and is persisted so it survives restarts within the same day. The old `household_consumption_battery_window_kwh` attribute remains as a compatibility alias with the same full-day value.
 
 ---
 
@@ -65,7 +67,7 @@ While fewer than 7 real days have accumulated (e.g. just after installing the in
 
 ### Backfill from recorder history
 
-At startup, the integration recovers missing days by querying the **Home Assistant recorder** for the `sensor.marstek_venus_system_home_consumption` sensor (which already resolves to the derived value, or the legacy household sensor when applicable). For each missing day it integrates that sensor's history over the consumption window, applies the excluded/additional-device adjustments, and stores the result exactly as the 23:55 capture would. This builds the history with real data even after an HA restart or a fresh installation.
+At startup, the integration recovers missing days by querying the **Home Assistant recorder** for the `sensor.marstek_venus_system_home_consumption` sensor (which already resolves to the derived value, or the legacy household sensor when applicable). For each missing day it integrates that sensor's history over the full local day, applies the excluded/additional-device adjustments, and stores the result exactly as the 23:55 capture would. This builds the history with real data even after an HA restart or a fresh installation. Histories created by older windowed versions are discarded once and rebuilt from Recorder so partial-day and full-day totals are never mixed.
 
 ---
 
@@ -84,13 +86,13 @@ where `n` may be less than 7 if not enough real days have accumulated yet (fallb
 ## Full example
 
 ```
-Monday:    home consumption (battery window) = 5.0 kWh
-Tuesday:   home consumption (battery window) = 5.1 kWh
-Wednesday: home consumption (battery window) = 5.3 kWh
-Thursday:  home consumption (battery window) = 4.8 kWh
-Friday:    home consumption (battery window) = 4.9 kWh
-Saturday:  home consumption (battery window) = 6.3 kWh
-Sunday:    home consumption (battery window) = 6.0 kWh
+Monday:    full-day home consumption = 5.0 kWh
+Tuesday:   full-day home consumption = 5.1 kWh
+Wednesday: full-day home consumption = 5.3 kWh
+Thursday:  full-day home consumption = 4.8 kWh
+Friday:    full-day home consumption = 4.9 kWh
+Saturday:  full-day home consumption = 6.3 kWh
+Sunday:    full-day home consumption = 6.0 kWh
 
 Expected consumption = (5.0 + 5.1 + 5.3 + 4.8 + 4.9 + 6.3 + 6.0) / 7 = 5.34 kWh
 ```
@@ -116,8 +118,8 @@ per day, in **96 local quarter-hour intervals**. Each sample is integrated with 
 trapezoidal rule and split across midnight, quarter-hour boundaries and daylight
 saving transitions. A gap longer than five minutes breaks continuity; an interval
 is usable only after at least 675 seconds (75%) of observed coverage. Charging
-windows are not applied while learning, so the profile can later answer any
-remaining-time query without biasing the source data.
+windows are not applied while learning or forecasting household demand: they
+schedule battery charging but do not remove the home's load from the day.
 
 The profile uses a hierarchy of matching weekday, weekday/weekend type and global
 samples. Recent days are weighted `1.0`, `0.75`, `0.5` and `0.25`. It is considered

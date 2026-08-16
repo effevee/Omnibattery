@@ -658,8 +658,8 @@ class ChargeDischargeController:
         # rename because the unique_id never changes.
         self.home_consumption_sensor: Optional[str] = None
 
-        # Home consumption accumulator (integration of derived home power over the
-        # solar+battery window). Owned by ConsumptionTracker (see consumption_tracker.py);
+        # Home consumption accumulator (24-hour integration of adjusted derived
+        # home power). Owned by ConsumptionTracker (see consumption_tracker.py);
         # these public attrs remain on the controller so binary_sensor.py and
         # aggregate_sensors.py keep reading them.
         self._household_energy_accumulator = 0.0
@@ -2355,6 +2355,26 @@ class ChargeDischargeController:
                 return slot
         return None
 
+    def _is_grid_at_min_soc_discharge_window(self) -> bool:
+        """Return whether unmet demand belongs to a manual discharge window.
+
+        A disabled or charge-only timeslot must not restrict the Grid at Min SOC
+        accumulator. Only an enabled slot that explicitly allows discharge
+        changes the default full-day scope.
+        """
+        slots = self.config_entry.data.get("no_discharge_time_slots", [])
+        enabled_discharge_slots = [
+            slot
+            for slot in slots
+            if slot.get("enabled", True) and slot.get("allow_discharge", False)
+        ]
+        if not enabled_discharge_slots:
+            return True
+        return any(
+            self._get_active_slot(coordinator, "discharge") is not None
+            for coordinator in self.coordinators
+        )
+
     def _get_available_batteries(self, is_charging: bool, include_operation_blocks: bool = True) -> list:
         """Get list of available batteries for the current operation.
         
@@ -3170,7 +3190,7 @@ class ChargeDischargeController:
                     profile_forecast = profile.forecast_energy_between(
                         profile_start,
                         profile_start + timedelta(days=1),
-                        exclude_charging_windows=True,
+                        exclude_charging_windows=False,
                         fallback="legacy_daily",
                     )
                 except Exception as exc:  # noqa: BLE001
@@ -6544,11 +6564,7 @@ class ChargeDischargeController:
         has_reachable = any(c.is_available for c in self.coordinators)
         all_at_min_soc = (len(discharge_available) == 0) and has_reachable
         if all_at_min_soc and not self.grid_charging_active and sensor_actual > 0:
-            time_slots = self.config_entry.data.get("no_discharge_time_slots", [])
-            in_discharge_window = (not time_slots) or any(
-                self._get_active_slot(c, "discharge") is not None for c in self.coordinators
-            )
-            if in_discharge_window:
+            if self._is_grid_at_min_soc_discharge_window():
                 # Cycle cadence is now variable (event- and timer-driven), so integrate
                 # over the real elapsed time since the last accumulation instead of a
                 # fixed step. A gap (>10s) means the condition was inactive in between;
@@ -6736,6 +6752,13 @@ async def _restore_consumption_history(hass: HomeAssistant, entry: ConfigEntry, 
     
     if state is None or not state.attributes:
         _LOGGER.debug("No previous predictive charging state found for history restoration")
+        return
+
+    if state.attributes.get("consumption_history_scope") != "full_day_home":
+        _LOGGER.info(
+            "Skipping legacy windowed consumption history restoration; "
+            "Recorder backfill will rebuild full-day totals"
+        )
         return
     
     # Extract history from attributes

@@ -62,8 +62,8 @@ It re-triggers with hysteresis: once SOC recovers to the configured floor, charg
 The daily estimate is retained as a compatibility fallback, but mature
 installations use the local 15-minute profile described in [Daily and hourly
 consumption estimate](../../features/consumption-estimate.md). Dynamic Pricing
-and its intraday re-evaluations request only the remaining local-time horizon and
-apply charging-window masks at query time. The decision attributes identify the
+and its intraday re-evaluations request only the remaining local-time horizon.
+Predictive charging windows are not subtracted from household demand. The decision attributes identify the
 source as `profile` or `legacy_daily`, together with profile coverage and the
 number of learned days.
 

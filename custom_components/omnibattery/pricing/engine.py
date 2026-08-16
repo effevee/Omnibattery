@@ -2421,10 +2421,9 @@ class PricingManager:
         """Return today's full-day home consumption for remaining forecasts.
 
         ``_daily_home_energy_kwh`` is the user-facing total since midnight and
-        is the correct value to subtract from the daily forecast. The older
-        ``_household_energy_accumulator`` only covers the battery consumption
-        window, so using it here can make today's total look like it is still
-        remaining. Keep that accumulator as a startup/reload fallback.
+        is the preferred value to subtract from the daily forecast. The adjusted
+        ``_household_energy_accumulator`` now covers the same full day and remains
+        the startup/reload fallback.
         """
         sources = (
             (
@@ -2433,7 +2432,7 @@ class PricingManager:
                 "_daily_home_energy_kwh",
             ),
             (
-                "household_window",
+                "household_full_day",
                 "_household_accumulator_date",
                 "_household_energy_accumulator",
             ),
@@ -2468,7 +2467,7 @@ class PricingManager:
             forecast = profile.forecast_energy_between(
                 start,
                 end,
-                exclude_charging_windows=True,
+                exclude_charging_windows=False,
                 fallback="legacy_daily",
             )
             if forecast.source in {"profile", "legacy_daily"}:

@@ -1316,8 +1316,9 @@ class DailyHomeEnergySensor(SensorEntity):
     """Exact daily home consumption (kWh), integrated from the home power.
 
     The value is derived from grid + battery AC + solar, matching the power-flow
-    Home Consumption sensor. Unlike the predictive-charging windowed accumulator,
-    this integrates the full 24 h.
+    Home Consumption sensor and the predictive-charging daily accumulator. Both
+    integrate the full 24 h; excluded/additional loads only adjust the predictive
+    history contract.
     """
 
     _attr_has_entity_name = True

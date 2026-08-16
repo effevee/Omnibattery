@@ -63,7 +63,7 @@ La estimación diaria se conserva como fallback de compatibilidad, pero las
 instalaciones maduras usan el perfil local de 15 minutos descrito en
 [Estimación diaria y horaria del consumo](../../features/consumption-estimate.es.md).
 Precio Dinámico y sus reevaluaciones intradía solicitan únicamente el horizonte
-local restante y aplican las franjas de carga al consultar. Los atributos de la
+local restante. Las franjas de carga predictiva no se restan de la demanda del hogar. Los atributos de la
 decisión identifican el origen como `profile` o `legacy_daily`, junto con la
 cobertura y el número de días aprendidos.
 

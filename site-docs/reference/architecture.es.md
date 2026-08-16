@@ -156,6 +156,6 @@ su fuente o configuración.
 
 Todos los consumidores usan el mismo contrato: datos del perfil maduro para el
 rango solicitado o un fallback heredado explícito. La captura nunca aplica
-franjas de carga; `forecast_energy_between()` las aplica solo al solicitar una
-previsión. Así la misma señal sirve a la carga predictiva diaria, el Retraso de
+franjas de carga, y las previsiones de demanda tampoco: esas franjas programan
+la carga de la batería desde la red, no el funcionamiento del hogar. Así la misma señal sirve a la carga predictiva diaria, el Retraso de
 Carga Solar y Precio Dinámico sin acoplar sus decisiones de ejecución.

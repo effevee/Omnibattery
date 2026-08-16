@@ -153,8 +153,8 @@ invalid samples, isolates corrupt stored days, handles local DST boundaries and
 invalidates the raw profile when its source/configuration fingerprint changes.
 
 Control consumers use one contract: mature profile data for the requested range,
-otherwise an explicit legacy fallback. The capture path never applies charging
-window masks; `forecast_energy_between()` applies them only when a forecast is
-requested. This keeps the same learned signal usable by daily predictive
+otherwise an explicit legacy fallback. Neither capture nor runtime household
+forecasts mask predictive charging windows; those windows schedule battery grid
+charging rather than household operation. This keeps the same learned signal usable by daily predictive
 charging, Solar Charge Delay and Dynamic Pricing without coupling their runtime
 decisions to one another.

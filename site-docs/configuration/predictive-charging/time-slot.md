@@ -13,7 +13,7 @@ Charges from the grid during a **fixed time window** (typically cheap overnight 
 | **Predictive grid charge margin (%)** | Extra % charged from the grid on top of the solar deficit (default 0%) |
 
 !!! note "Up to 3 windows"
-    You can configure 1, 2 or 3 charging windows — useful for a split tariff with both a night and a midday off-peak block. Fill only window 1 for the previous single-window behaviour; each extra window needs **both** a start and an end time (fill both or leave both empty). The consumption-window math treats the union of all configured windows.
+    You can configure 1, 2 or 3 charging windows — useful for a split tariff with both a night and a midday off-peak block. Fill only window 1 for the previous single-window behaviour; each extra window needs **both** a start and an end time (fill both or leave both empty). These windows schedule predictive grid charging only: household-consumption history still covers all 24 hours, while the battery's negative AC power removes its own charging energy from the derived home load.
 
 !!! note "No solar sensor"
     If you have no solar panels, leave the forecast sensor empty. The system will charge whenever battery energy is insufficient to cover expected consumption.
