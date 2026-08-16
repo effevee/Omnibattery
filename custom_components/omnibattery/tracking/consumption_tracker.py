@@ -248,6 +248,34 @@ class ConsumptionTracker:
         """Fire-and-forget: persist the exact daily solar/home/grid energy totals."""
         asyncio.create_task(self.async_save_daily_energy())
 
+    def capture_daily_solar_forecast(self, forecast_kwh: Any) -> bool:
+        """Keep the first full-day solar forecast observed for the local day.
+
+        The live forecast is deliberately allowed to change during the day,
+        but the dashboard also needs a stable reference from the daily 00:05
+        evaluation. Repeated evaluations on the same day never overwrite the
+        first valid value.
+        """
+        try:
+            value = float(forecast_kwh)
+        except (TypeError, ValueError):
+            return False
+        if not math.isfinite(value) or value < 0.0:
+            return False
+
+        today = date.today()
+        ctrl = self._controller
+        if (
+            ctrl._daily_solar_forecast_initial_date == today
+            and ctrl._daily_solar_forecast_initial_kwh is not None
+        ):
+            return False
+
+        ctrl._daily_solar_forecast_initial_date = today
+        ctrl._daily_solar_forecast_initial_kwh = round(value, 4)
+        self.save_daily_energy()
+        return True
+
     async def async_save_daily_energy(self) -> None:
         """Await-able persist of the daily energy totals (used on unload)."""
         ctrl = self._controller
@@ -260,6 +288,12 @@ class ConsumptionTracker:
                 "home_kwh": round(ctrl._daily_home_energy_kwh, 4),
                 "grid_import_kwh": round(ctrl._daily_grid_import_energy_kwh, 4),
                 "grid_export_kwh": round(ctrl._daily_grid_export_energy_kwh, 4),
+                "solar_forecast_initial_kwh": ctrl._daily_solar_forecast_initial_kwh,
+                "solar_forecast_initial_date": (
+                    ctrl._daily_solar_forecast_initial_date.isoformat()
+                    if ctrl._daily_solar_forecast_initial_date is not None
+                    else None
+                ),
             })
         except Exception as e:
             _LOGGER.error("Failed to save daily energy: %s", e)
@@ -279,6 +313,16 @@ class ConsumptionTracker:
             ctrl._daily_grid_import_energy_kwh = float(data.get("grid_import_kwh", 0.0))
             ctrl._daily_grid_export_energy_kwh = float(data.get("grid_export_kwh", 0.0))
             ctrl._daily_grid_energy_date = today
+            initial_date = data.get("solar_forecast_initial_date")
+            initial_value = data.get("solar_forecast_initial_kwh")
+            if initial_date == today.isoformat() and initial_value is not None:
+                try:
+                    value = float(initial_value)
+                except (TypeError, ValueError):
+                    value = None
+                if value is not None and math.isfinite(value) and value >= 0.0:
+                    ctrl._daily_solar_forecast_initial_kwh = value
+                    ctrl._daily_solar_forecast_initial_date = today
             _LOGGER.info(
                 "Restored daily energy totals from storage: solar=%.2f kWh, home=%.2f kWh, "
                 "grid import=%.2f kWh, grid export=%.2f kWh",
@@ -329,6 +373,9 @@ class ConsumptionTracker:
             self._daily_grid_last_time = None
             self._daily_grid_last_power_kw = None
             ctrl._daily_grid_energy_date = today
+        if ctrl._daily_solar_forecast_initial_date != today:
+            ctrl._daily_solar_forecast_initial_kwh = None
+            ctrl._daily_solar_forecast_initial_date = today
 
     def _read_power_kw(self, entity_id: str) -> Optional[float]:
         """Read a power entity and return its value in kW, or None if unusable."""

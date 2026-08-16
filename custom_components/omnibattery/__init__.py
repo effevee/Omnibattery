@@ -325,6 +325,7 @@ async def _async_register_frontend_panel(hass: HomeAssistant, entry: ConfigEntry
             from .const import (
                 CONF_BATTERY_VERSION,
                 CONF_SOLAR_FORECAST_SENSOR,
+                CONF_SOLAR_FORECAST_REMAINING_SENSOR,
                 CONF_SOLAR_PRODUCTION_SENSOR,
             )
 
@@ -357,6 +358,10 @@ async def _async_register_frontend_panel(hass: HomeAssistant, entry: ConfigEntry
                 panel_config["home_entity"] = home_eid
             if data.get(CONF_SOLAR_FORECAST_SENSOR):
                 panel_config["solar_forecast_entity"] = data[CONF_SOLAR_FORECAST_SENSOR]
+            if data.get(CONF_SOLAR_FORECAST_REMAINING_SENSOR):
+                panel_config["solar_forecast_remaining_entity"] = data[
+                    CONF_SOLAR_FORECAST_REMAINING_SENSOR
+                ]
             # Solar node click target. When any battery has DC-coupled PV (vA/vD)
             # the node shows external + MPPT, so link the live total-solar sensor
             # (sensor.marstek_venus_system_solar_power, gated on MPPT in sensor.py)
@@ -697,6 +702,10 @@ class ChargeDischargeController:
         self._daily_grid_import_energy_kwh = 0.0
         self._daily_grid_export_energy_kwh = 0.0
         self._daily_grid_energy_date = None
+        # Stable reference captured by the full-day forecast evaluation. This
+        # remains separate from the live remaining forecast used later today.
+        self._daily_solar_forecast_initial_kwh = None
+        self._daily_solar_forecast_initial_date = None
 
         # State tracking for predictive charging
         self.grid_charging_active = False  # True when mode is active
@@ -3321,6 +3330,15 @@ class ChargeDischargeController:
                 forecast_source = forecast.source
                 forecast_diagnostic_source = forecast.diagnostic_source
                 forecast_state = self.hass.states.get(forecast.sensor)
+        if (
+            solar_forecast_kwh is not None
+            and consumption_override_kwh is None
+            and solar_forecast_override_kwh is None
+        ):
+            tracker = getattr(self, "_consumption_tracker", None)
+            capture = getattr(tracker, "capture_daily_solar_forecast", None)
+            if callable(capture):
+                capture(solar_forecast_kwh)
         if solar_forecast_kwh is None:
             # Conservative mode: assume zero solar, compare usable vs consumption
             total_available_kwh = usable_energy_kwh

@@ -188,6 +188,69 @@ class _FakeConsumptionStore:
         self._data = data
 
 
+def _make_daily_energy_controller(**overrides):
+    """Build the controller fields used by the daily-energy Store."""
+    values = {
+        "_daily_solar_energy_kwh": 2.5,
+        "_daily_solar_energy_date": date.today(),
+        "_daily_home_energy_kwh": 7.25,
+        "_daily_home_energy_date": date.today(),
+        "_daily_grid_import_energy_kwh": 4.0,
+        "_daily_grid_export_energy_kwh": 0.75,
+        "_daily_grid_energy_date": date.today(),
+        "_daily_solar_forecast_initial_kwh": None,
+        "_daily_solar_forecast_initial_date": None,
+    }
+    values.update(overrides)
+    return SimpleNamespace(**values)
+
+
+def test_daily_solar_forecast_captures_first_value_only(monkeypatch):
+    controller = _make_daily_energy_controller()
+    tracker = ConsumptionTracker.__new__(ConsumptionTracker)
+    tracker._controller = controller
+    saved = []
+    monkeypatch.setattr(tracker, "save_daily_energy", lambda: saved.append(True))
+
+    assert tracker.capture_daily_solar_forecast(5.12345) is True
+    assert controller._daily_solar_forecast_initial_kwh == pytest.approx(5.1235)
+    assert controller._daily_solar_forecast_initial_date == date.today()
+
+    # A later, live forecast must not replace the 00:05 reference.
+    assert tracker.capture_daily_solar_forecast(9.0) is False
+    assert controller._daily_solar_forecast_initial_kwh == pytest.approx(5.1235)
+    assert saved == [True]
+
+    for invalid in (None, -1.0, float("nan"), float("inf")):
+        assert tracker.capture_daily_solar_forecast(invalid) is False
+
+
+@pytest.mark.asyncio
+async def test_daily_solar_forecast_is_restored_from_store():
+    controller = _make_daily_energy_controller(
+        _daily_solar_forecast_initial_kwh=6.75,
+        _daily_solar_forecast_initial_date=date.today(),
+    )
+    tracker = ConsumptionTracker.__new__(ConsumptionTracker)
+    tracker._controller = controller
+    tracker._daily_energy_store = _FakeConsumptionStore(None)
+
+    await tracker.async_save_daily_energy()
+    saved = tracker._daily_energy_store._data
+    assert saved["solar_forecast_initial_kwh"] == pytest.approx(6.75)
+    assert saved["solar_forecast_initial_date"] == date.today().isoformat()
+
+    restored_controller = _make_daily_energy_controller()
+    restored = ConsumptionTracker.__new__(ConsumptionTracker)
+    restored._controller = restored_controller
+    restored._daily_energy_store = _FakeConsumptionStore(saved)
+
+    await restored.load_daily_energy()
+
+    assert restored_controller._daily_solar_forecast_initial_kwh == pytest.approx(6.75)
+    assert restored_controller._daily_solar_forecast_initial_date == date.today()
+
+
 @pytest.mark.asyncio
 async def test_legacy_windowed_history_is_invalidated_for_recorder_rebuild():
     tracker = _make_history_tracker([(date(2026, 8, 15), 5.77)], _MON_FRI)

@@ -1920,6 +1920,16 @@ class PricingManager:
             decision_data = await self._controller._should_activate_grid_charging()
         else:
             decision_data = await self._evaluate_remaining_grid_charging(now=now)
+
+        # Keep the first full-day forecast separate from the live remaining
+        # horizon used by later reevaluations. With a configured remaining-today
+        # sensor, its value at 00:05 is the full-day forecast; the legacy today
+        # path already returns that same full-day quantity.
+        if horizon is DynamicPricingEvaluationHorizon.DAILY:
+            tracker = getattr(self._controller, "_consumption_tracker", None)
+            capture = getattr(tracker, "capture_daily_solar_forecast", None)
+            if callable(capture):
+                capture(decision_data.get("solar_forecast_kwh"))
         self._controller._last_decision_data = decision_data
         # Reference SOC for the SOC-drop re-evaluation (#411): this is read before
         # the overnight discharge, so a battery that drains far below it must be
