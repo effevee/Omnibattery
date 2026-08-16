@@ -10,6 +10,7 @@
 
 ### Fixed
 
+- **Dashboard charts could use the browser timezone instead of Home Assistant's timezone** (#266): history queries, day boundaries, hover clocks, weekday labels and the current profile hour now follow the user's Home Assistant timezone preference. Calendar-day calculations also account for daylight-saving days instead of assuming every day has exactly 24 hours.
 - **Hoymiles keepalive could delay Home Assistant startup** (#283): the MQTT command watchdog now runs as a named background task, so its long-lived refresh loop is excluded from the bootstrap wait while still being cancelled cleanly when the integration unloads.
 - **Predictive charging notifications could mix daily and remaining forecast labels**: Predictive Charging, Dynamic Pricing and pre-slot confirmations now identify whether solar and household consumption cover today or only the period until midnight, recognize learned-profile and temporary-curve scopes, and show the forecast basis on a separate line instead of presenting remaining consumption as a seven-day average.
 - **Predictive charging windows could truncate daily household consumption**: the legacy daily history, same-day accumulator, Recorder backfill and quarter-hour forecast consumers now keep the full 24-hour household demand, including weekends and predictive grid-charging windows. Battery charging itself is still excluded naturally because negative battery AC power cancels the matching grid import. Existing windowed totals are rebuilt from Recorder instead of mixing partial-day and full-day data.

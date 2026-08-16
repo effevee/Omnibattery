@@ -1309,6 +1309,57 @@ class MarstekVenusPanel extends HTMLElement {
   _lang() {
     return (this._hass && this._hass.locale && this._hass.locale.language) || "es-ES";
   }
+  /** Time zone selected in the HA user profile. `local` deliberately leaves
+   *  Intl on the browser zone; `server` follows Home Assistant's configured
+   *  IANA zone even when the browser or host runs in UTC. */
+  _timeZone() {
+    const locale = this._hass && this._hass.locale;
+    if (!locale || locale.time_zone === "local") return undefined;
+    return this._hass && this._hass.config && this._hass.config.time_zone;
+  }
+  _dateTimeOptions(options = {}) {
+    const timeZone = this._timeZone();
+    return timeZone ? { ...options, timeZone } : options;
+  }
+  /** Calendar fields for an instant in the time zone shown by Home Assistant. */
+  _dateParts(epochMs = Date.now()) {
+    const formatter = new Intl.DateTimeFormat("en-CA", this._dateTimeOptions({
+      year: "numeric", month: "2-digit", day: "2-digit",
+      hour: "2-digit", minute: "2-digit", second: "2-digit",
+      hourCycle: "h23",
+    }));
+    return Object.fromEntries(
+      formatter.formatToParts(new Date(epochMs))
+        .filter((part) => part.type !== "literal")
+        .map((part) => [part.type, Number(part.value)])
+    );
+  }
+  /** Convert a wall-clock midnight in an IANA zone to its real UTC instant. */
+  _zonedMidnight(year, month, day) {
+    const timeZone = this._timeZone();
+    if (!timeZone) return new Date(year, month - 1, day).getTime();
+    const targetAsUtc = Date.UTC(year, month - 1, day);
+    const offsetAt = (epochMs) => {
+      const p = this._dateParts(epochMs);
+      return Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second) - epochMs;
+    };
+    let instant = targetAsUtc - offsetAt(targetAsUtc);
+    // Re-evaluate at the candidate so transitions near the target use the
+    // offset that actually applies to that local date.
+    instant = targetAsUtc - offsetAt(instant);
+    return instant;
+  }
+  /** Start of the selected HA calendar day, optionally shifted by N days. */
+  _dayStartEpoch(offsetDays = 0, epochMs = Date.now()) {
+    const p = this._dateParts(epochMs);
+    const shifted = new Date(Date.UTC(p.year, p.month - 1, p.day + offsetDays));
+    return this._zonedMidnight(
+      shifted.getUTCFullYear(), shifted.getUTCMonth() + 1, shifted.getUTCDate()
+    );
+  }
+  _localHour(epochMs = Date.now()) {
+    return this._dateParts(epochMs).hour;
+  }
   /** Two-letter UI language for i18n lookups ("es-ES" -> "es"). */
   _lang2() {
     return String(this._lang()).split("-")[0].toLowerCase();
@@ -1995,7 +2046,7 @@ class MarstekVenusPanel extends HTMLElement {
   _isDaytime() {
     const sun = this._hass && this._hass.states && this._hass.states["sun.sun"];
     if (sun) return sun.state !== "below_horizon";
-    const h = new Date().getHours();
+    const h = this._localHour();
     return h >= 7 && h < 20;
   }
 
@@ -2228,9 +2279,7 @@ class MarstekVenusPanel extends HTMLElement {
       return;
     }
     // SOC samples are evenly spaced from 00:00 → now; map an original index → clock.
-    const mid = new Date();
-    mid.setHours(0, 0, 0, 0);
-    const startS = mid.getTime() / 1000;
+    const startS = this._dayStartEpoch() / 1000;
     const elapsed = Date.now() / 1000 - startS;
     const fullLast = full.length - 1;
     const clockOf = (origIdx) => startS + (fullLast > 0 ? origIdx / fullLast : 0) * elapsed;
@@ -2332,7 +2381,9 @@ class MarstekVenusPanel extends HTMLElement {
   /** Local clock "HH:MM" for an epoch-seconds value. */
   _fmtClock(s) {
     if (s == null) return "";
-    return new Date(s * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    return new Date(s * 1000).toLocaleTimeString(
+      this._lang(), this._dateTimeOptions({ hour: "2-digit", minute: "2-digit" })
+    );
   }
 
   /** Attach a hover readout to a STABLE element (the .chart-plot or .mini-spark
@@ -2513,11 +2564,11 @@ class MarstekVenusPanel extends HTMLElement {
     const fullSeries = avail.map((d) => ({ color: d.color, data: ps[d.key].map((v) => (v == null ? 0 : v)) }));
     // Anchor each sample to its real time-of-day so a partial day (e.g. 03:00)
     // only fills the left of the fixed 00–24 axis instead of stretching across it.
-    const dayStart = new Date();
-    dayStart.setHours(0, 0, 0, 0);
-    const startS = dayStart.getTime() / 1000;
+    const startS = this._dayStartEpoch() / 1000;
+    const endS = this._dayStartEpoch(1) / 1000;
+    const daySpan = endS - startS;
     const t = Array.isArray(ps.t) ? ps.t : null;
-    const fullXs = t && t.length ? t.map((ts) => (ts - startS) / 86400) : null;
+    const fullXs = t && t.length ? t.map((ts) => (ts - startS) / daySpan) : null;
 
     // apply the active zoom window (fraction of the 24 h day), if set
     const z = plot.__zoom;
@@ -2554,7 +2605,7 @@ class MarstekVenusPanel extends HTMLElement {
       decimals: 2,
       xLabel: (i) => (times ? this._fmtClock(times[i]) : ""),
     };
-    this._updatePowerXaxis(z, startS);
+    this._updatePowerXaxis(z, startS, endS);
   }
 
   // ----- Energía semanal (7 días, barras agrupadas) -----
@@ -2621,11 +2672,13 @@ class MarstekVenusPanel extends HTMLElement {
   /** Natural time domain (epoch s) for a chart: Potencias spans the full day,
    *  SOC spans midnight -> now. */
   _chartDomain(kind) {
-    const mid = new Date();
-    mid.setHours(0, 0, 0, 0);
-    const startS = mid.getTime() / 1000;
+    const startS = this._dayStartEpoch() / 1000;
     const nowS = Date.now() / 1000;
-    return { startS, nowS, endS: kind === "power" ? startS + 86400 : nowS };
+    return {
+      startS,
+      nowS,
+      endS: kind === "power" ? this._dayStartEpoch(1) / 1000 : nowS,
+    };
   }
   /** Range-preset buttons + reset, placed under the chart. */
   _buildZoomBar(host, kind) {
@@ -2732,14 +2785,15 @@ class MarstekVenusPanel extends HTMLElement {
     host.addEventListener("pointerup", onUp);
     window.addEventListener("pointerup", onUp);
   }
-  _updatePowerXaxis(z, startS) {
+  _updatePowerXaxis(z, startS, endS) {
     const ax = this._r.powerXaxis;
     if (!ax) return;
     if (!z) {
       ax.innerHTML = `<span>00</span><span>06</span><span>12</span><span>18</span><span>24</span>`;
       return;
     }
-    const t0 = startS + z.lo * 86400, t1 = startS + z.hi * 86400;
+    const span = endS - startS;
+    const t0 = startS + z.lo * span, t1 = startS + z.hi * span;
     ax.innerHTML = Array.from({ length: 5 }, (_, i) =>
       `<span>${this._fmtClock(t0 + ((t1 - t0) * i) / 4)}</span>`
     ).join("");
@@ -3079,7 +3133,7 @@ class MarstekVenusPanel extends HTMLElement {
     (r.profileBars || []).forEach((bar, index) => {
       const value = Number(hourly[index]) || 0;
       bar.style.height = `${Math.max(2, (value / peak) * 100)}%`;
-      bar.classList.toggle("current", index === new Date().getHours());
+      bar.classList.toggle("current", index === this._localHour());
       bar.title = `${String(index).padStart(2, "0")}:00 · ${this._nf(value, 2)} kWh`;
     });
     if (r.profileState) {
@@ -3183,13 +3237,12 @@ class MarstekVenusPanel extends HTMLElement {
 
   /** Build a step-hold sampler grid from local midnight to now (N+1 points). */
   _historyGrid(n = 144) {
-    const start = new Date();
-    start.setHours(0, 0, 0, 0);
-    const startS = start.getTime() / 1000;
+    const startMs = this._dayStartEpoch();
+    const startS = startMs / 1000;
     const nowS = Date.now() / 1000;
     const grid = [];
     for (let i = 0; i <= n; i++) grid.push(startS + (nowS - startS) * (i / n));
-    return { grid, startISO: start.toISOString() };
+    return { grid, startISO: new Date(startMs).toISOString() };
   }
 
   /** Resample one entity's recorder history onto `grid` (step-hold), in kW. */
@@ -3354,11 +3407,11 @@ class MarstekVenusPanel extends HTMLElement {
     const impIds = impSys ? [impSys] : [];
     const expIds = expSys ? [expSys] : [];
     const days = 7;
-    const start = new Date();
-    start.setHours(0, 0, 0, 0);
-    start.setDate(start.getDate() - (days - 1));
+    const boundaries = Array.from(
+      { length: days + 1 }, (_, k) => this._dayStartEpoch(k - (days - 1))
+    );
     const allIds = [...new Set([...chIds, ...diIds, ...impIds, ...expIds])];
-    const startISO = start.toISOString();
+    const startISO = new Date(boundaries[0]).toISOString();
     const endISO = new Date().toISOString();
     // These sources reset at midnight.  Their Recorder ``sum`` is a
     // lifetime-normalized value, so its daily ``change`` can include reset
@@ -3385,8 +3438,9 @@ class MarstekVenusPanel extends HTMLElement {
       }
     }
     if (!statistics && !history) return;
-    const startMs = start.getTime();
-    const dayIndex = (ms) => Math.floor((ms - startMs) / 86400000);
+    const dayIndex = (ms) => boundaries.findIndex(
+      (start, k) => k < days && ms >= start && ms < boundaries[k + 1]
+    );
     // Prefer each entity's final daily statistics state, then sum across ids.
     // Raw history fallbacks retain the former daily-maximum calculation.
     const dailyTotals = (entIds) => {
@@ -3454,8 +3508,10 @@ class MarstekVenusPanel extends HTMLElement {
     if (expTot && liveExport != null) expTot[todayIndex] = liveExport;
     const labels = [];
     for (let k = 0; k < days; k++) {
-      const dd = new Date(startMs + k * 86400000);
-      labels.push(dd.toLocaleDateString(this._lang(), { weekday: "short" }));
+      const dd = new Date(boundaries[k]);
+      labels.push(dd.toLocaleDateString(
+        this._lang(), this._dateTimeOptions({ weekday: "short" })
+      ));
     }
     this._weekly = {
       days: labels,
