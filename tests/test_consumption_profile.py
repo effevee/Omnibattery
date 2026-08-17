@@ -268,6 +268,33 @@ def test_current_day_capture_exposes_raw_energy_and_coverage():
     assert capture["coverage_ratio"] == pytest.approx(round(900 / 86400, 6))
 
 
+def test_current_day_capture_is_unavailable_without_covered_samples():
+    profile = _profile()
+    today = date.today()
+    start = datetime.combine(today, datetime.min.time()).replace(
+        hour=10,
+        tzinfo=MADRID,
+    )
+
+    assert profile.current_day_capture(today) is None
+
+    # The first valid sample establishes a baseline but cannot integrate
+    # energy yet.  This is the transient state observed after a restart.
+    profile.record_power_sample(1.0, local_time=start, monotonic_time=0.0)
+
+    assert profile.current_day_capture(today) is None
+
+
+def test_current_day_capture_keeps_zero_energy_when_coverage_is_valid():
+    profile = _profile({date.today(): _day(date.today(), 0.0)})
+
+    capture = profile.current_day_capture(date.today())
+
+    assert capture is not None
+    assert capture["energy_kwh"] == 0.0
+    assert capture["valid_intervals"] == INTERVAL_COUNT
+
+
 def test_four_weekday_samples_are_weighted_by_age_and_profile_becomes_mature():
     # Freeze the profile's notion of today so the age weights do not depend on
     # the calendar date on which the test suite happens to run.
