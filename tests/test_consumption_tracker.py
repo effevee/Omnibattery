@@ -17,6 +17,7 @@ from custom_components.omnibattery.const import (
     DEFAULT_BASE_CONSUMPTION_KWH,
 )
 from custom_components.omnibattery.tracking.consumption_tracker import (
+    CONSUMPTION_HISTORY_SCOPE,
     ConsumptionTracker,
 )
 from tests.conftest import FakeCoordinator
@@ -98,9 +99,8 @@ def test_avg_daily_consumption_single_day():
 
 
 # ----------------------------------------------------------------------
-# Operating-day gating of the consumption history (#46 follow-up):
-# non-operating days (weekends outside the charging window) must never enter
-# history with a synthetic default, or they drag the 7-day average down.
+# Every calendar day belongs in consumption history. Predictive grid-charging
+# windows schedule charging; they do not make the home or battery inactive.
 # ----------------------------------------------------------------------
 
 def _make_history_tracker(history, charging_time_slots):
@@ -117,46 +117,21 @@ _MON_FRI = [{"days": ["mon", "tue", "wed", "thu", "fri"],
              "start_time": "00:00", "end_time": "08:00"}]
 
 
-def test_is_operating_day_respects_slot_days():
+def test_recent_history_days_include_weekend_despite_weekday_charge_window():
     tracker = _make_history_tracker([], _MON_FRI)
-    assert tracker._is_operating_day(date(2026, 6, 26))   # Friday
-    assert not tracker._is_operating_day(date(2026, 6, 27))  # Saturday
-    assert not tracker._is_operating_day(date(2026, 6, 28))  # Sunday
-    assert tracker._is_operating_day(date(2026, 6, 29))   # Monday
+    days = tracker._recent_history_days(7, before=date(2026, 7, 3))
+    assert days == [date(2026, 7, 3) - timedelta(days=i) for i in range(1, 8)]
+    assert date(2026, 6, 27) in days
+    assert date(2026, 6, 28) in days
 
 
-def test_is_operating_day_true_when_no_slots():
-    # No charging window configured = battery runs 24/7 = every day counts.
+def test_recent_history_days_all_when_no_slots():
     tracker = _make_history_tracker([], [])
-    assert tracker._is_operating_day(date(2026, 6, 27))  # a Saturday
-
-
-def test_recent_operating_days_reaches_across_weekend():
-    # The window is 7 OPERATING days, not 7 calendar days: on a Friday it reaches
-    # back over the weekend into the previous week. (Issue #46 clarification.)
-    tracker = _make_history_tracker([], _MON_FRI)
-    days = tracker._recent_operating_days(7, before=date(2026, 7, 3))  # a Friday
-    assert days == [
-        date(2026, 7, 2),   # Thu (yesterday)
-        date(2026, 7, 1),   # Wed
-        date(2026, 6, 30),  # Tue
-        date(2026, 6, 29),  # Mon
-        date(2026, 6, 26),  # Fri  (skipped Sun 28 + Sat 27)
-        date(2026, 6, 25),  # Thu
-        date(2026, 6, 24),  # Wed
-    ]
-    # No weekend day ever appears.
-    assert all(tracker._is_operating_day(d) for d in days)
-
-
-def test_recent_operating_days_all_when_no_slots():
-    # 24/7 config → 7 consecutive calendar days before `before`.
-    tracker = _make_history_tracker([], [])
-    days = tracker._recent_operating_days(7, before=date(2026, 7, 3))
+    days = tracker._recent_history_days(7, before=date(2026, 7, 3))
     assert days == [date(2026, 7, 3) - timedelta(days=i) for i in range(1, 8)]
 
 
-def test_initialize_defaults_seeds_seven_operating_days():
+def test_initialize_defaults_seeds_seven_calendar_days():
     tracker = _make_history_tracker([], _MON_FRI)
     import custom_components.omnibattery.tracking.consumption_tracker as ct
 
@@ -173,10 +148,164 @@ def test_initialize_defaults_seeds_seven_operating_days():
         ct.date = orig
 
     seeded = {d for d, _ in tracker._controller._daily_consumption_history}
-    assert len(seeded) == 7                    # always 7 operating days
-    assert date(2026, 6, 27) not in seeded     # Saturday
-    assert date(2026, 6, 28) not in seeded     # Sunday
-    assert all(tracker._is_operating_day(d) for d in seeded)
+    assert len(seeded) == 7
+    assert date(2026, 6, 27) in seeded
+    assert date(2026, 6, 28) in seeded
+
+
+def test_consumption_window_is_full_day_with_weekday_charge_slot():
+    tracker = _make_history_tracker([], _MON_FRI)
+    assert tracker.is_in_consumption_window() is True
+    assert tracker.get_consumption_window_hours_per_day() == 24.0
+    assert tracker.consumption_window_hours_in_range(0.0, 8.0) == 8.0
+
+
+@pytest.mark.asyncio
+async def test_accumulator_counts_power_during_predictive_charge_window(monkeypatch):
+    """A predictive slot must not pause household consumption learning."""
+    tracker = _make_history_tracker([], _MON_FRI)
+    tracker._controller._household_energy_accumulator = 2.0
+    tracker._household_last_accumulation_time = 100.0
+    tracker._consumption_profile = SimpleNamespace(record_power_sample=lambda *a, **kw: None)
+    monkeypatch.setattr(tracker, "get_adjusted_home_power_kw", lambda: 0.5)
+
+    import custom_components.omnibattery.tracking.consumption_tracker as ct
+    monkeypatch.setattr(ct, "monotonic", lambda: 3700.0)
+
+    await tracker.accumulate_household_consumption()
+
+    assert tracker._controller._household_energy_accumulator == pytest.approx(2.5)
+
+
+class _FakeConsumptionStore:
+    def __init__(self, data):
+        self._data = data
+
+    async def async_load(self):
+        return self._data
+
+    async def async_save(self, data):
+        self._data = data
+
+
+def _make_daily_energy_controller(**overrides):
+    """Build the controller fields used by the daily-energy Store."""
+    values = {
+        "_daily_solar_energy_kwh": 2.5,
+        "_daily_solar_energy_date": date.today(),
+        "_daily_home_energy_kwh": 7.25,
+        "_daily_home_energy_date": date.today(),
+        "_daily_grid_import_energy_kwh": 4.0,
+        "_daily_grid_export_energy_kwh": 0.75,
+        "_daily_grid_energy_date": date.today(),
+        "_daily_solar_forecast_initial_kwh": None,
+        "_daily_solar_forecast_initial_date": None,
+    }
+    values.update(overrides)
+    return SimpleNamespace(**values)
+
+
+def test_daily_solar_forecast_captures_first_value_only(monkeypatch):
+    controller = _make_daily_energy_controller()
+    tracker = ConsumptionTracker.__new__(ConsumptionTracker)
+    tracker._controller = controller
+    saved = []
+    monkeypatch.setattr(tracker, "save_daily_energy", lambda: saved.append(True))
+
+    assert tracker.capture_daily_solar_forecast(5.12345) is True
+    assert controller._daily_solar_forecast_initial_kwh == pytest.approx(5.1235)
+    assert controller._daily_solar_forecast_initial_date == date.today()
+
+    # A later, live forecast must not replace the 00:05 reference.
+    assert tracker.capture_daily_solar_forecast(9.0) is False
+    assert controller._daily_solar_forecast_initial_kwh == pytest.approx(5.1235)
+    assert saved == [True]
+
+    for invalid in (None, -1.0, float("nan"), float("inf")):
+        assert tracker.capture_daily_solar_forecast(invalid) is False
+
+
+@pytest.mark.asyncio
+async def test_daily_solar_forecast_is_restored_from_store():
+    controller = _make_daily_energy_controller(
+        _daily_solar_forecast_initial_kwh=6.75,
+        _daily_solar_forecast_initial_date=date.today(),
+    )
+    tracker = ConsumptionTracker.__new__(ConsumptionTracker)
+    tracker._controller = controller
+    tracker._daily_energy_store = _FakeConsumptionStore(None)
+
+    await tracker.async_save_daily_energy()
+    saved = tracker._daily_energy_store._data
+    assert saved["solar_forecast_initial_kwh"] == pytest.approx(6.75)
+    assert saved["solar_forecast_initial_date"] == date.today().isoformat()
+
+    restored_controller = _make_daily_energy_controller()
+    restored = ConsumptionTracker.__new__(ConsumptionTracker)
+    restored._controller = restored_controller
+    restored._daily_energy_store = _FakeConsumptionStore(saved)
+
+    await restored.load_daily_energy()
+
+    assert restored_controller._daily_solar_forecast_initial_kwh == pytest.approx(6.75)
+    assert restored_controller._daily_solar_forecast_initial_date == date.today()
+
+
+@pytest.mark.asyncio
+async def test_legacy_windowed_history_is_invalidated_for_recorder_rebuild():
+    tracker = _make_history_tracker([(date(2026, 8, 15), 5.77)], _MON_FRI)
+    tracker._controller._daily_grid_at_min_soc_kwh = 0.0
+    tracker._consumption_store = _FakeConsumptionStore(
+        {
+            "history": [("2026-08-15", 5.77)],
+            "grid_at_min_soc_kwh": 1.53,
+        }
+    )
+
+    assert await tracker.load_consumption_history() is True
+    assert tracker._controller._daily_consumption_history == []
+    assert tracker._controller._daily_grid_at_min_soc_kwh == pytest.approx(1.53)
+
+
+@pytest.mark.asyncio
+async def test_full_day_history_is_restored_without_invalidation():
+    tracker = _make_history_tracker([], _MON_FRI)
+    tracker._controller._daily_grid_at_min_soc_kwh = 0.0
+    tracker._consumption_store = _FakeConsumptionStore(
+        {
+            "consumption_scope": CONSUMPTION_HISTORY_SCOPE,
+            "history": [("2026-08-15", 14.49)],
+        }
+    )
+
+    assert await tracker.load_consumption_history() is True
+    assert tracker._controller._daily_consumption_history == [
+        (date(2026, 8, 15), 14.49)
+    ]
+
+
+@pytest.mark.asyncio
+async def test_legacy_same_day_accumulator_is_rebuilt_from_recorder(monkeypatch):
+    tracker = _make_history_tracker([], _MON_FRI)
+    tracker._controller._household_energy_accumulator = 1.0
+    tracker._controller._household_accumulator_date = None
+    tracker._accumulator_store = _FakeConsumptionStore(
+        {"date": date.today().isoformat(), "household_kwh": 1.0}
+    )
+
+    async def _rebuild(_target_date):
+        return 4.25
+
+    monkeypatch.setattr(tracker, "backfill_home_from_history", _rebuild)
+
+    await tracker.load_accumulators()
+
+    assert tracker._controller._household_energy_accumulator == pytest.approx(4.25)
+    assert tracker._controller._household_accumulator_date == date.today()
+    assert (
+        tracker._accumulator_store._data["consumption_scope"]
+        == CONSUMPTION_HISTORY_SCOPE
+    )
 
 
 # ----------------------------------------------------------------------
@@ -308,6 +437,27 @@ def test_derive_home_counts_connected_discharge():
         {"sensor.grid": _w(300)}, [_battunit(2500)]
     )
     assert tracker._derive_home_power_kw() == pytest.approx(2.8)
+
+
+def test_derive_home_cancels_grid_energy_used_to_charge_battery():
+    # Grid imports 2800 W while the battery charges at 2500 W (negative AC).
+    # Only the remaining 300 W belongs to household consumption.
+    tracker = _make_home_tracker(
+        {"sensor.grid": _w(2800)}, [_battunit(-2500)]
+    )
+    assert tracker._derive_home_power_kw() == pytest.approx(0.3)
+
+
+def test_adjusted_home_holds_last_valid_value_for_small_charge_balance():
+    # A stale grid/battery pair can leave a small positive balance instead of
+    # a negative one. It must not be accepted as real household consumption.
+    tracker = _make_home_tracker(
+        {"sensor.grid": _w(1000)}, [_battunit(-800)]
+    )
+    assert tracker.get_adjusted_home_power_kw() == pytest.approx(0.2)
+
+    tracker._hass.states._mapping["sensor.grid"] = _w(801)
+    assert tracker.get_adjusted_home_power_kw() == pytest.approx(0.2)
 
 
 def test_derive_home_skips_disconnected_stale_discharge():

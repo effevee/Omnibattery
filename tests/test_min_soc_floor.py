@@ -11,6 +11,7 @@ a stub controller (no Home Assistant runtime needed).
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timedelta
 from types import SimpleNamespace
 
 from custom_components.omnibattery import ChargeDischargeController
@@ -156,6 +157,72 @@ def test_no_re_evaluation_while_already_charging():
     asyncio.run(engine.handle_time_slot_predictive_charging())
     assert calls["activate"] == 0
     assert calls["handle"] == 1
+
+
+def test_initial_evaluation_retries_when_configured_forecast_is_unavailable():
+    """Do not publish a one-shot safe-mode notification during a forecast blip."""
+    calls = {"activate": 0, "notify": 0}
+    forecast_state = {"value": "unavailable"}
+
+    async def _activate():
+        calls["activate"] += 1
+        return {
+            "should_charge": True,
+            "solar_forecast_kwh": (
+                None if forecast_state["value"] == "unavailable" else 1.5
+            ),
+        }
+
+    async def _notify(**_kwargs):
+        calls["notify"] += 1
+
+    controller = SimpleNamespace(
+        charging_time_slots=["slot"],
+        predictive_charging_overridden=False,
+        grid_charging_active=False,
+        last_evaluation_soc=None,
+        _predictive_min_soc_floor=0.0,
+        _predictive_min_soc_floor_enabled=False,
+        coordinators=[_Coord(50.0, 10.0)],
+        max_contracted_power=5000,
+        _grid_charging_initialized=False,
+        first_execution=False,
+        _handle_predictive_grid_charging=_noop,
+        _slot_entry_time=datetime.now() - timedelta(minutes=6),
+        _last_decision_data=None,
+        _check_time_window=lambda: True,
+        solar_forecast_remaining_sensor="sensor.solar_remaining",
+        solar_forecast_sensor=None,
+        hass=SimpleNamespace(
+            states=SimpleNamespace(
+                get=lambda _entity_id: SimpleNamespace(
+                    state=forecast_state["value"],
+                    attributes={"unit_of_measurement": "kWh"},
+                )
+            )
+        ),
+    )
+    engine = PricingManager(
+        hass=controller.hass,
+        controller=controller,
+    )
+    engine._current_horizon_grid_charging_decision = _activate
+    engine._send_predictive_charging_notification = _notify
+
+    asyncio.run(engine.handle_time_slot_predictive_charging())
+
+    assert calls["activate"] == 0
+    assert calls["notify"] == 0
+    assert controller.last_evaluation_soc is None
+    assert controller.grid_charging_active is False
+
+    forecast_state["value"] = "1.5"
+    asyncio.run(engine.handle_time_slot_predictive_charging())
+
+    assert calls["activate"] == 1
+    assert calls["notify"] == 1
+    assert controller.last_evaluation_soc == 50.0
+    assert controller.grid_charging_active is True
 
 
 def test_above_floor_no_swing_no_re_evaluation():

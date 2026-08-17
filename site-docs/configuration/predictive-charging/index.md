@@ -12,7 +12,7 @@ Else:
 ```
 
 - **Usable battery**: energy currently stored above the configured min SOC.
-- **Solar forecast**: estimated production for today (Solcast/Forecast.Solar sensor).
+- **Solar forecast**: preferably the production remaining today (Solcast/Forecast.Solar sensor). Whole-day sensors remain a legacy fallback during the transition.
 - **Expected consumption**: 7-day rolling average. See [Daily consumption estimate](../../features/consumption-estimate.md).
 
 ---
@@ -56,6 +56,16 @@ The optional **Guaranteed Minimum SOC** slider (Control tab, `0` = off) forces a
 It re-triggers with hysteresis: once SOC recovers to the configured floor, charging stops if the floor was the only reason to charge; it re-arms when SOC drops to `floor − 5 %`. Set it via the `number.*_predictive_min_soc_floor` slider, paired with the **Guaranteed Minimum SOC** switch.
 
 ---
+
+## Consumption forecast source
+
+The daily estimate is retained as a compatibility fallback, but mature
+installations use the local 15-minute profile described in [Daily and hourly
+consumption estimate](../../features/consumption-estimate.md). Dynamic Pricing
+and its intraday re-evaluations request only the remaining local-time horizon.
+Predictive charging windows are not subtracted from household demand. The decision attributes identify the
+source as `profile` or `legacy_daily`, together with profile coverage and the
+number of learned days.
 
 ## Available modes
 

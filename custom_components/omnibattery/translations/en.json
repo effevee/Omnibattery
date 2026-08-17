@@ -12,6 +12,10 @@
       "title": "Solar forecast unusable",
       "description": "The configured solar forecast sensor {sensor} has been unavailable or unreadable for over {minutes} minutes. Omnibattery keeps running, but every feature that depends on the forecast is now blind: the charge delay unlocks for the rest of the day, grid-charge decisions assume no sun at all and may book grid slots you do not need, and remaining-solar estimates read as 0 kWh. Check the sensor or the integration that provides it."
     },
+    "solar_forecast_remaining_recommended": {
+      "title": "Use a remaining solar forecast",
+      "description": "{sensor} is a legacy whole-day solar forecast. Omnibattery still supports it, but past forecast errors can make intraday decisions inaccurate. Configure the provider's \"remaining today\" forecast sensor in Omnibattery options for a more accurate remaining-solar calculation."
+    },
     "three_phase_manual_mode": {
       "title": "Three-phase protection can be bypassed by manual commands",
       "description": "Three-phase protection is enabled, but manual register or manual time-slot commands can write directly to a battery without the automatic phase envelope. Keep those commands within the configured phase limits."
@@ -28,7 +32,8 @@
         "description": "Select the sensor that measures grid import/export power. Optionally, configure the solar forecast sensor for advanced features.",
         "data": {
           "consumption_sensor": "Grid consumption sensor",
-          "solar_forecast_sensor": "Solar forecast sensor (optional)",
+          "solar_forecast_sensor": "Whole-day solar forecast sensor (legacy)",
+          "solar_forecast_remaining_sensor": "Solar forecast remaining today sensor (recommended)",
           "solar_production_sensor": "Solar production sensor (optional)",
           "meter_inverted": "Inverted meter sign",
           "max_contracted_power": "Maximum contracted power (W)",
@@ -36,7 +41,8 @@
         },
         "data_description": {
           "consumption_sensor": "Real-time sensor for imported (+) or exported (-) grid power. Updates every 1-2 seconds are recommended. Slower sensors are accepted, but delayed readings reduce regulation quality; the latest reading is followed for up to 65 seconds.",
-          "solar_forecast_sensor": "Sensor providing solar production forecast in kWh (e.g., Solcast). If configured here, it will be used automatically for predictive charging and solar charge delay.",
+          "solar_forecast_sensor": "Legacy sensor providing the whole-day solar forecast. Existing installations can keep using it during the transition; prefer Remaining Today for new configurations.",
+          "solar_forecast_remaining_sensor": "Sensor providing solar production still expected today in kWh. Saving it replaces the legacy whole-day forecast and it is never reduced by production already measured.",
           "solar_production_sensor": "Real-time PV production power sensor (W/kW) from an external inverter not wired through the battery MPPT inputs. Used to show the Solar node in the dashboard energy-flow diagram. Leave empty if your panels feed the battery MPPT directly.",
           "meter_inverted": "Enable this option if your meter uses the opposite convention: positive = export, negative = import. The unit (W/kW) is detected automatically.",
           "max_contracted_power": "Total contracted power in watts. System won't exceed this limit when charging to avoid tripping the breaker",
@@ -691,7 +697,8 @@
         "description": "Configure the sensors used by the integration.",
         "data": {
           "consumption_sensor": "Grid consumption sensor",
-          "solar_forecast_sensor": "Solar forecast sensor (optional)",
+          "solar_forecast_sensor": "Whole-day solar forecast sensor (legacy)",
+          "solar_forecast_remaining_sensor": "Solar forecast remaining today sensor (recommended)",
           "solar_production_sensor": "Solar production sensor (optional)",
           "meter_inverted": "Inverted meter sign",
           "max_contracted_power": "Maximum contracted power (W)",
@@ -699,7 +706,8 @@
         },
         "data_description": {
           "consumption_sensor": "Real-time sensor for imported (+) or exported (-) grid power. Updates every 1-2 seconds are recommended. Slower sensors are accepted, but delayed readings reduce regulation quality; the latest reading is followed for up to 65 seconds.",
-          "solar_forecast_sensor": "Sensor providing solar production forecast in kWh (e.g., Solcast). If configured here, it will be used automatically for predictive charging and solar charge delay.",
+          "solar_forecast_sensor": "Legacy sensor providing the whole-day solar forecast. Existing installations can keep using it during the transition; prefer Remaining Today for new configurations.",
+          "solar_forecast_remaining_sensor": "Sensor providing solar production still expected today in kWh. Saving it replaces the legacy whole-day forecast and it is never reduced by production already measured.",
           "solar_production_sensor": "Real-time PV production power sensor (W/kW) from an external inverter not wired through the battery MPPT inputs. Used to show the Solar node in the dashboard energy-flow diagram. Leave empty if your panels feed the battery MPPT directly.",
           "meter_inverted": "Enable this option if your meter uses the opposite convention: positive = export, negative = import. The unit (W/kW) is detected automatically.",
           "max_contracted_power": "Total contracted power in watts. System won't exceed this limit when charging to avoid tripping the breaker",
@@ -1436,6 +1444,12 @@
       "system_daily_home_energy": {
         "name": "Daily Home Consumption"
       },
+      "expected_home_consumption_profile": {
+        "name": "Expected Home Consumption Profile"
+      },
+      "consumption_profile_capture": {
+        "name": "Current Consumption Profile Capture"
+      },
       "home_consumption": {
         "name": "Home Consumption"
       },
@@ -1447,6 +1461,7 @@
           "oscillating": "Oscillating",
           "sluggish": "Sluggish",
           "battery_limited": "Battery limited",
+          "blocked": "Blocked",
           "collecting_data": "Collecting data"
         }
       },

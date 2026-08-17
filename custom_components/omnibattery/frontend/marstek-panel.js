@@ -48,6 +48,7 @@ const I18N = {
     placeholderMsg: "This view is coming in a future phase. For now, use the Overview view.",
     cardFlow: "Energy flow", cardSoc: "System status", cardDaily: "Energy today",
     cardWeekly: "Weekly energy", cardPower: "Power", cardSocToday: "SOC · today",
+    forecastToday: "Solar forecast · 00:05", solarRemaining: "Solar remaining", expectedConsumption: "Expected consumption",
     grid: "Grid", solar: "Solar", home: "Home", battery: "Battery",
     excludedDevices: "Excluded devices",
     importing: "Importing", exporting: "Exporting",
@@ -119,6 +120,7 @@ const I18N = {
     placeholderMsg: "Esta vista llegará en una próxima fase. Por ahora, usa la vista Resumen.",
     cardFlow: "Flujo de energía", cardSoc: "Estado del sistema", cardDaily: "Energía hoy",
     cardWeekly: "Energía semanal", cardPower: "Potencias", cardSocToday: "SOC · hoy",
+    forecastToday: "Previsión solar · 00:05", solarRemaining: "Solar restante", expectedConsumption: "Consumo esperado",
     grid: "Red", solar: "Solar", home: "Casa", battery: "Batería",
     excludedDevices: "Disp. excluidos",
     importing: "Importando", exporting: "Exportando",
@@ -190,6 +192,7 @@ const I18N = {
     placeholderMsg: "Aquesta vista arribarà en una fase futura. De moment, fes servir la vista Resum.",
     cardFlow: "Flux d'energia", cardSoc: "Estat del sistema", cardDaily: "Energia avui",
     cardWeekly: "Energia setmanal", cardPower: "Potències", cardSocToday: "SOC · avui",
+    forecastToday: "Previsió solar · 00:05", solarRemaining: "Solar restant", expectedConsumption: "Consum esperat",
     grid: "Xarxa", solar: "Solar", home: "Casa", battery: "Bateria",
     excludedDevices: "Disp. exclosos",
     importing: "Important", exporting: "Exportant",
@@ -257,6 +260,7 @@ const I18N = {
     placeholderMsg: "Diese Ansicht kommt in einer späteren Phase. Nutze vorerst die Übersicht.",
     cardFlow: "Energiefluss", cardSoc: "Systemstatus", cardDaily: "Energie heute",
     cardWeekly: "Wochenenergie", cardPower: "Leistung", cardSocToday: "SOC · heute",
+    forecastToday: "Solarprognose · 00:05", solarRemaining: "Verbleibende Solarenergie", expectedConsumption: "Erwarteter Verbrauch",
     grid: "Netz", solar: "Solar", home: "Haus", battery: "Batterie",
     excludedDevices: "Ausgeschl. Geräte",
     importing: "Bezug", exporting: "Einspeisung",
@@ -324,6 +328,7 @@ const I18N = {
     placeholderMsg: "Cette vue arrivera dans une phase ultérieure. Pour l'instant, utilisez la vue Résumé.",
     cardFlow: "Flux d'énergie", cardSoc: "État du système", cardDaily: "Énergie aujourd'hui",
     cardWeekly: "Énergie hebdomadaire", cardPower: "Puissances", cardSocToday: "SOC · aujourd'hui",
+    forecastToday: "Prévision solaire · 00:05", solarRemaining: "Solaire restant", expectedConsumption: "Consommation prévue",
     grid: "Réseau", solar: "Solaire", home: "Maison", battery: "Batterie",
     excludedDevices: "Appareils exclus",
     importing: "Importation", exporting: "Exportation",
@@ -391,6 +396,7 @@ const I18N = {
     placeholderMsg: "Deze weergave komt in een latere fase. Gebruik voorlopig het Overzicht.",
     cardFlow: "Energiestroom", cardSoc: "Systeemstatus", cardDaily: "Energie vandaag",
     cardWeekly: "Energie per week", cardPower: "Vermogen", cardSocToday: "SOC · vandaag",
+    forecastToday: "Zonneverwachting · 00:05", solarRemaining: "Resterende zonne-energie", expectedConsumption: "Verwacht verbruik",
     grid: "Net", solar: "Zon", home: "Huis", battery: "Batterij",
     excludedDevices: "Uitgesloten app.",
     importing: "Invoer", exporting: "Teruglevering",
@@ -504,6 +510,7 @@ const K = {
   sysDailyHome: "system_daily_home_energy", // exact daily home consumption (kWh)
   sysDailyGridImport: "system_daily_grid_import_energy", // exact daily grid import (kWh)
   sysDailyGridExport: "system_daily_grid_export_energy", // exact daily grid export (kWh)
+  consumptionProfile: "expected_home_consumption_profile",
   sysAlarm: "system_alarm_status",
   pdQuality: "system_pd_control_quality", // PD control-quality verdict
   // diagnostics / flags
@@ -1302,6 +1309,57 @@ class MarstekVenusPanel extends HTMLElement {
   _lang() {
     return (this._hass && this._hass.locale && this._hass.locale.language) || "es-ES";
   }
+  /** Time zone selected in the HA user profile. `local` deliberately leaves
+   *  Intl on the browser zone; `server` follows Home Assistant's configured
+   *  IANA zone even when the browser or host runs in UTC. */
+  _timeZone() {
+    const locale = this._hass && this._hass.locale;
+    if (!locale || locale.time_zone === "local") return undefined;
+    return this._hass && this._hass.config && this._hass.config.time_zone;
+  }
+  _dateTimeOptions(options = {}) {
+    const timeZone = this._timeZone();
+    return timeZone ? { ...options, timeZone } : options;
+  }
+  /** Calendar fields for an instant in the time zone shown by Home Assistant. */
+  _dateParts(epochMs = Date.now()) {
+    const formatter = new Intl.DateTimeFormat("en-CA", this._dateTimeOptions({
+      year: "numeric", month: "2-digit", day: "2-digit",
+      hour: "2-digit", minute: "2-digit", second: "2-digit",
+      hourCycle: "h23",
+    }));
+    return Object.fromEntries(
+      formatter.formatToParts(new Date(epochMs))
+        .filter((part) => part.type !== "literal")
+        .map((part) => [part.type, Number(part.value)])
+    );
+  }
+  /** Convert a wall-clock midnight in an IANA zone to its real UTC instant. */
+  _zonedMidnight(year, month, day) {
+    const timeZone = this._timeZone();
+    if (!timeZone) return new Date(year, month - 1, day).getTime();
+    const targetAsUtc = Date.UTC(year, month - 1, day);
+    const offsetAt = (epochMs) => {
+      const p = this._dateParts(epochMs);
+      return Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second) - epochMs;
+    };
+    let instant = targetAsUtc - offsetAt(targetAsUtc);
+    // Re-evaluate at the candidate so transitions near the target use the
+    // offset that actually applies to that local date.
+    instant = targetAsUtc - offsetAt(instant);
+    return instant;
+  }
+  /** Start of the selected HA calendar day, optionally shifted by N days. */
+  _dayStartEpoch(offsetDays = 0, epochMs = Date.now()) {
+    const p = this._dateParts(epochMs);
+    const shifted = new Date(Date.UTC(p.year, p.month - 1, p.day + offsetDays));
+    return this._zonedMidnight(
+      shifted.getUTCFullYear(), shifted.getUTCMonth() + 1, shifted.getUTCDate()
+    );
+  }
+  _localHour(epochMs = Date.now()) {
+    return this._dateParts(epochMs).hour;
+  }
   /** Two-letter UI language for i18n lookups ("es-ES" -> "es"). */
   _lang2() {
     return String(this._lang()).split("-")[0].toLowerCase();
@@ -1382,6 +1440,18 @@ class MarstekVenusPanel extends HTMLElement {
     if (!stateObj) return null;
     const n = Number(stateObj.state);
     return Number.isNaN(n) ? null : n;
+  }
+  _attrNum(attrs, key) {
+    const value = attrs && attrs[key];
+    if (value == null || value === "") return null;
+    const n = Number(value);
+    return Number.isFinite(n) ? n : null;
+  }
+  _energyKwh(stateObj) {
+    const n = this._num(stateObj);
+    if (n == null) return null;
+    const unit = String((stateObj.attributes || {}).unit_of_measurement || "kWh").toLowerCase();
+    return unit === "wh" ? n / 1000 : n;
   }
   /** Sum numeric states for a key across all batteries. */
   _sum(byKey, key) {
@@ -1634,6 +1704,22 @@ class MarstekVenusPanel extends HTMLElement {
     const dailyHome = this._num(this._stateFor(byKey, K.sysDailyHome));
     const dailyGridImport = this._num(this._stateFor(byKey, K.sysDailyGridImport));
     const dailyGridExport = this._num(this._stateFor(byKey, K.sysDailyGridExport));
+    const profileObj = this._stateFor(byKey, K.consumptionProfile);
+    const predictiveObj = this._stateFor(byKey, K.predictiveActive);
+    const predictiveAttrs = predictiveObj && predictiveObj.attributes ? predictiveObj.attributes : {};
+    const forecastInitial = this._attrNum(
+      predictiveAttrs, "solar_forecast_initial_kwh"
+    );
+    const forecastRemaining = this._attrNum(
+      predictiveAttrs, "remaining_solar_kwh"
+    );
+    const remainingEntity = this._panelConfig.solar_forecast_remaining_entity
+      ? hass.states[this._panelConfig.solar_forecast_remaining_entity]
+      : null;
+    const solarRemaining = forecastRemaining ?? this._energyKwh(remainingEntity);
+    const expectedConsumption =
+      this._num(profileObj) ??
+      this._attrNum(predictiveAttrs, "daily_avg_consumption_kwh");
 
     return {
       nBat,
@@ -1653,6 +1739,9 @@ class MarstekVenusPanel extends HTMLElement {
       dailyHome,
       dailyGridImport,
       dailyGridExport,
+      forecastInitial,
+      solarRemaining,
+      expectedConsumption,
       active,
       offline,
       netBalance,
@@ -1952,7 +2041,7 @@ class MarstekVenusPanel extends HTMLElement {
   _isDaytime() {
     const sun = this._hass && this._hass.states && this._hass.states["sun.sun"];
     if (sun) return sun.state !== "below_horizon";
-    const h = new Date().getHours();
+    const h = this._localHour();
     return h >= 7 && h < 20;
   }
 
@@ -2086,7 +2175,7 @@ class MarstekVenusPanel extends HTMLElement {
     const body = document.createElement("div");
     body.className = "daily-body";
     const bar = (cls, label, color) => `
-      <div class="daily-row">
+      <div class="daily-row daily-row-${cls}">
         <div class="daily-head"><span class="muted">${label}</span>
           <span class="num daily-${cls}-v">—<span class="dim" style="font-size:11px"> kWh</span></span></div>
         <div class="socbar"><span class="daily-${cls}-bar" style="background:${color}"></span></div>
@@ -2097,7 +2186,10 @@ class MarstekVenusPanel extends HTMLElement {
       bar("sol", this._t("solar"), "var(--solar)") +
       bar("home", this._t("home"), "var(--home)") +
       bar("imp", this._t("gridImport"), "var(--flow-purple)") +
-      bar("exp", this._t("gridExport"), "var(--flow-orange)");
+      bar("exp", this._t("gridExport"), "var(--flow-orange)") +
+      bar("forecast", this._t("forecastToday"), "var(--solar)") +
+      bar("remaining", this._t("solarRemaining"), "var(--solar)") +
+      bar("expected", this._t("expectedConsumption"), "var(--home)");
     card.appendChild(body);
     const rows = body.querySelectorAll(".daily-row");
     // click an energy row -> more-info (history graph)
@@ -2107,6 +2199,9 @@ class MarstekVenusPanel extends HTMLElement {
     this._linkMoreInfo(rows[3], this._sysEntityId(K.sysDailyHome));
     this._linkMoreInfo(rows[4], this._sysEntityId(K.sysDailyGridImport));
     this._linkMoreInfo(rows[5], this._sysEntityId(K.sysDailyGridExport));
+    this._linkMoreInfo(rows[6], this._sysEntityId(K.predictiveActive));
+    this._linkMoreInfo(rows[7], this._sysEntityId(K.predictiveActive));
+    this._linkMoreInfo(rows[8], this._sysEntityId(K.consumptionProfile));
     this._r.dChV = body.querySelector(".daily-ch-v");
     this._r.dChBar = body.querySelector(".daily-ch-bar");
     this._r.dDisV = body.querySelector(".daily-dis-v");
@@ -2123,6 +2218,15 @@ class MarstekVenusPanel extends HTMLElement {
     this._r.dExpRow = rows[5];
     this._r.dExpV = body.querySelector(".daily-exp-v");
     this._r.dExpBar = body.querySelector(".daily-exp-bar");
+    this._r.dForecastRow = rows[6];
+    this._r.dForecastV = body.querySelector(".daily-forecast-v");
+    this._r.dForecastBar = body.querySelector(".daily-forecast-bar");
+    this._r.dRemainingRow = rows[7];
+    this._r.dRemainingV = body.querySelector(".daily-remaining-v");
+    this._r.dRemainingBar = body.querySelector(".daily-remaining-bar");
+    this._r.dExpectedRow = rows[8];
+    this._r.dExpectedV = body.querySelector(".daily-expected-v");
+    this._r.dExpectedBar = body.querySelector(".daily-expected-bar");
     return card;
   }
 
@@ -2185,9 +2289,7 @@ class MarstekVenusPanel extends HTMLElement {
       return;
     }
     // SOC samples are evenly spaced from 00:00 → now; map an original index → clock.
-    const mid = new Date();
-    mid.setHours(0, 0, 0, 0);
-    const startS = mid.getTime() / 1000;
+    const startS = this._dayStartEpoch() / 1000;
     const elapsed = Date.now() / 1000 - startS;
     const fullLast = full.length - 1;
     const clockOf = (origIdx) => startS + (fullLast > 0 ? origIdx / fullLast : 0) * elapsed;
@@ -2289,7 +2391,9 @@ class MarstekVenusPanel extends HTMLElement {
   /** Local clock "HH:MM" for an epoch-seconds value. */
   _fmtClock(s) {
     if (s == null) return "";
-    return new Date(s * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    return new Date(s * 1000).toLocaleTimeString(
+      this._lang(), this._dateTimeOptions({ hour: "2-digit", minute: "2-digit" })
+    );
   }
 
   /** Attach a hover readout to a STABLE element (the .chart-plot or .mini-spark
@@ -2470,11 +2574,11 @@ class MarstekVenusPanel extends HTMLElement {
     const fullSeries = avail.map((d) => ({ color: d.color, data: ps[d.key].map((v) => (v == null ? 0 : v)) }));
     // Anchor each sample to its real time-of-day so a partial day (e.g. 03:00)
     // only fills the left of the fixed 00–24 axis instead of stretching across it.
-    const dayStart = new Date();
-    dayStart.setHours(0, 0, 0, 0);
-    const startS = dayStart.getTime() / 1000;
+    const startS = this._dayStartEpoch() / 1000;
+    const endS = this._dayStartEpoch(1) / 1000;
+    const daySpan = endS - startS;
     const t = Array.isArray(ps.t) ? ps.t : null;
-    const fullXs = t && t.length ? t.map((ts) => (ts - startS) / 86400) : null;
+    const fullXs = t && t.length ? t.map((ts) => (ts - startS) / daySpan) : null;
 
     // apply the active zoom window (fraction of the 24 h day), if set
     const z = plot.__zoom;
@@ -2511,7 +2615,7 @@ class MarstekVenusPanel extends HTMLElement {
       decimals: 2,
       xLabel: (i) => (times ? this._fmtClock(times[i]) : ""),
     };
-    this._updatePowerXaxis(z, startS);
+    this._updatePowerXaxis(z, startS, endS);
   }
 
   // ----- Energía semanal (7 días, barras agrupadas) -----
@@ -2578,11 +2682,13 @@ class MarstekVenusPanel extends HTMLElement {
   /** Natural time domain (epoch s) for a chart: Potencias spans the full day,
    *  SOC spans midnight -> now. */
   _chartDomain(kind) {
-    const mid = new Date();
-    mid.setHours(0, 0, 0, 0);
-    const startS = mid.getTime() / 1000;
+    const startS = this._dayStartEpoch() / 1000;
     const nowS = Date.now() / 1000;
-    return { startS, nowS, endS: kind === "power" ? startS + 86400 : nowS };
+    return {
+      startS,
+      nowS,
+      endS: kind === "power" ? this._dayStartEpoch(1) / 1000 : nowS,
+    };
   }
   /** Range-preset buttons + reset, placed under the chart. */
   _buildZoomBar(host, kind) {
@@ -2689,14 +2795,15 @@ class MarstekVenusPanel extends HTMLElement {
     host.addEventListener("pointerup", onUp);
     window.addEventListener("pointerup", onUp);
   }
-  _updatePowerXaxis(z, startS) {
+  _updatePowerXaxis(z, startS, endS) {
     const ax = this._r.powerXaxis;
     if (!ax) return;
     if (!z) {
       ax.innerHTML = `<span>00</span><span>06</span><span>12</span><span>18</span><span>24</span>`;
       return;
     }
-    const t0 = startS + z.lo * 86400, t1 = startS + z.hi * 86400;
+    const span = endS - startS;
+    const t0 = startS + z.lo * span, t1 = startS + z.hi * span;
     ax.innerHTML = Array.from({ length: 5 }, (_, i) =>
       `<span>${this._fmtClock(t0 + ((t1 - t0) * i) / 4)}</span>`
     ).join("");
@@ -3000,8 +3107,14 @@ class MarstekVenusPanel extends HTMLElement {
     const hm = m.dailyHome;
     const imp = m.dailyGridImport;
     const exp = m.dailyGridExport;
+    const forecast = m.forecastInitial;
+    const remaining = m.solarRemaining;
+    const expected = m.expectedConsumption;
     const u = `<span class="dim" style="font-size:11px"> kWh</span>`;
-    const max = Math.max(m.dailyCharge || 0, m.dailyDischarge || 0, sol || 0, hm || 0, imp || 0, exp || 0, 0.1);
+    const max = Math.max(
+      m.dailyCharge || 0, m.dailyDischarge || 0, sol || 0, hm || 0,
+      imp || 0, exp || 0, forecast || 0, remaining || 0, expected || 0, 0.1
+    );
     r.dChV.innerHTML = `${this._nf(m.dailyCharge, 2)}${u}`;
     r.dChBar.style.width = ((m.dailyCharge || 0) / max) * 100 + "%";
     r.dDisV.innerHTML = `${this._nf(m.dailyDischarge, 2)}${u}`;
@@ -3027,6 +3140,23 @@ class MarstekVenusPanel extends HTMLElement {
     if (exp != null) {
       r.dExpV.innerHTML = `${this._nf(exp, 2)}${u}`;
       r.dExpBar.style.width = (exp / max) * 100 + "%";
+    }
+
+    // ----- daily forecasts -----
+    if (r.dForecastRow) r.dForecastRow.style.display = forecast == null ? "none" : "";
+    if (forecast != null) {
+      r.dForecastV.innerHTML = `${this._nf(forecast, 2)}${u}`;
+      r.dForecastBar.style.width = (forecast / max) * 100 + "%";
+    }
+    if (r.dRemainingRow) r.dRemainingRow.style.display = remaining == null ? "none" : "";
+    if (remaining != null) {
+      r.dRemainingV.innerHTML = `${this._nf(remaining, 2)}${u}`;
+      r.dRemainingBar.style.width = (remaining / max) * 100 + "%";
+    }
+    if (r.dExpectedRow) r.dExpectedRow.style.display = expected == null ? "none" : "";
+    if (expected != null) {
+      r.dExpectedV.innerHTML = `${this._nf(expected, 2)}${u}`;
+      r.dExpectedBar.style.width = (expected / max) * 100 + "%";
     }
 
     // ----- diagnostics (section 2, two columns) -----
@@ -3122,13 +3252,12 @@ class MarstekVenusPanel extends HTMLElement {
 
   /** Build a step-hold sampler grid from local midnight to now (N+1 points). */
   _historyGrid(n = 144) {
-    const start = new Date();
-    start.setHours(0, 0, 0, 0);
-    const startS = start.getTime() / 1000;
+    const startMs = this._dayStartEpoch();
+    const startS = startMs / 1000;
     const nowS = Date.now() / 1000;
     const grid = [];
     for (let i = 0; i <= n; i++) grid.push(startS + (nowS - startS) * (i / n));
-    return { grid, startISO: start.toISOString() };
+    return { grid, startISO: new Date(startMs).toISOString() };
   }
 
   /** Resample one entity's recorder history onto `grid` (step-hold), in kW. */
@@ -3293,11 +3422,11 @@ class MarstekVenusPanel extends HTMLElement {
     const impIds = impSys ? [impSys] : [];
     const expIds = expSys ? [expSys] : [];
     const days = 7;
-    const start = new Date();
-    start.setHours(0, 0, 0, 0);
-    start.setDate(start.getDate() - (days - 1));
+    const boundaries = Array.from(
+      { length: days + 1 }, (_, k) => this._dayStartEpoch(k - (days - 1))
+    );
     const allIds = [...new Set([...chIds, ...diIds, ...impIds, ...expIds])];
-    const startISO = start.toISOString();
+    const startISO = new Date(boundaries[0]).toISOString();
     const endISO = new Date().toISOString();
     // These sources reset at midnight.  Their Recorder ``sum`` is a
     // lifetime-normalized value, so its daily ``change`` can include reset
@@ -3324,8 +3453,9 @@ class MarstekVenusPanel extends HTMLElement {
       }
     }
     if (!statistics && !history) return;
-    const startMs = start.getTime();
-    const dayIndex = (ms) => Math.floor((ms - startMs) / 86400000);
+    const dayIndex = (ms) => boundaries.findIndex(
+      (start, k) => k < days && ms >= start && ms < boundaries[k + 1]
+    );
     // Prefer each entity's final daily statistics state, then sum across ids.
     // Raw history fallbacks retain the former daily-maximum calculation.
     const dailyTotals = (entIds) => {
@@ -3393,8 +3523,10 @@ class MarstekVenusPanel extends HTMLElement {
     if (expTot && liveExport != null) expTot[todayIndex] = liveExport;
     const labels = [];
     for (let k = 0; k < days; k++) {
-      const dd = new Date(startMs + k * 86400000);
-      labels.push(dd.toLocaleDateString(this._lang(), { weekday: "short" }));
+      const dd = new Date(boundaries[k]);
+      labels.push(dd.toLocaleDateString(
+        this._lang(), this._dateTimeOptions({ weekday: "short" })
+      ));
     }
     this._weekly = {
       days: labels,
@@ -5097,6 +5229,10 @@ class MarstekVenusPanel extends HTMLElement {
       .socbar > span { display: block; height: 100%; border-radius: 999px; background: var(--battery); transition: width 0.8s cubic-bezier(.4,0,.2,1); }
       .daily-body { display: flex; flex-direction: column; gap: 10px; }
       .daily-row { display: flex; flex-direction: column; gap: 4px; }
+      .daily-row-forecast { margin-top: 4px; padding-top: 10px; border-top: 1px solid var(--line); }
+      .daily-row-forecast .socbar > span,
+      .daily-row-remaining .socbar > span,
+      .daily-row-expected .socbar > span { opacity: .62; }
       .daily-head { display: flex; justify-content: space-between; font-size: 13px; font-weight: 600; }
 
       .mini-spark { margin-top: 2px; flex: 1 1 auto; min-height: 96px; }

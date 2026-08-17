@@ -19,6 +19,7 @@ from .const import (
 )
 from .infra.coordinator import MarstekVenusDataUpdateCoordinator
 from .infra.entity_naming import english_entity_id, system_entity_id, SYSTEM_UNIQUE_ID_PREFIX
+from .solar_forecast import read_solar_forecast_kwh
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -389,18 +390,18 @@ class PredictiveChargingStatusSensor(BinarySensorEntity):
     _unrecorded_attributes = frozenset({
         # heavy nested structures
         "active_slot_per_battery", "manual_slot_owned",
-        "daily_consumption_history", "history_days",
+        "daily_consumption_history",
         "predictive_target_soc_pct", "selected_hours",
         # per-cycle accumulators
-        "household_consumption_battery_window_kwh", "solar_production_today_kwh",
+        "household_consumption_full_day_kwh",
         # last-decision diagnostic dump (changes on every evaluation)
-        "stored_energy_kwh", "usable_energy_kwh", "min_reserve_kwh",
+        "stored_energy_kwh", "usable_energy_kwh",
         "cutoff_energy_kwh", "effective_min_soc", "avg_consumption_kwh",
         "total_available_kwh", "energy_deficit_kwh", "solar_forecast_kwh",
-        "solar_surplus_kwh", "grid_charge_kwh", "planned_grid_charge_kwh",
+        "solar_surplus_kwh", "planned_grid_charge_kwh",
         "consumption_scope", "daily_avg_consumption_kwh", "consumed_today_kwh",
         "remaining_consumption_kwh", "remaining_solar_kwh",
-        "consumption_rate_kwh_h", "consumption_accumulator_ready",
+        "consumption_rate_kwh_h", "consumption_accumulator_source",
         "decision_reason",
     })
 
@@ -467,26 +468,40 @@ class PredictiveChargingStatusSensor(BinarySensorEntity):
 
         if self.controller.solar_forecast_sensor:
             attrs["solar_forecast_sensor"] = self.controller.solar_forecast_sensor
+        if getattr(self.controller, "solar_forecast_remaining_sensor", None):
+            attrs["solar_forecast_remaining_sensor"] = self.controller.solar_forecast_remaining_sensor
+        if getattr(self.controller, "solar_forecast_source", None):
+            attrs["solar_forecast_source"] = self.controller.solar_forecast_source
 
         attrs["max_contracted_power"] = self.controller.max_contracted_power
 
         # Home consumption diagnostics: home power is always derived
         # (grid + battery AC + solar); the household sensor was removed.
         attrs["consumption_source"] = "derived (grid + battery AC + solar)"
-        attrs["household_consumption_battery_window_kwh"] = round(self.controller._household_energy_accumulator, 2)
+        full_day_consumption = round(self.controller._household_energy_accumulator, 2)
+        attrs["household_consumption_full_day_kwh"] = full_day_consumption
+        attrs["consumption_history_scope"] = "full_day_home"
         if self.controller._household_accumulator_date is not None:
             attrs["household_accumulator_date"] = self.controller._household_accumulator_date.isoformat()
-        # Measured solar produced today (real solar sensor + Venus MPPT)
-        attrs["solar_production_today_kwh"] = round(self.controller._daily_solar_energy_kwh, 2)
         if self.controller._daily_solar_energy_date is not None:
             attrs["solar_accumulator_date"] = self.controller._daily_solar_energy_date.isoformat()
+
+        initial_forecast = getattr(
+            self.controller, "_daily_solar_forecast_initial_kwh", None
+        )
+        initial_date = getattr(
+            self.controller, "_daily_solar_forecast_initial_date", None
+        )
+        if initial_forecast is not None:
+            attrs["solar_forecast_initial_kwh"] = round(initial_forecast, 2)
+        if initial_date is not None:
+            attrs["solar_forecast_initial_date"] = initial_date.isoformat()
 
         # Persist daily consumption history for restoration after restarts
         if hasattr(self.controller, '_daily_consumption_history') and self.controller._daily_consumption_history:
             attrs["daily_consumption_history"] = [
                 (d.isoformat(), c) for d, c in self.controller._daily_consumption_history
             ]
-            attrs["history_days"] = len(self.controller._daily_consumption_history)
 
         # Add last decision data if available (for diagnostics)
         if hasattr(self.controller, '_last_decision_data') and self.controller._last_decision_data:
@@ -494,7 +509,6 @@ class PredictiveChargingStatusSensor(BinarySensorEntity):
             attrs.update({
                 "stored_energy_kwh": decision.get("stored_energy_kwh"),
                 "usable_energy_kwh": decision.get("usable_energy_kwh"),
-                "min_reserve_kwh": decision.get("min_reserve_kwh"),
                 "cutoff_energy_kwh": decision.get("cutoff_energy_kwh"),
                 "effective_min_soc": decision.get("effective_min_soc"),
                 "avg_consumption_kwh": decision.get("avg_consumption_kwh"),
@@ -504,15 +518,29 @@ class PredictiveChargingStatusSensor(BinarySensorEntity):
                 "remaining_consumption_kwh": decision.get("remaining_consumption_kwh"),
                 "remaining_solar_kwh": decision.get("remaining_solar_kwh"),
                 "consumption_rate_kwh_h": decision.get("consumption_rate_kwh_h"),
-                "consumption_accumulator_ready": decision.get("consumption_accumulator_ready"),
+                "consumption_accumulator_source": decision.get("consumption_accumulator_source"),
                 "total_available_kwh": decision.get("total_available_kwh"),
                 "energy_deficit_kwh": decision.get("energy_deficit_kwh"),
                 "planned_grid_charge_kwh": decision.get("planned_grid_charge_kwh"),
                 "solar_forecast_kwh": decision.get("solar_forecast_kwh"),
                 "solar_surplus_kwh": decision.get("solar_surplus_kwh"),
-                "grid_charge_kwh": decision.get("grid_charge_kwh"),
                 "decision_reason": decision.get("reason"),
             })
+
+        # Keep the live remainder current even between pricing reevaluations.
+        # This also gives legacy whole-day forecast sensors the same dashboard
+        # value as the control path, which derives the remainder from production
+        # already observed and the solar curve.
+        if getattr(self.controller, "_pricing_mgr", None) is not None:
+            try:
+                forecast = read_solar_forecast_kwh(self.hass, self.controller)
+                if forecast is not None:
+                    now = datetime.now()
+                    now_h = now.hour + now.minute / 60.0 + now.second / 3600.0
+                    remaining = self.controller._pricing_mgr._remaining_solar_today_kwh(now_h)
+                    attrs["remaining_solar_kwh"] = round(max(0.0, float(remaining)), 2)
+            except (AttributeError, TypeError, ValueError):
+                _LOGGER.debug("Predictive status: live solar remainder unavailable", exc_info=True)
 
         # Per-battery grid-only SOC targets (set at charge initialisation, None when not charging)
         if hasattr(self.controller, '_predictive_charge_target_soc') and self.controller._predictive_charge_target_soc:

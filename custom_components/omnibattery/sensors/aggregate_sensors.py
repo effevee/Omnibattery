@@ -16,6 +16,11 @@ _LOGGER = logging.getLogger(__name__)
 from ..const import DOMAIN, ALARM_BIT_DESCRIPTIONS, FAULT_BIT_DESCRIPTIONS, DEBUG_POLL_SENSOR_VALUES, CONF_SOLAR_PRODUCTION_SENSOR, CONF_METER_INVERTED, pd_profile_from_params
 from ..infra.coordinator import MarstekVenusDataUpdateCoordinator
 from ..infra.entity_naming import system_entity_id
+from ..tracking.consumption_tracker import (
+    HOME_CONSUMPTION_HOLD_S,
+    has_battery_charging,
+    home_balance_is_suspicious,
+)
 
 
 # Define aggregate sensor definitions
@@ -169,7 +174,20 @@ class PdControlQualitySensor(SensorEntity):
     _RMS_HIGH_W = 150.0
     _OSC_LOW_PER_MIN = 1.0
 
-    _STATES = ["disabled", "stable", "oscillating", "sluggish", "battery_limited", "collecting_data"]
+    # The metric only advances while the loop is in control. Past this age the
+    # EMAs describe an old situation, so report "collecting_data" rather than a
+    # stale verdict (5x the 60s metric window).
+    _STALE_AFTER_S = 300.0
+
+    _STATES = [
+        "disabled",
+        "stable",
+        "oscillating",
+        "sluggish",
+        "battery_limited",
+        "blocked",
+        "collecting_data",
+    ]
 
     def __init__(self, controller) -> None:
         """Initialize the sensor."""
@@ -191,10 +209,15 @@ class PdControlQualitySensor(SensorEntity):
         c = self._controller
         if getattr(c, "no_pd_mode_enabled", False):
             return "disabled"  # No-PD direct-tracking mode: PD loop not running
-        if getattr(c, "_pd_limited", False):
+        if getattr(c, "pd_blocked", False):
+            return "blocked"  # charge delay / time slot / price / EV: loop muzzled
+        if getattr(c, "pd_limited", False):
             return "battery_limited"
         rms = c.pd_quality_rms_error
         if rms is None:
+            return "collecting_data"
+        age = getattr(c, "pd_quality_age_s", None)
+        if age is not None and age > self._STALE_AFTER_S:
             return "collecting_data"
         return self._verdict(rms, c.pd_quality_oscillation_per_min)
 
@@ -203,9 +226,11 @@ class PdControlQualitySensor(SensorEntity):
         """Expose the raw RMS error, oscillation rate, and active params/profile."""
         c = self._controller
         rms = c.pd_quality_rms_error
+        age = getattr(c, "pd_quality_age_s", None)
         return {
             "rms_error_w": round(rms) if rms is not None else None,
             "oscillation_per_min": round(c.pd_quality_oscillation_per_min, 2),
+            "metric_age_s": round(age) if age is not None else None,
             "kp": c.kp,
             "kd": c.kd,
             "deadband_w": c.deadband,
@@ -265,6 +290,11 @@ class MarstekVenusAggregateSensor(RestoreEntity, SensorEntity):
         self._daily_source_key = _DAILY_AGGREGATE_SOURCE_KEYS.get(definition["key"])
         self._daily_value: float | None = None
         self._daily_reset_date = dt_util.now().date().isoformat()
+
+        self._last_valid_home_consumption: float | None = None
+        self._last_valid_home_consumption_at = None
+        self._home_consumption_raw_balance: float | None = None
+        self._home_consumption_quality = "unknown"
 
     async def async_added_to_hass(self) -> None:
         """Restore daily aggregates before coordinator callbacks can publish."""
@@ -547,10 +577,18 @@ class MarstekVenusAggregateSensor(RestoreEntity, SensorEntity):
 
     @property
     def extra_state_attributes(self):
-        """Expose the local reset date for safe same-day restoration."""
-        if self._daily_source_key is None:
-            return None
-        return {"reset_date": self._daily_reset_date}
+        """Expose diagnostics for restored daily values and home estimates."""
+        attributes = {}
+        if self._daily_source_key is not None:
+            attributes["reset_date"] = self._daily_reset_date
+
+        if self.definition["key"] == "home_consumption":
+            raw_balance = self._home_consumption_raw_balance
+            if raw_balance is not None:
+                attributes["raw_balance_w"] = raw_balance
+            attributes["balance_quality"] = self._home_consumption_quality
+
+        return attributes or None
 
     def _read_power_w(self, entity_id: str) -> float | None:
         """Read a power entity and return its value in Watts, or None if unusable."""
@@ -600,7 +638,47 @@ class MarstekVenusAggregateSensor(RestoreEntity, SensorEntity):
             if solar_w is not None:
                 total += solar_w
 
-        return round(max(0.0, total))
+        raw_balance = round(total, self.definition.get("precision", 0))
+        self._home_consumption_raw_balance = raw_balance
+
+        # A negative or implausibly small household load is physically
+        # impossible for the configured installation. It is normally caused
+        # here by independently polled grid/solar/battery values being sampled
+        # at different instants while the batteries are charging. Keep the last
+        # coherent estimate briefly, then publish unknown instead of a false
+        # low or zero value.
+        if home_balance_is_suspicious(
+            total,
+            battery_charging=has_battery_charging(self.coordinators),
+            last_valid_w=self._last_valid_home_consumption,
+        ):
+            last_value = self._last_valid_home_consumption
+            last_at = self._last_valid_home_consumption_at
+            if last_value is not None and last_at is not None:
+                held_s = (dt_util.utcnow() - last_at).total_seconds()
+                if 0 <= held_s <= HOME_CONSUMPTION_HOLD_S:
+                    self._home_consumption_quality = "held_last_valid"
+                    _LOGGER.debug(
+                        "Holding last valid home consumption %.0f W for %.1f s "
+                        "after suspicious balance %.0f W",
+                        last_value,
+                        held_s,
+                        raw_balance,
+                    )
+                    return last_value
+
+            self._home_consumption_quality = "invalid_balance"
+            return None
+
+        value = round(total, self.definition.get("precision", 0))
+        if value <= 0:
+            self._home_consumption_quality = "invalid_balance"
+            return None
+
+        self._last_valid_home_consumption = value
+        self._last_valid_home_consumption_at = dt_util.utcnow()
+        self._home_consumption_quality = "calculated"
+        return value
 
     @property
     def device_info(self):

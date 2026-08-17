@@ -46,6 +46,11 @@ from ..const import (
     T_START_FALLBACK_HOUR,
     FLOOR_HYSTERESIS_PCT,
 )
+from ..solar_forecast import (
+    get_configured_solar_forecast_sensor,
+    read_solar_forecast_kwh,
+)
+from ..tracking.consumption_profile import adjust_remaining_fallback_energy
 from . import (
     DynamicPricingSchedule,
     PriceSlot,
@@ -1174,17 +1179,12 @@ class PricingManager:
                 )
 
     def _curtailment_forecast_model(self, now: datetime) -> tuple[float | None, object | None, float | None]:
-        """Return today's forecast, cumulative solar model and daily consumption."""
-        sensor = getattr(self._controller, "solar_forecast_sensor", None)
-        if not sensor:
+        """Return the forecast and matching future horizon for curtailment."""
+        forecast = read_solar_forecast_kwh(self._hass, self._controller)
+        if forecast is None:
             return None, None, None
-        state = self._hass.states.get(sensor)
-        if state is None or state.state in ("unknown", "unavailable"):
-            return None, None, None
-        try:
-            forecast_kwh = float(state.state)
-        except (TypeError, ValueError):
-            return None, None, None
+        forecast_kwh = forecast.kwh
+        is_remaining = forecast.source == "remaining"
 
         tracker = getattr(self._controller, "_consumption_tracker", None)
         if tracker is None:
@@ -1203,6 +1203,13 @@ class PricingManager:
                 return None, None, None
             fraction_fn = lambda hour: tracker.get_solar_fraction_done(hour, t_start, t_end)
             daily_consumption = float(tracker.get_avg_daily_consumption())
+            # A remaining solar sensor applies only to future slots.  Use the
+            # matching remaining load instead of comparing it to a full day.
+            if is_remaining:
+                now_h = now.hour + now.minute / 60.0 + now.second / 3600.0
+                window_hours = tracker.get_consumption_window_hours_per_day()
+                remaining_window = tracker.consumption_window_hours_in_range(now_h, 24.0)
+                daily_consumption *= remaining_window / window_hours if window_hours > 0 else 0.0
         except (AttributeError, TypeError, ValueError):
             return None, None, None
         return forecast_kwh, fraction_fn, daily_consumption
@@ -1288,6 +1295,11 @@ class PricingManager:
         small warm-up threshold to avoid making a decision from the first few
         watts of the day; until then the forecast remains the safe fallback.
         """
+        if getattr(plan, "solar_forecast_is_remaining", False):
+            # A daily production accumulator cannot be compared with a scalar
+            # that represents only the post-evaluation forecast horizon.
+            return None
+
         controller = self._controller
         actual_date = getattr(controller, "_daily_solar_energy_date", None)
         if actual_date is not None and actual_date != now.date():
@@ -1350,7 +1362,11 @@ class PricingManager:
         forecast_consumption = getattr(plan, "consumption_forecast_by_slot", {}) or {}
         actual_mapping = self._curtailment_actual_solar_mapping(plan)
         actual_total_ratio: float | None = None
-        if actual_mapping is None and risk_slots:
+        if (
+            actual_mapping is None
+            and risk_slots
+            and not getattr(plan, "solar_forecast_is_remaining", False)
+        ):
             for name in (
                 "_curtailment_actual_solar_kwh",
                 "curtailment_actual_solar_kwh",
@@ -1582,6 +1598,7 @@ class PricingManager:
 
         daily_slots = self._curtailment_plan_slots(slots, evaluated_at)
         forecast, solar_model, daily_consumption = self._curtailment_forecast_model(evaluated_at)
+        is_remaining = getattr(self._controller, "solar_forecast_source", None) == "remaining"
         if forecast is None or solar_model is None or daily_consumption is None:
             plan = CurtailmentPlan(
                 status="fail_safe",
@@ -1615,6 +1632,8 @@ class PricingManager:
                 max_export_power_w=export_limit_w,
                 export_mode=export_mode,
                 solar_fraction_fn=solar_model,
+                solar_forecast_is_remaining=is_remaining,
+                consumption_forecast_is_remaining=is_remaining,
                 reserved_slots=reserved,
                 now=evaluated_at,
             )
@@ -1892,10 +1911,25 @@ class PricingManager:
         # Step 1: Energy balance.  The full-day forecast is valid only for the
         # scheduled 00:05 run.  Any later reconstruction starts from the live
         # remainder, including already-produced solar.
-        if horizon is DynamicPricingEvaluationHorizon.DAILY:
+        if (
+            horizon is DynamicPricingEvaluationHorizon.DAILY
+            and not get_configured_solar_forecast_sensor(
+                self._controller, "remaining"
+            )
+        ):
             decision_data = await self._controller._should_activate_grid_charging()
         else:
             decision_data = await self._evaluate_remaining_grid_charging(now=now)
+
+        # Keep the first full-day forecast separate from the live remaining
+        # horizon used by later reevaluations. With a configured remaining-today
+        # sensor, its value at 00:05 is the full-day forecast; the legacy today
+        # path already returns that same full-day quantity.
+        if horizon is DynamicPricingEvaluationHorizon.DAILY:
+            tracker = getattr(self._controller, "_consumption_tracker", None)
+            capture = getattr(tracker, "capture_daily_solar_forecast", None)
+            if callable(capture):
+                capture(decision_data.get("solar_forecast_kwh"))
         self._controller._last_decision_data = decision_data
         # Reference SOC for the SOC-drop re-evaluation (#411): this is read before
         # the overnight discharge, so a battery that drains far below it must be
@@ -2393,6 +2427,66 @@ class PricingManager:
         current = sum(c.data.get("battery_soc", 0) for c in coords) / len(coords)
         return (ref - current) >= SOC_REEVALUATION_THRESHOLD
 
+    @staticmethod
+    def _get_consumed_today_kwh(controller, now: datetime) -> tuple[float, bool, str]:
+        """Return today's full-day home consumption for remaining forecasts.
+
+        ``_daily_home_energy_kwh`` is the user-facing total since midnight and
+        is the preferred value to subtract from the daily forecast. The adjusted
+        ``_household_energy_accumulator`` now covers the same full day and remains
+        the startup/reload fallback.
+        """
+        sources = (
+            (
+                "daily_home_energy",
+                "_daily_home_energy_date",
+                "_daily_home_energy_kwh",
+            ),
+            (
+                "household_full_day",
+                "_household_accumulator_date",
+                "_household_energy_accumulator",
+            ),
+        )
+        for source, date_attr, value_attr in sources:
+            if getattr(controller, date_attr, None) != now.date():
+                continue
+            try:
+                value = float(getattr(controller, value_attr, 0.0) or 0.0)
+            except (TypeError, ValueError):
+                continue
+            if math.isfinite(value) and value > 0.0:
+                return value, True, source
+        return 0.0, False, "none"
+
+    def _profile_remaining_consumption(
+        self,
+        start: datetime,
+        end: datetime,
+    ):
+        """Return the learned profile or its explicit daily fallback."""
+        tracker = getattr(self._controller, "_consumption_tracker", None)
+        profile = getattr(tracker, "consumption_profile", None)
+        if profile is None or end <= start:
+            return None
+        try:
+            if start.tzinfo is None:
+                current = getattr(profile, "_timezone", lambda: None)()
+                start = start.replace(tzinfo=current)
+            if end.tzinfo is None:
+                end = end.replace(tzinfo=start.tzinfo)
+            forecast = profile.forecast_energy_between(
+                start,
+                end,
+                exclude_charging_windows=False,
+                fallback="legacy_daily",
+            )
+            if forecast.source in {"profile", "legacy_daily"}:
+                return forecast
+        except Exception as exc:  # noqa: BLE001
+            _LOGGER.debug("Pricing: profile forecast failed: %s", exc)
+        return None
+
     async def _evaluate_remaining_grid_charging(self, *, now: datetime | None = None) -> dict:
         """Evaluate the energy still needed before the end of today's horizon.
 
@@ -2417,49 +2511,75 @@ class PricingManager:
         now = now or datetime.now()
         now_h = now.hour + now.minute / 60.0 + now.second / 3600.0
         avg_daily_kwh = await get_average()
-        # Use the same windowed/adjusted accumulator that feeds the historical
-        # average.  The full-day Home Energy counter includes charging windows
-        # and does not apply excluded/additional-load adjustments, so comparing
-        # it with the windowed seven-day average mixes two different quantities.
-        accumulator_date = getattr(controller, "_household_accumulator_date", None)
-        raw_consumed_today_kwh = getattr(
-            controller, "_household_energy_accumulator", None
+        consumed_today_kwh, accumulator_ready, consumption_source = (
+            self._get_consumed_today_kwh(controller, now)
         )
-        try:
-            consumed_today_kwh = float(raw_consumed_today_kwh)
-        except (TypeError, ValueError):
-            consumed_today_kwh = 0.0
-        accumulator_ready = (
-            accumulator_date == now.date()
-            and math.isfinite(consumed_today_kwh)
-            and consumed_today_kwh > 0.0
-        )
-        if not accumulator_ready:
-            consumed_today_kwh = 0.0
         get_window_hours = getattr(
             tracker, "get_consumption_window_hours_per_day", None
         )
         get_remaining_window_hours = getattr(
             tracker, "consumption_window_hours_in_range", None
         )
-        window_hours_per_day = (
-            get_window_hours() if callable(get_window_hours) else 24.0
-        )
-        remaining_window_hours = (
-            get_remaining_window_hours(now_h, 24.0)
-            if callable(get_remaining_window_hours)
-            else 24.0 - now_h
-        )
-        remaining_consumption_kwh, consumption_rate_kwh_h = (
-            self._project_remaining_consumption(
-                now_h,
-                consumed_today_kwh,
-                avg_daily_kwh,
-                accumulator_ready=accumulator_ready,
-                window_hours_per_day=window_hours_per_day,
-                remaining_window_hours=remaining_window_hours,
+        if consumption_source == "daily_home_energy":
+            # The live source is a full-day counter, so keep the projection on
+            # the same 24-hour basis instead of applying a battery-window
+            # profile to it.
+            window_hours_per_day = 24.0
+            remaining_window_hours = 24.0 - now_h
+        else:
+            window_hours_per_day = (
+                get_window_hours() if callable(get_window_hours) else 24.0
             )
-        )
+            remaining_window_hours = (
+                get_remaining_window_hours(now_h, 24.0)
+                if callable(get_remaining_window_hours)
+                else 24.0 - now_h
+            )
+        profile_forecast = None
+        local_now = now
+        end_of_day = local_now.replace(
+            hour=0,
+            minute=0,
+            second=0,
+            microsecond=0,
+        ) + timedelta(days=1)
+        profile_forecast = self._profile_remaining_consumption(local_now, end_of_day)
+        if profile_forecast is not None:
+            remaining_consumption_kwh = profile_forecast.energy_kwh
+            fallback_correction_kwh = 0.0
+            if profile_forecast.source == "legacy_daily" and accumulator_ready:
+                (
+                    remaining_consumption_kwh,
+                    fallback_correction_kwh,
+                ) = adjust_remaining_fallback_energy(
+                    remaining_consumption_kwh,
+                    avg_daily_kwh,
+                    consumed_today_kwh,
+                    now_h,
+                )
+            consumption_rate_kwh_h = (
+                remaining_consumption_kwh / remaining_window_hours
+                if remaining_window_hours > 0
+                else 0.0
+            )
+            consumption_scope = (
+                "remaining_profile"
+                if profile_forecast.source == "profile"
+                else "remaining_fallback"
+            )
+        else:
+            fallback_correction_kwh = 0.0
+            remaining_consumption_kwh, consumption_rate_kwh_h = (
+                self._project_remaining_consumption(
+                    now_h,
+                    consumed_today_kwh,
+                    avg_daily_kwh,
+                    accumulator_ready=accumulator_ready,
+                    window_hours_per_day=window_hours_per_day,
+                    remaining_window_hours=remaining_window_hours,
+                )
+            )
+            consumption_scope = "remaining"
         remaining_solar_kwh = self._remaining_solar_today_kwh(now_h)
 
         decision = await controller._should_activate_grid_charging(
@@ -2468,14 +2588,52 @@ class PricingManager:
         )
         # Keep explicit diagnostics for the pre-slot notification and future
         # consumers while preserving the legacy avg_consumption_kwh field.
-        decision["consumption_scope"] = "remaining"
+        decision["consumption_scope"] = consumption_scope
         decision["daily_avg_consumption_kwh"] = avg_daily_kwh
         decision["consumed_today_kwh"] = consumed_today_kwh
         decision["remaining_consumption_kwh"] = remaining_consumption_kwh
+        decision["consumption_fallback_correction_kwh"] = fallback_correction_kwh
         decision["remaining_solar_kwh"] = remaining_solar_kwh
         decision["consumption_rate_kwh_h"] = consumption_rate_kwh_h
         decision["consumption_accumulator_ready"] = accumulator_ready
+        decision["consumption_accumulator_source"] = consumption_source
+        decision["consumption_forecast_source"] = (
+            profile_forecast.source if profile_forecast is not None else "legacy_daily"
+        )
+        decision["profile_coverage_ratio"] = (
+            profile_forecast.coverage_ratio if profile_forecast is not None else 0.0
+        )
+        decision["profile_days"] = (
+            profile_forecast.total_days if profile_forecast is not None else 0
+        )
+        decision["profile_fallback_reason"] = (
+            profile_forecast.fallback_reason if profile_forecast is not None else "profile_not_mature"
+        )
+        decision["solar_forecast_source"] = getattr(
+            controller,
+            "solar_forecast_diagnostic_source",
+            getattr(controller, "solar_forecast_source", None),
+        )
         return decision
+
+    async def _current_horizon_grid_charging_decision(self) -> dict:
+        """Evaluate direct Time Slot/Real-Time Price gates coherently.
+
+        These paths run during the day rather than solely at 00:05. When a
+        provider supplies ``remaining today``, pair it with remaining load too.
+        """
+        if (
+            get_configured_solar_forecast_sensor(
+                self._controller, "remaining"
+            )
+            or getattr(
+                getattr(self._controller, "_consumption_tracker", None),
+                "consumption_profile",
+                None,
+            ) is not None
+        ):
+            return await self._evaluate_remaining_grid_charging()
+        return await self._controller._should_activate_grid_charging()
 
     @staticmethod
     def _project_remaining_consumption(
@@ -2564,13 +2722,15 @@ class PricingManager:
         After the cutoff hour with no production seen, keep the conservative
         0 (solar sensor likely broken; better to book the slots than run dry).
         """
-        if not self._controller.solar_forecast_sensor:
+        forecast = read_solar_forecast_kwh(self._hass, self._controller)
+        if forecast is None:
             return 0.0
-        forecast_state = self._hass.states.get(self._controller.solar_forecast_sensor)
-        if not forecast_state or forecast_state.state in ("unknown", "unavailable"):
-            return 0.0
+        if forecast.source == "remaining":
+            # Provider already removed production that has happened.  Do not
+            # subtract the accumulator or run a solar curve a second time.
+            return forecast.kwh
         try:
-            forecast_today = float(forecast_state.state)
+            forecast_today = forecast.kwh
             if self._controller._daily_solar_energy_kwh > 0:
                 return max(0.0, forecast_today - self._controller._daily_solar_energy_kwh)
             if self._controller._solar_t_start is not None:
@@ -2651,37 +2811,74 @@ class PricingManager:
         # remaining-horizon rebuilds: never reuse consumption already spent
         # today, while retaining the normal historical remainder when today's
         # load was concentrated earlier. ---
-        accumulator_date = getattr(
-            self._controller, "_household_accumulator_date", None
+        consumed_today_kwh, accumulator_ready, _consumption_source = (
+            self._get_consumed_today_kwh(self._controller, now)
         )
-        raw_consumed_today_kwh = getattr(
-            self._controller, "_household_energy_accumulator", None
-        )
-        try:
-            consumed_today_kwh = float(raw_consumed_today_kwh)
-        except (TypeError, ValueError):
-            consumed_today_kwh = 0.0
-        accumulator_ready = (
-            accumulator_date == now.date()
-            and math.isfinite(consumed_today_kwh)
-            and consumed_today_kwh > 0.0
-        )
-        if not accumulator_ready:
-            consumed_today_kwh = 0.0
         tracker = self._controller._consumption_tracker
         avg_daily_kwh = tracker.get_avg_daily_consumption()
-        window_hours_per_day = tracker.get_consumption_window_hours_per_day()
-        remaining_window_hours = tracker.consumption_window_hours_in_range(
-            now_h, 24.0
+        if _consumption_source == "daily_home_energy":
+            window_hours_per_day = 24.0
+            remaining_window_hours = 24.0 - now_h
+        else:
+            window_hours_per_day = tracker.get_consumption_window_hours_per_day()
+            remaining_window_hours = tracker.consumption_window_hours_in_range(
+                now_h, 24.0
+            )
+        profile_forecast = self._profile_remaining_consumption(now, now.replace(
+            hour=0,
+            minute=0,
+            second=0,
+            microsecond=0,
+        ) + timedelta(days=1))
+        if profile_forecast is not None:
+            remaining_consumption_kwh = profile_forecast.energy_kwh
+            consumption_rate_kwh_h = (
+                remaining_consumption_kwh / remaining_window_hours
+                if remaining_window_hours > 0
+                else 0.0
+            )
+            consumption_scope = (
+                "remaining_profile"
+                if profile_forecast.source == "profile"
+                else "remaining_fallback"
+            )
+        else:
+            remaining_consumption_kwh, consumption_rate_kwh_h = self._project_remaining_consumption(
+                now_h,
+                consumed_today_kwh,
+                avg_daily_kwh,
+                accumulator_ready=accumulator_ready,
+                window_hours_per_day=window_hours_per_day,
+                remaining_window_hours=remaining_window_hours,
+            )
+            consumption_scope = "remaining"
+
+        # Keep the source visible to the status/diagnostic sensor and to the
+        # next decision snapshot without changing the scheduling schema.
+        decision_data = self._controller._last_decision_data
+        if not isinstance(decision_data, dict):
+            decision_data = {}
+        decision_data.update(
+            {
+                "consumption_scope": consumption_scope,
+                "consumption_forecast_source": (
+                    profile_forecast.source if profile_forecast is not None else "legacy_daily"
+                ),
+                "profile_coverage_ratio": (
+                    profile_forecast.coverage_ratio if profile_forecast is not None else 0.0
+                ),
+                "profile_days": (
+                    profile_forecast.total_days if profile_forecast is not None else 0
+                ),
+                "remaining_consumption_kwh": remaining_consumption_kwh,
+                "solar_forecast_source": getattr(
+                    self._controller,
+                    "solar_forecast_diagnostic_source",
+                    getattr(self._controller, "solar_forecast_source", None),
+                ),
+            }
         )
-        remaining_consumption_kwh, consumption_rate_kwh_h = self._project_remaining_consumption(
-            now_h,
-            consumed_today_kwh,
-            avg_daily_kwh,
-            accumulator_ready=accumulator_ready,
-            window_hours_per_day=window_hours_per_day,
-            remaining_window_hours=remaining_window_hours,
-        )
+        self._controller._last_decision_data = decision_data
 
         # Battery energy available above the discharge floor right now.
         usable_now_kwh = sum(
@@ -3230,7 +3427,7 @@ class PricingManager:
                 )
             else:
                 # Evaluate whether charging is actually needed before starting
-                decision_data = await self._controller._should_activate_grid_charging()
+                decision_data = await self._current_horizon_grid_charging_decision()
                 self._controller._last_decision_data = decision_data
                 if decision_data["should_charge"]:
                     self._controller._realtime_price_charging = True
@@ -3362,7 +3559,49 @@ class PricingManager:
                     _LOGGER.info("RE-EVALUATING predictive grid charging due to SOC drop (%.1f%% -> %.1f%%)",
                                 self._controller.last_evaluation_soc, current_avg_soc)
 
-                decision_data = await self._controller._should_activate_grid_charging()
+                forecast_configured = bool(
+                    get_configured_solar_forecast_sensor(
+                        self._controller, "remaining"
+                    )
+                    or get_configured_solar_forecast_sensor(
+                        self._controller, "today"
+                    )
+                )
+                if is_initial_eval and forecast_configured:
+                    # ``_evaluate_remaining_grid_charging`` deliberately uses
+                    # zero solar as its fail-safe when a forecast read fails.
+                    # For the one-shot slot-entry evaluation, distinguish that
+                    # transient failure before it is flattened to 0 kWh so the
+                    # next cycle can retry instead of publishing a misleading
+                    # safe-mode notification.
+                    if read_solar_forecast_kwh(self._hass, self._controller) is None:
+                        _LOGGER.debug(
+                            "Predictive charging: configured solar forecast is not "
+                            "readable yet; deferring initial evaluation"
+                        )
+                        return
+
+                decision_data = await self._current_horizon_grid_charging_decision()
+
+                # A configured forecast can still be unavailable when the
+                # provider is rebuilding its state around midnight.  Do not
+                # consume the one-shot initial evaluation or publish a false
+                # safe-mode notification in that case.  Leaving
+                # ``last_evaluation_soc`` unset makes the next control cycle
+                # retry as soon as the sensor recovers.  An installation with
+                # no forecast configured keeps the existing conservative
+                # notification path.
+                if (
+                    is_initial_eval
+                    and decision_data.get("solar_forecast_kwh") is None
+                    and forecast_configured
+                ):
+                    _LOGGER.debug(
+                        "Predictive charging: configured solar forecast is not "
+                        "readable yet; deferring initial evaluation"
+                    )
+                    return
+
                 self._controller.grid_charging_active = decision_data["should_charge"]
                 self._controller.last_evaluation_soc = current_avg_soc
                 self._controller._last_decision_data = decision_data

@@ -15,6 +15,10 @@
     "solar_forecast_unusable": {
       "title": "Previsión solar inutilizable",
       "description": "El sensor de previsión solar configurado {sensor} lleva más de {minutes} minutos no disponible o ilegible. Omnibattery sigue funcionando, pero todo lo que depende de la previsión está a ciegas: el retardo de carga se libera durante el resto del día, las decisiones de carga desde red asumen que no habrá sol y pueden reservar franjas innecesarias, y la estimación de sol restante marca 0 kWh. Revise el sensor o la integración que lo proporciona."
+    },
+    "solar_forecast_remaining_recommended": {
+      "title": "Usa una previsión solar restante",
+      "description": "{sensor} es una previsión solar heredada para todo el día. Omnibattery la sigue admitiendo, pero los errores de previsión ya ocurridos pueden hacer imprecisas las decisiones intradía. Configura en las opciones de Omnibattery el sensor de previsión del proveedor para \"restante hoy\" para calcular con más precisión el sol restante."
     }
   },
   "config": {
@@ -28,7 +32,8 @@
         "description": "Selecciona el sensor que mide la importación/exportación de la red eléctrica. Opcionalmente, configura el sensor de predicción solar para funciones avanzadas.",
         "data": {
           "consumption_sensor": "Sensor de consumo de la red",
-          "solar_forecast_sensor": "Sensor de predicción solar (opcional)",
+          "solar_forecast_sensor": "Sensor de previsión solar del día completo (legado)",
+          "solar_forecast_remaining_sensor": "Sensor de previsión solar restante de hoy (recomendado)",
           "solar_production_sensor": "Sensor de producción solar (opcional)",
           "meter_inverted": "Signo del medidor invertido",
           "max_contracted_power": "Potencia máxima contratada (W)",
@@ -36,7 +41,8 @@
         },
         "data_description": {
           "consumption_sensor": "Sensor en tiempo real de potencia importada (+) o exportada (-) a la red. Se recomiendan actualizaciones cada 1-2 segundos. Se aceptan sensores más lentos, pero las lecturas retrasadas reducen la calidad de la regulación; la última lectura se sigue durante un máximo de 65 segundos.",
-          "solar_forecast_sensor": "Sensor que proporciona la predicción de producción solar en kWh (ej: Solcast). Si se configura aquí, se usará automáticamente en carga predictiva y retraso de carga solar.",
+          "solar_forecast_sensor": "Sensor legado con la previsión solar del día completo. Las instalaciones existentes pueden mantenerlo durante la transición; para configuraciones nuevas se recomienda Restante de hoy.",
+          "solar_forecast_remaining_sensor": "Sensor con la producción solar que todavía se espera hoy en kWh. Al guardarlo sustituye el forecast legado y nunca se reduce con la producción ya medida.",
           "solar_production_sensor": "Sensor de potencia de producción fotovoltaica en tiempo real (W/kW) de un inversor externo que no pasa por las entradas MPPT de la batería. Se usa para mostrar el nodo Solar en el diagrama de flujo del panel. Déjalo vacío si tus paneles alimentan directamente el MPPT de la batería.",
           "meter_inverted": "Activa esta opción si tu medidor usa el convenio opuesto: positivo = exportación, negativo = importación. La unidad (W/kW) se detecta automáticamente.",
           "max_contracted_power": "Potencia total contratada en vatios. El sistema no superará este límite al cargar para evitar que salte el diferencial",
@@ -713,7 +719,8 @@
         "description": "Configura los sensores utilizados por la integración.",
         "data": {
           "consumption_sensor": "Sensor de consumo de la red",
-          "solar_forecast_sensor": "Sensor de predicción solar (opcional)",
+          "solar_forecast_sensor": "Sensor de previsión solar del día completo (legado)",
+          "solar_forecast_remaining_sensor": "Sensor de previsión solar restante de hoy (recomendado)",
           "solar_production_sensor": "Sensor de producción solar (opcional)",
           "meter_inverted": "Signo del medidor invertido",
           "max_contracted_power": "Potencia máxima contratada (W)",
@@ -721,7 +728,8 @@
         },
         "data_description": {
           "consumption_sensor": "Sensor en tiempo real de potencia importada (+) o exportada (-) a la red. Se recomiendan actualizaciones cada 1-2 segundos. Se aceptan sensores más lentos, pero las lecturas retrasadas reducen la calidad de la regulación; la última lectura se sigue durante un máximo de 65 segundos.",
-          "solar_forecast_sensor": "Sensor que proporciona la predicción de producción solar en kWh (ej: Solcast). Si se configura aquí, se usará automáticamente en carga predictiva y retraso de carga solar.",
+          "solar_forecast_sensor": "Sensor legado con la previsión solar del día completo. Las instalaciones existentes pueden mantenerlo durante la transición; para configuraciones nuevas se recomienda Restante de hoy.",
+          "solar_forecast_remaining_sensor": "Sensor con la producción solar que todavía se espera hoy en kWh. Al guardarlo sustituye el forecast legado y nunca se reduce con la producción ya medida.",
           "solar_production_sensor": "Sensor de potencia de producción fotovoltaica en tiempo real (W/kW) de un inversor externo que no pasa por las entradas MPPT de la batería. Se usa para mostrar el nodo Solar en el diagrama de flujo del panel. Déjalo vacío si tus paneles alimentan directamente el MPPT de la batería.",
           "meter_inverted": "Activa esta opción si tu medidor usa el convenio opuesto: positivo = exportación, negativo = importación. La unidad (W/kW) se detecta automáticamente.",
           "max_contracted_power": "Potencia total contratada en vatios. El sistema no superará este límite al cargar para evitar que salte el diferencial",
@@ -1427,6 +1435,12 @@
       "system_daily_home_energy": {
         "name": "Consumo Diario de la Casa"
       },
+      "expected_home_consumption_profile": {
+        "name": "Perfil de consumo doméstico esperado"
+      },
+      "consumption_profile_capture": {
+        "name": "Captura del perfil de consumo actual"
+      },
       "home_consumption": {
         "name": "Consumo de la Casa"
       },
@@ -1438,6 +1452,7 @@
           "oscillating": "Oscilando",
           "sluggish": "Lento",
           "battery_limited": "Limitado por batería",
+          "blocked": "Bloqueado",
           "collecting_data": "Recopilando datos"
         }
       },

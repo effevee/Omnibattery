@@ -139,9 +139,10 @@ El sensor también expone diagnósticos del registro de bloqueos como atributos:
 | `oscillating` | Cabeceo — usa un perfil más suave o sube el deadband |
 | `sluggish` | Demasiado lento — usa un perfil más agresivo |
 | `battery_limited` | Batería llena/vacía o en su límite de potencia; el PD no puede actuar (no es problema de ajuste) |
-| `collecting_data` | Calentando |
+| `blocked` | La dirección que exige el error de red no está permitida (retardo de carga, franja horaria, precio, pausa por VE); el PD está bloqueado, no mal ajustado |
+| `collecting_data` | Calentando, o la métrica lleva más de 5 min sin avanzar |
 
-Atributos: `rms_error_w` (error medio de seguimiento), `oscillation_per_min`, los `kp` / `kd` / `deadband_w` / `max_power_change_w` activos, y `active_profile`. La métrica es una media móvil de 60 s y se pausa brevemente tras un cambio de objetivo y mientras está limitada por batería, así que espera 1–2 min tras un cambio.
+Atributos: `rms_error_w` (error medio de seguimiento), `oscillation_per_min`, `metric_age_s` (segundos desde el último avance de la métrica), los `kp` / `kd` / `deadband_w` / `max_power_change_w` activos, y `active_profile`. La métrica es una media móvil de 60 s y se pausa brevemente tras un cambio de objetivo y mientras está limitada por batería o bloqueada, así que espera 1–2 min tras un cambio.
 
 ### Sensores agregados
 
@@ -155,3 +156,14 @@ Disponibles bajo el prefijo `sensor.marstek_venus_system_*`, suman los valores d
 - `system_alarm_status` — Estado de alarma agregado de todas las baterías (`OK` / `Warning` / `Fault`); los atributos listan las condiciones activas por batería
 - `system_home_consumption` — Consumo instantáneo del hogar (W). Lee el sensor del hogar si está configurado, en caso contrario lo deriva de `red + AC de baterías + solar`.
 - `system_daily_home_energy` — Consumo del hogar de hoy (kWh), integrado del valor de Consumo de la Casa anterior. Se reinicia a medianoche (hora local).
+
+### Perfil de consumo esperado del hogar
+
+`sensor.omnibattery_expected_home_consumption_profile` es un sensor de
+diagnóstico del perfil aprendido de 28 días. Su estado es la previsión de hoy en
+kWh. Sus atributos incluyen `interval_profile_kwh`, `hourly_profile_kwh`,
+`target_date`, `source`, `mature`, `coverage_ratio`, `weekday_samples`,
+`day_type_samples`, `total_profile_days` y `newest_profile_date`. El resumen
+acotado por día está disponible en los diagnósticos de la integración. El origen
+es `profile` solo cuando se cumple el
+contrato de madurez; `legacy_daily` identifica el fallback.

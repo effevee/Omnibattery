@@ -64,6 +64,15 @@ The integration monitors the battery's `Alarm Status` and `Fault Status` registe
 3. Review HA notifications: the 00:05 evaluation reports its result.
 4. Make sure the energy balance actually requires charging (there may already be enough energy).
 
+### The consumption source says `legacy_daily`
+
+This is expected while the 28-day profile is learning or when the requested
+intervals do not meet its coverage contract. Check
+`sensor.omnibattery_expected_home_consumption_profile` and the integration
+diagnostics endpoint. A source, excluded-load adjustment or timezone change
+intentionally invalidates the stored profile; Recorder backfill then
+rebuilds it in the background. A gap longer than five minutes is not interpolated.
+
 ---
 
 ## Metering device unavailable or losing connectivity

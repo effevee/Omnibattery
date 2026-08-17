@@ -11,7 +11,7 @@ Carga desde la red durante una **ventana horaria fija** (típicamente tarifa noc
 | **Sensor de previsión solar** | Sensor de producción solar del día actual en kWh (opcional) |
 
 !!! note "Hasta 3 ventanas"
-    Puedes configurar 1, 2 o 3 ventanas de carga — útil para una tarifa con bloque nocturno y otro de mediodía. Rellena solo la ventana 1 para el comportamiento de ventana única anterior; cada ventana extra necesita **tanto** una hora de inicio como de fin (rellena ambas o déjalas ambas vacías). El cálculo de la ventana de consumo usa la unión de todas las ventanas configuradas.
+    Puedes configurar 1, 2 o 3 ventanas de carga — útil para una tarifa con bloque nocturno y otro de mediodía. Rellena solo la ventana 1 para el comportamiento de ventana única anterior; cada ventana extra necesita **tanto** una hora de inicio como de fin (rellena ambas o déjalas ambas vacías). Estas franjas solo programan la carga predictiva desde la red: el historial del consumo de la casa sigue cubriendo las 24 horas, mientras que la potencia AC negativa de la batería elimina del consumo derivado la energía usada para cargarla.
 
 !!! note "Sin sensor solar"
     Si no tienes paneles solares, deja vacío el sensor de previsión. El sistema cargará siempre que la energía de la batería sea insuficiente para cubrir el consumo esperado.
