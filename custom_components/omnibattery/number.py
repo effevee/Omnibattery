@@ -46,6 +46,7 @@ from .const import (
     effective_system_power,
 )
 from .infra.coordinator import MarstekVenusDataUpdateCoordinator
+from .infra.manual_control import assert_manual_control
 from .infra.entity_naming import (
     english_entity_id,
     excluded_device_name,
@@ -244,6 +245,9 @@ class MarstekVenusNumber(CoordinatorEntity, NumberEntity):
         _LOGGER = getLogger(__name__)
         
         key = self.definition["key"]
+        # The setpoint registers are re-asserted by the control loop every
+        # cycle; refuse the write instead of reverting it silently.
+        assert_manual_control(self.hass, self.coordinator, key)
         if key == "set_charge_power":
             value = max(0.0, min(float(value), float(self.native_max_value)))
         elif key == "set_discharge_power":

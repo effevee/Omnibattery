@@ -2063,5 +2063,10 @@
         "name": "Re-evaluate Dynamic Pricing"
       }
     }
+  },
+  "exceptions": {
+    "manual_control_required": {
+      "message": "{battery} is under automatic control, so Force Mode and the charge/discharge setpoints are rewritten every control cycle. Enable Manual Mode (system-wide or for this battery) before commanding it directly."
+    }
   }
 }

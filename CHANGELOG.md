@@ -1,5 +1,10 @@
 # Changelog
 
+## [Unreleased]
+
+### Fixed
+- **Force Mode and the charge/discharge setpoints silently did nothing under automatic control**: on register-backed drivers (Marstek, ESPHome) these entities write the device registers directly, but the control loop re-asserts them every cycle, so the write was reverted before it took effect and the battery appeared unresponsive. Writing them while the controller owns the battery now raises an error naming Manual Mode instead of accepting the change. Battery configuration registers (SOC cutoffs, power caps) stay writable, and both Manual Mode switches (system-wide and per battery) release the guard.
+
 ## [1.3.0] - 2026-08-14
 
 ### Added

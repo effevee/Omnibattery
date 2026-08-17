@@ -2054,5 +2054,10 @@
         "name": "Dynamische Prijzen Herevalueren"
       }
     }
+  },
+  "exceptions": {
+    "manual_control_required": {
+      "message": "{battery} staat onder automatische besturing, dus Force Mode en de laad-/ontlaadsetpoints worden elke regelcyclus overschreven. Zet eerst Manual Mode aan (systeembreed of voor deze accu) voordat je hem rechtstreeks aanstuurt."
+    }
   }
 }

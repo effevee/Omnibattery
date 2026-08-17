@@ -121,6 +121,8 @@ Each battery also exposes `switch.*_battery_manual_mode`. When enabled, Omnibatt
 
 Turning the switch off keeps the battery under manual ownership while the final idle command is verified. Only then is it returned to the automatic pool and an immediate control cycle scheduled. If the idle handoff fails, the switch stays enabled and the battery remains manual.
 
+On register-backed drivers (Marstek, ESPHome) the raw `Force Mode`, `Set Charge Power` and `Set Discharge Power` entities write the device registers directly, and the control loop re-asserts those registers every cycle. Writing them while the battery is under automatic control is therefore refused with an error pointing at Manual Mode, instead of being accepted and reverted a second later. Turning on either the global `Manual Mode` switch or this battery's `Battery Manual Mode` switch releases the guard. Battery configuration registers such as the SOC cutoffs and power caps are not affected.
+
 This control is independent from the global `Manual Mode` switch. For example, with two batteries, battery A can be left in manual mode at a user-selected power while battery B remains automatic. If B is already charging, the PD controller includes A's measured AC grid charge so B reduces its own charge and the meter remains at zero. Once the automatic batteries are no longer charging, A's intentional grid charge is excluded from feedback so B does not discharge to compensate it. DC-coupled solar power is not included when the driver exposes a separate AC-power reading.
 
 ## Unified blocker registry
