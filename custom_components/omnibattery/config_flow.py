@@ -2806,9 +2806,11 @@ class MarstekVenusConfigFlow(LegacyDomainMigrationMixin, ConfigFlow, domain=DOMA
 
         Reached through the ``registered_devices`` matcher in the manifest, which
         fires for any device whose MAC sits in the device registry. All this step
-        does is turn the lease into a verdict and act on it; every guard lives in
-        ``infra.mac_tracking`` so it can be tested without a running Home
-        Assistant. It always aborts — there is no user-facing flow here.
+        does is turn the lease into a verdict and act on it; the decision guards
+        live in ``infra.mac_tracking`` so they can be tested without a running
+        Home Assistant, and the one guard that needs the network — the candidate
+        has to answer as the battery — runs here. It always aborts; there is no
+        user-facing flow.
         """
         reason = await self._async_apply_dhcp_lease(
             getattr(discovery_info, "macaddress", None),
