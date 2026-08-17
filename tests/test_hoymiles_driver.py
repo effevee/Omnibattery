@@ -75,6 +75,51 @@ async def test_mqtt_telemetry_uses_aggregate_values_and_inverts_wire_sign(mqtt_m
 
 
 @pytest.mark.asyncio
+async def test_mqtt_telemetry_accepts_legacy_numeric_strings(mqtt_mock):
+    driver = HoymilesMqttDriver(
+        _hass(), "MSA-legacy", max_charge_power_w=1800, max_discharge_power_w=1800
+    )
+    await driver.connect()
+    mqtt_mock.callbacks[driver._quick_topic](SimpleNamespace(
+        payload='{"soc":"20.0","bat_p":"-80.0","sys_soc":"50.0","sys_bat_p":"300.0","bat_sts":"discharge"}'
+    ))
+    mqtt_mock.callbacks[driver._device_topic](SimpleNamespace(
+        payload='{"bat_v":"51.2","bat_i":"2.0","bat_temp":"24.0","rssi":"-62","pack_num":"2"}'
+    ))
+    mqtt_mock.callbacks[driver._system_topic](SimpleNamespace(
+        payload='{"chg_e":"1240","dchg_e":"530"}'
+    ))
+    mqtt_mock.callbacks[driver._power_config_topic](SimpleNamespace(
+        payload='{"min":"-1800","max":"1800"}'
+    ))
+
+    snapshot = await driver.read_telemetry([
+        "battery_soc",
+        "battery_power",
+        "inverter_state",
+        "battery_voltage",
+        "battery_current",
+        "internal_temperature",
+        "wifi_signal_strength",
+        "pack_count",
+        "total_daily_charging_energy",
+    ])
+    assert snapshot == {
+        "battery_soc": 50.0,
+        "battery_power": -300.0,
+        "inverter_state": 3,
+        "battery_voltage": 51.2,
+        "battery_current": 2.0,
+        "internal_temperature": 24.0,
+        "wifi_signal_strength": -62.0,
+        "pack_count": 2.0,
+        "total_daily_charging_energy": 1240.0,
+    }
+    assert driver.capabilities.max_charge_power_w == driver.capabilities.max_discharge_power_w == 1800
+    await driver.close()
+
+
+@pytest.mark.asyncio
 async def test_quick_fallback_uses_battery_values_and_inverts_charge_sign(mqtt_mock):
     driver = HoymilesMqttDriver(_hass(), "MSA-1")
     await driver.connect()
@@ -339,6 +384,18 @@ async def test_probe_accepts_quick_telemetry_and_cleans_up(mqtt_mock):
     ok, metadata = await probe
     assert ok and metadata == {}
     assert len(mqtt_mock.unsubscribed) == 2
+
+
+@pytest.mark.asyncio
+async def test_probe_accepts_legacy_string_telemetry(mqtt_mock):
+    hass = SimpleNamespace()
+    probe = asyncio.create_task(HoymilesMqttDriver.probe(hass, "MSA-legacy", timeout=0.2))
+    await asyncio.sleep(0)
+    mqtt_mock.callbacks["homeassistant/sensor/MSA-legacy/quick/state"](
+        SimpleNamespace(payload='{"soc":"50.0","bat_p":"-100.0"}')
+    )
+
+    assert await probe == (True, {})
 
 
 @pytest.mark.asyncio
