@@ -925,7 +925,7 @@ CONFIG_NUMBER_DEFINITIONS = [
         "key": CONF_MAX_CONTRACTED_POWER,
         "name": "Max Contracted Power",
         "min": 1000,
-        "max": 15000,
+        "max": 20000,
         "step": 100,
         "unit": "W",
         "default": 7000,
