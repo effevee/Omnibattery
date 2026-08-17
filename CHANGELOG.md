@@ -1,6 +1,6 @@
 # Changelog
 
-## [1.4.0b1] - 2026-08-16
+## [1.4.0b1] - 2026-08-17
 
 ### Changed
 
@@ -26,6 +26,7 @@
 - **The live profile capture could briefly fall to 0 kWh during a Home Assistant restart or Recorder backfill**: empty profile days and baseline-only samples now report no state until covered intervals exist, so charts no longer interpret an uninitialized capture as zero energy.
 - **The slow grid-sensor warning stayed after the sensor recovered** (PR#280): a transient stall of three intervals raised the Repairs warning, and nothing could clear it until the integration or Home Assistant restarted, so the warning kept describing a fast meter as slow. Twenty consecutive fast intervals now clear it during the same run, and a sensor that slows down again raises it once more. Clearing deliberately needs a longer streak than raising, so a sensor hovering around the ten-second threshold does not churn the repair. A warning left over from an earlier run now also needs that longer streak, so it disappears about twenty publications into the new run instead of three. Thanks to @syphernl
 - **PD control quality no longer reports `sluggish` while the controller is not allowed to act** (PR#286): the per-cycle restriction check keyed on the commanded power, which a previously blocked cycle had already zeroed, so a blocked charge demand was evaluated as a discharge question, passed, and fed the full grid error into the quality metric. With charge delay active and a solar surplus the sensor read `sluggish` on the most aggressive profile while the batteries sat idle. The demand direction now comes from the grid-error sign, and `blocked` is reported only when the command has no headroom left in the direction it is already running (reducing discharge while charging is blocked remains a fair tuning verdict). Blocked cycles are skipped by the metric and the sensor reports a new `blocked` state. A verdict whose metric has not advanced for over 5 minutes is reported as `collecting_data` instead of as a live verdict; `metric_age_s` was added to the attributes. The `blocked` and `battery_limited` flags are stamped when set and expire after a minute, so a cycle that never reaches the PD tail (weekly full charge or predictive charging owning the cycle, max SOC handling, manual mode) neither erases a verdict that is still true nor latches a stale one for the whole session. Thanks to @syphernl
+- **Force Mode and the charge/discharge setpoints silently did nothing under automatic control**: on register-backed drivers (Marstek, ESPHome) these entities write the device registers directly, but the control loop re-asserts them every cycle, so the write was reverted before it took effect and the battery appeared unresponsive. Writing them while the controller owns the battery now raises an error naming Manual Mode instead of accepting the change. Battery configuration registers (SOC cutoffs, power caps) stay writable, and both Manual Mode switches (system-wide and per battery) release the guard. Thanks to @syphernl
 
 ## [1.3.0] - 2026-08-14
 
