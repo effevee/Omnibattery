@@ -54,7 +54,7 @@ En cada ciclo de control (dirigido por eventos, a la cadencia del sensor de red)
 incremento (kWh) = potencia_hogar (W) × Δt (s) / 3 600 000
 ```
 
-`Δt` es el tiempo real transcurrido desde la muestra anterior, así se adapta a la cadencia variable. El valor diario en curso se expone como `household_consumption_full_day_kwh` en `binary_sensor.marstek_venus_system_predictive_charging_active`, y se persiste para sobrevivir reinicios dentro del mismo día. El antiguo atributo `household_consumption_battery_window_kwh` se mantiene como alias compatible con el mismo valor de día completo.
+`Δt` es el tiempo real transcurrido desde la muestra anterior, así se adapta a la cadencia variable. El valor diario en curso se expone como `household_consumption_full_day_kwh` en `binary_sensor.marstek_venus_system_predictive_charging_active`, y se persiste para sobrevivir reinicios dentro del mismo día.
 
 ---
 

@@ -3125,8 +3125,6 @@ class ChargeDischargeController:
         - usable_energy = stored_energy - cutoff_energy
         - stored_energy = (avg_soc / 100) × total_capacity
         - cutoff_energy = (min_soc / 100) × total_capacity
-        - min_reserve = usable_energy (dynamic buffer above hardware cutoff)
-
         The hardware discharge cutoff is used directly with no safety margin.
 
         Returns:
@@ -3135,7 +3133,6 @@ class ChargeDischargeController:
                 "solar_forecast_kwh": float | None,
                 "stored_energy_kwh": float,
                 "usable_energy_kwh": float,
-                "min_reserve_kwh": float,
                 "cutoff_energy_kwh": float,
                 "effective_min_soc": float,
                 "avg_soc": float,
@@ -3158,7 +3155,6 @@ class ChargeDischargeController:
                 "solar_forecast_kwh": None,
                 "stored_energy_kwh": 0,
                 "usable_energy_kwh": 0,
-                "min_reserve_kwh": 0,
                 "cutoff_energy_kwh": 0,
                 "effective_min_soc": 0,
                 "avg_soc": 0,
@@ -3181,7 +3177,6 @@ class ChargeDischargeController:
                 "solar_forecast_kwh": None,
                 "stored_energy_kwh": 0,
                 "usable_energy_kwh": 0,
-                "min_reserve_kwh": 0,
                 "cutoff_energy_kwh": 0,
                 "effective_min_soc": 0,
                 "avg_soc": 0,
@@ -3205,7 +3200,6 @@ class ChargeDischargeController:
                 "solar_forecast_kwh": None,
                 "stored_energy_kwh": 0,
                 "usable_energy_kwh": 0,
-                "min_reserve_kwh": 0,
                 "cutoff_energy_kwh": 0,
                 "effective_min_soc": 0,
                 "avg_soc": 0,
@@ -3233,7 +3227,6 @@ class ChargeDischargeController:
         stored_energy_kwh = (avg_soc / 100) * total_capacity_kwh
         cutoff_energy_kwh = (min_soc / 100) * total_capacity_kwh
         usable_energy_kwh = max(0, stored_energy_kwh - cutoff_energy_kwh)
-        min_reserve_kwh = usable_energy_kwh  # Dynamic buffer: 0 at cutoff, positive above
         effective_min_soc = min_soc  # Actual hardware cutoff, no safety margin
 
         # Safety margin: user-configurable buffer added to consumption forecast.
@@ -3366,7 +3359,6 @@ class ChargeDischargeController:
                 "solar_forecast_kwh": None,
                 "stored_energy_kwh": stored_energy_kwh,
                 "usable_energy_kwh": usable_energy_kwh,
-                "min_reserve_kwh": min_reserve_kwh,
                 "cutoff_energy_kwh": cutoff_energy_kwh,
                 "effective_min_soc": effective_min_soc,
                 "avg_soc": avg_soc,
@@ -3443,11 +3435,6 @@ class ChargeDischargeController:
         # battery, so the "solar will charge the remaining X" line can't quote a
         # figure larger than the pack (e.g. 12.94 kWh into a 5.12 kWh battery).
         solar_surplus_kwh = max(0.0, min(solar_forecast_kwh - avg_consumption_kwh, _gap_to_max_kwh))
-        _grid_margin_factor = 1.0 + self._predictive_grid_charge_margin_pct / 100.0
-        grid_charge_kwh = min(
-            _gap_to_max_kwh,
-            max(0.0, _gap_to_max_kwh - solar_surplus_kwh) * _grid_margin_factor,
-        )
         planned_grid_charge_kwh = calculations.calculate_planned_grid_charge_kwh(
             energy_deficit_kwh,
             _gap_to_max_kwh,
@@ -3459,7 +3446,6 @@ class ChargeDischargeController:
             "solar_forecast_kwh": solar_forecast_kwh,
             "stored_energy_kwh": stored_energy_kwh,
             "usable_energy_kwh": usable_energy_kwh,
-            "min_reserve_kwh": min_reserve_kwh,
             "cutoff_energy_kwh": cutoff_energy_kwh,
             "effective_min_soc": effective_min_soc,
             "avg_soc": avg_soc,
@@ -3469,7 +3455,6 @@ class ChargeDischargeController:
             "planned_grid_charge_kwh": planned_grid_charge_kwh,
             "days_in_history": days_in_history,
             "solar_surplus_kwh": solar_surplus_kwh,
-            "grid_charge_kwh": grid_charge_kwh,
             "floor_active": floor_active,
             "consumption_scope": consumption_scope,
             "consumption_forecast_source": (

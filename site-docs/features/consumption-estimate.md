@@ -54,7 +54,7 @@ On every control cycle (event-driven, at the grid sensor's cadence), the adjuste
 increment (kWh) = home_power (W) × Δt (s) / 3,600,000
 ```
 
-`Δt` is the real elapsed time since the previous sample, so it adapts to the variable cadence. The running daily value is exposed as `household_consumption_full_day_kwh` on `binary_sensor.marstek_venus_system_predictive_charging_active`, and is persisted so it survives restarts within the same day. The old `household_consumption_battery_window_kwh` attribute remains as a compatibility alias with the same full-day value.
+`Δt` is the real elapsed time since the previous sample, so it adapts to the variable cadence. The running daily value is exposed as `household_consumption_full_day_kwh` on `binary_sensor.marstek_venus_system_predictive_charging_active`, and is persisted so it survives restarts within the same day.
 
 ---
 
