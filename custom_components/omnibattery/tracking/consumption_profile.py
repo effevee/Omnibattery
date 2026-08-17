@@ -35,6 +35,10 @@ MIN_INTERVAL_COVERAGE_S = INTERVAL_SECONDS * 0.75
 MAX_SAMPLE_GAP_SECONDS = 5 * 60
 PROFILE_STORE_VERSION = 1
 PROFILE_STORE_KEY = "consumption_profile"
+# Raw days captured before the balance-validation guard may contain false
+# near-zero energy during battery charging.  Rebuild those days from Recorder
+# after upgrading instead of allowing contaminated intervals to survive.
+PROFILE_CAPTURE_VERSION = 2
 # Temporary household-shape fallback used until the learned profile is mature.
 # Values are relative hourly demand, not kWh.  The six quiet overnight hours
 # stay at the lowest level, breakfast has a small lift, daytime demand rises
@@ -643,6 +647,19 @@ class ConsumptionProfileTracker:
             _LOGGER.info("Consumption profile: invalidated after configuration change")
             return False
 
+        if data.get("capture_version") != PROFILE_CAPTURE_VERSION:
+            self._days = {}
+            self._invalidated = True
+            self._active_fingerprint = expected_fingerprint
+            self._last_error = "profile invalidated after balance validation change"
+            self._loaded = True
+            _LOGGER.info(
+                "Consumption profile: discarded raw days after balance "
+                "validation change; Recorder backfill will rebuild them"
+            )
+            await self.async_save()
+            return False
+
         raw_days = data.get("days", [])
         loaded: dict[date, ProfileDay] = {}
         if isinstance(raw_days, list):
@@ -687,6 +704,7 @@ class ConsumptionProfileTracker:
         return {
             "interval_minutes": INTERVAL_MINUTES,
             "retention_days": PROFILE_RETENTION_DAYS,
+            "capture_version": PROFILE_CAPTURE_VERSION,
             "timezone": getattr(getattr(self._hass, "config", None), "time_zone", None),
             "configuration_fingerprint": self.configuration_fingerprint(),
             "days": [

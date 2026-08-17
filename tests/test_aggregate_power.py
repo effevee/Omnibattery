@@ -137,6 +137,21 @@ def test_home_consumption_holds_last_valid_value_for_negative_transient():
     }
 
 
+def test_home_consumption_holds_last_valid_value_for_small_positive_transient():
+    # The independently sampled values can leave a tiny positive balance, so
+    # checking only total <= 0 is insufficient.
+    zendure = FakeCoordinator(data={"battery_power": 400})
+    sensor = _home_sensor([zendure], grid=1000, solar=0)
+    assert sensor._calculate_home_consumption() == 600
+
+    sensor.hass._states["sensor.grid"] = _FakeState(401)
+    assert sensor._calculate_home_consumption() == 600
+    assert sensor.extra_state_attributes == {
+        "raw_balance_w": 1,
+        "balance_quality": "held_last_valid",
+    }
+
+
 def test_home_consumption_does_not_hold_stale_value_forever():
     zendure = FakeCoordinator(data={"battery_power": 400})
     sensor = _home_sensor([zendure], grid=1000, solar=0)

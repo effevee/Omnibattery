@@ -448,6 +448,18 @@ def test_derive_home_cancels_grid_energy_used_to_charge_battery():
     assert tracker._derive_home_power_kw() == pytest.approx(0.3)
 
 
+def test_adjusted_home_holds_last_valid_value_for_small_charge_balance():
+    # A stale grid/battery pair can leave a small positive balance instead of
+    # a negative one. It must not be accepted as real household consumption.
+    tracker = _make_home_tracker(
+        {"sensor.grid": _w(1000)}, [_battunit(-800)]
+    )
+    assert tracker.get_adjusted_home_power_kw() == pytest.approx(0.2)
+
+    tracker._hass.states._mapping["sensor.grid"] = _w(801)
+    assert tracker.get_adjusted_home_power_kw() == pytest.approx(0.2)
+
+
 def test_derive_home_skips_disconnected_stale_discharge():
     # Same battery dropped mid-discharge: ac_power frozen at 2500, but its load
     # has shifted onto the grid meter (now 2800 W). Counting the stale 2500 would

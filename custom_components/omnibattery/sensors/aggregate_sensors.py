@@ -16,6 +16,11 @@ _LOGGER = logging.getLogger(__name__)
 from ..const import DOMAIN, ALARM_BIT_DESCRIPTIONS, FAULT_BIT_DESCRIPTIONS, DEBUG_POLL_SENSOR_VALUES, CONF_SOLAR_PRODUCTION_SENSOR, CONF_METER_INVERTED, pd_profile_from_params
 from ..infra.coordinator import MarstekVenusDataUpdateCoordinator
 from ..infra.entity_naming import system_entity_id
+from ..tracking.consumption_tracker import (
+    HOME_CONSUMPTION_HOLD_S,
+    has_battery_charging,
+    home_balance_is_suspicious,
+)
 
 
 # Define aggregate sensor definitions
@@ -93,14 +98,6 @@ AGGREGATE_SENSOR_DEFINITIONS = [
         "precision": 0,
     },
 ]
-
-
-# Grid, solar and battery telemetry arrive on independent schedules. During a
-# battery poll, their instantaneous balance can therefore become briefly
-# negative even though the household is still consuming power. Keep the last
-# coherent positive estimate for the duration of one normal telemetry gap;
-# after that, expose the estimate as unknown instead of publishing a false 0 W.
-HOME_CONSUMPTION_HOLD_S = 15.0
 
 
 # Signed net cell power across all batteries (+charge / -discharge), added only
@@ -644,12 +641,17 @@ class MarstekVenusAggregateSensor(RestoreEntity, SensorEntity):
         raw_balance = round(total, self.definition.get("precision", 0))
         self._home_consumption_raw_balance = raw_balance
 
-        # A negative household load is physically impossible. It is normally
-        # caused here by the independently polled grid/solar/battery values
-        # being sampled at different instants while the batteries are charging.
-        # Do not turn that transient into a false 0 W reading: hold the last
-        # positive estimate for one normal telemetry gap instead.
-        if total <= 0:
+        # A negative or implausibly small household load is physically
+        # impossible for the configured installation. It is normally caused
+        # here by independently polled grid/solar/battery values being sampled
+        # at different instants while the batteries are charging. Keep the last
+        # coherent estimate briefly, then publish unknown instead of a false
+        # low or zero value.
+        if home_balance_is_suspicious(
+            total,
+            battery_charging=has_battery_charging(self.coordinators),
+            last_valid_w=self._last_valid_home_consumption,
+        ):
             last_value = self._last_valid_home_consumption
             last_at = self._last_valid_home_consumption_at
             if last_value is not None and last_at is not None:
@@ -658,7 +660,7 @@ class MarstekVenusAggregateSensor(RestoreEntity, SensorEntity):
                     self._home_consumption_quality = "held_last_valid"
                     _LOGGER.debug(
                         "Holding last valid home consumption %.0f W for %.1f s "
-                        "after negative balance %.0f W",
+                        "after suspicious balance %.0f W",
                         last_value,
                         held_s,
                         raw_balance,

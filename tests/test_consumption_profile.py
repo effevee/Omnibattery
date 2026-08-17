@@ -269,8 +269,8 @@ def test_current_day_capture_exposes_raw_energy_and_coverage():
 
 
 def test_four_weekday_samples_are_weighted_by_age_and_profile_becomes_mature():
-    # The current date in the test environment is a Saturday.  These four
-    # Mondays therefore receive weights 1, .75, .50 and .25.
+    # Freeze the profile's notion of today so the age weights do not depend on
+    # the calendar date on which the test suite happens to run.
     monday_samples = {
         date(2026, 8, 10): 1.0,
         date(2026, 8, 3): 2.0,
@@ -281,7 +281,9 @@ def test_four_weekday_samples_are_weighted_by_age_and_profile_becomes_mature():
     for local_date in (date(2026, 8, 9), date(2026, 8, 8), date(2026, 8, 7)):
         days[local_date] = _day(local_date, 2.0)
 
-    forecast = _profile(days).forecast_for_date(date(2026, 8, 17))
+    profile = _profile(days)
+    profile._today = lambda: date(2026, 8, 15)
+    forecast = profile.forecast_for_date(date(2026, 8, 17))
 
     # Weighted weekday mean = (1 + .75*2 + .50*3 + .25*4) / 2.5 = 2.
     assert forecast.mature is True

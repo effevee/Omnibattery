@@ -35,6 +35,76 @@ _LOGGER = logging.getLogger(__name__)
 
 CONSUMPTION_HISTORY_SCOPE = "full_day_home"
 
+# Grid, solar and battery telemetry are published independently.  During a
+# battery charge, a short-lived mismatch can make the derived household
+# balance negative or implausibly small even though the house is still using
+# power.  Keep the same short hold window as the Home Consumption entity and
+# stop publishing the value when the mismatch persists.
+HOME_CONSUMPTION_HOLD_S = 15.0
+HOME_CONSUMPTION_MIN_BALANCE_W = 20.0
+HOME_CONSUMPTION_MIN_VALID_RATIO = 0.5
+
+
+def coordinator_ac_power_w(coordinator: Any) -> float | None:
+    """Return a coordinator's signed AC power in watts.
+
+    Marstek coordinators expose ``ac_power`` directly.  Registerless drivers
+    expose ``battery_power`` with the opposite sign, so use the same fallback
+    convention as the aggregate Home Consumption sensor.
+    """
+    data = getattr(coordinator, "data", None)
+    if not data:
+        return None
+    value = data.get("ac_power")
+    if value is None:
+        battery_power = data.get("battery_power")
+        if battery_power is None:
+            return None
+        value = -battery_power
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if math.isfinite(parsed) else None
+
+
+def has_battery_charging(coordinators: Any) -> bool:
+    """Return whether an available battery is currently charging."""
+    for coordinator in coordinators or ():
+        if getattr(coordinator, "is_available", True) is False:
+            continue
+        ac_power_w = coordinator_ac_power_w(coordinator)
+        if ac_power_w is not None and ac_power_w < -1.0:
+            return True
+    return False
+
+
+def home_balance_is_suspicious(
+    balance_w: float,
+    *,
+    battery_charging: bool,
+    last_valid_w: float | None,
+) -> bool:
+    """Identify an impossible or transiently collapsed home-power balance.
+
+    A positive low load can be legitimate when no battery is charging.  While
+    charging, however, a balance below both a small absolute floor and half of
+    the previous valid value is characteristic of independently sampled
+    telemetry cancelling the house load.
+    """
+    if not math.isfinite(balance_w) or balance_w <= 0.0:
+        return True
+    if not battery_charging:
+        return False
+
+    threshold_w = HOME_CONSUMPTION_MIN_BALANCE_W
+    if last_valid_w is not None and math.isfinite(last_valid_w) and last_valid_w > 0.0:
+        threshold_w = max(
+            threshold_w,
+            last_valid_w * HOME_CONSUMPTION_MIN_VALID_RATIO,
+        )
+    return balance_w < threshold_w
+
 
 class ConsumptionTracker:
     """Manages consumption history, accumulators and solar timing."""
@@ -85,6 +155,8 @@ class ConsumptionTracker:
         self._daily_solar_last_power_kw: Optional[float] = None
         self._daily_home_last_power_kw: Optional[float] = None
         self._daily_grid_last_power_kw: Optional[float] = None
+        self._last_valid_home_power_kw: Optional[float] = None
+        self._last_valid_home_power_monotonic: Optional[float] = None
         self._grid_at_min_soc_last_save_mono: float = 0.0
         self._accumulator_last_save_monotonic: float = 0.0
         self._solar_noon_cache: Optional[tuple[date, float]] = None
@@ -468,7 +540,7 @@ class ConsumptionTracker:
             # grid meter already carries its shifted load — double-counting it
             # into home consumption and the integrated daily total.
             if coordinator.is_available and coordinator.data:
-                ac = coordinator.data.get("ac_power")
+                ac = coordinator_ac_power_w(coordinator)
                 if ac is not None:
                     total_kw += ac / 1000.0
         if ctrl.solar_production_sensor:
@@ -480,12 +552,15 @@ class ConsumptionTracker:
     def get_adjusted_home_power_kw(self) -> Optional[float]:
         """Return household demand adjusted for configured external loads.
 
-        This is intentionally side-effect free and is the single input shared
-        by the legacy daily accumulator and the quarter-hour profile.
+        This is the single input shared by the legacy daily accumulator and the
+        quarter-hour profile.  A short-lived last-valid hold prevents a
+        transiently collapsed grid/battery balance from becoming captured
+        household energy.
         """
-        power_kw = self._derive_home_power_kw()
-        if power_kw is None:
+        raw_power_kw = self._derive_home_power_kw()
+        if raw_power_kw is None:
             return None
+        power_kw = raw_power_kw
         external_loads = getattr(self._controller, "_external_loads", None)
         if external_loads is not None:
             try:
@@ -494,7 +569,37 @@ class ConsumptionTracker:
                 pass
         if not math.isfinite(power_kw):
             return None
-        return max(0.0, power_kw)
+        power_kw = max(0.0, power_kw)
+
+        last_valid_kw = getattr(self, "_last_valid_home_power_kw", None)
+        last_valid_at = getattr(self, "_last_valid_home_power_monotonic", None)
+        suspicious = home_balance_is_suspicious(
+            raw_power_kw * 1000.0,
+            battery_charging=has_battery_charging(
+                getattr(self._controller, "coordinators", ())
+            ),
+            last_valid_w=(last_valid_kw * 1000.0 if last_valid_kw is not None else None),
+        ) or power_kw <= 0.0
+
+        now = monotonic()
+        if suspicious:
+            if (
+                last_valid_kw is not None
+                and last_valid_at is not None
+                and 0.0 <= now - last_valid_at <= HOME_CONSUMPTION_HOLD_S
+            ):
+                _LOGGER.debug(
+                    "Holding last valid home consumption %.0f W after "
+                    "suspicious balance %.0f W",
+                    last_valid_kw * 1000.0,
+                    raw_power_kw * 1000.0,
+                )
+                return last_valid_kw
+            return None
+
+        self._last_valid_home_power_kw = power_kw
+        self._last_valid_home_power_monotonic = now
+        return power_kw
 
     async def accumulate_daily_home_energy(self) -> None:
         """Integrate home consumption power → exact daily kWh.
