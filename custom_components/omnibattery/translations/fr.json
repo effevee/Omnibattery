@@ -169,7 +169,7 @@
           "full_charge_voltage_taper_enabled": "Lorsque la cible est 100%, limite la charge à 200 W à partir de 3.48 V de tension maximale de cellule. Les Venus E s'arrêtent à 3.60 V pour mesurer le déséquilibre après 60 secondes ; les Venus A/D avec des packs couplés continuent à 200 W jusqu'à la coupure du BMS.",
           "battery_capacity_kwh": "Capacité utilisable nominale du pack de batteries. Elle sert à calculer l'énergie stockée et l'efficacité à partir du SOC. Pour Sessy, saisissez la capacité réelle ; pour les autres batteries, laissez 0 si elle est inconnue.",
           "battery_phase": "Phase AC physique (L1/L2/L3) à laquelle cette batterie est raccordée, ou Non assignée hors du schéma de phases protégées. Une batterie sans phase est exclue de l'enveloppe triphasée et continue à fonctionner normalement en automatique.",
-          "track_mac": "L'adresse MAC est l'adresse matérielle permanente de la batterie : contrairement à l'adresse IP ci-dessus, elle ne change jamais. Home Assistant s'en sert pour retrouver la batterie et mettre l'adresse IP à jour tout seul.",
+          "track_mac": "L'adresse MAC est l'adresse matérielle permanente de la batterie : contrairement à l'adresse IP ci-dessus, elle ne change jamais. Home Assistant s'en sert pour retrouver la batterie et mettre l'adresse IP à jour tout seul. Derrière un pont Wi-Fi vers Ethernet ou un adaptateur CPL, l'adresse visible est celle de l'adaptateur et couvre tout ce qui est derrière : le suivi ne fonctionne alors que si une seule batterie s'y trouve.",
           "mac": "Adresse matérielle permanente de l'interface que la batterie utilise sur le réseau. Prenez-la dans la liste des appareils de votre box : une batterie peut annoncer une adresse différente de celle de son interface filaire. Remplie automatiquement quand le cache DHCP de Home Assistant est disponible."
         }
       },
@@ -669,6 +669,7 @@
     },
     "abort": {
       "ip_updated": "L'adresse IP de la batterie a changé ; la connexion a été mise à jour toute seule.",
+      "candidate_silent": "Une nouvelle adresse IP a été annoncée pour cette batterie, mais rien n'y a répondu ; la connexion n'a pas été modifiée.",
       "no_tracked_battery": "Aucune batterie configurée n'est suivie par l'adresse MAC de cet appareil.",
       "already_configured": "Cette intégration est déjà configurée.",
       "reconfigure_successful": "Paramètres de connexion de la batterie mis à jour avec succès.",
@@ -832,7 +833,7 @@
           "full_charge_voltage_taper_enabled": "Lorsque la cible est 100%, limite la charge à 200 W à partir de 3.48 V de tension maximale de cellule. Les Venus E s'arrêtent à 3.60 V pour mesurer le déséquilibre après 60 secondes ; les Venus A/D avec des packs couplés continuent à 200 W jusqu'à la coupure du BMS.",
           "battery_capacity_kwh": "Capacité utilisable nominale du pack de batteries. Elle sert à calculer l'énergie stockée et l'efficacité à partir du SOC. Pour Sessy, saisissez la capacité réelle ; pour les autres batteries, laissez 0 si elle est inconnue.",
           "battery_phase": "Phase AC physique (L1/L2/L3) à laquelle cette batterie est raccordée, ou Non assignée hors du schéma de phases protégées. Une batterie sans phase est exclue de l'enveloppe triphasée et continue à fonctionner normalement en automatique.",
-          "track_mac": "L'adresse MAC est l'adresse matérielle permanente de la batterie : contrairement à l'adresse IP ci-dessus, elle ne change jamais. Home Assistant s'en sert pour retrouver la batterie et mettre l'adresse IP à jour tout seul.",
+          "track_mac": "L'adresse MAC est l'adresse matérielle permanente de la batterie : contrairement à l'adresse IP ci-dessus, elle ne change jamais. Home Assistant s'en sert pour retrouver la batterie et mettre l'adresse IP à jour tout seul. Derrière un pont Wi-Fi vers Ethernet ou un adaptateur CPL, l'adresse visible est celle de l'adaptateur et couvre tout ce qui est derrière : le suivi ne fonctionne alors que si une seule batterie s'y trouve.",
           "mac": "Adresse matérielle permanente de l'interface que la batterie utilise sur le réseau. Prenez-la dans la liste des appareils de votre box : une batterie peut annoncer une adresse différente de celle de son interface filaire. Remplie automatiquement quand le cache DHCP de Home Assistant est disponible."
         }
       },
