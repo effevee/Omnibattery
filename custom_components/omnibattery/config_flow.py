@@ -62,6 +62,9 @@ from .const import (
     CONF_SOLAR_FORECAST_SENSOR,
     CONF_SOLAR_FORECAST_REMAINING_SENSOR,
     CONF_SOLAR_PRODUCTION_SENSOR,
+    CONF_SOLAR_PROFILE_MODE,
+    SOLAR_PROFILE_MODES,
+    DEFAULT_SOLAR_PROFILE_MODE,
     CONF_MAX_CONTRACTED_POWER,
     CONF_THREE_PHASE_ENABLED,
     CONF_PHASE_1_CURRENT_SENSOR,
@@ -181,6 +184,18 @@ def _hoymiles_model_selector(default: str = _HOYMILES_MODEL_AUTO):
         SelectSelectorConfig(
             options=options,
             translation_key="hoymiles_model",
+            mode=SelectSelectorMode.DROPDOWN,
+        )
+    )
+
+
+def _solar_profile_mode_selector(default: str = DEFAULT_SOLAR_PROFILE_MODE):
+    """Expose the solar timeline rollout without changing legacy defaults."""
+    if default not in SOLAR_PROFILE_MODES:
+        default = DEFAULT_SOLAR_PROFILE_MODE
+    return vol.Optional(CONF_SOLAR_PROFILE_MODE, default=default), SelectSelector(
+        SelectSelectorConfig(
+            options=list(SOLAR_PROFILE_MODES),
             mode=SelectSelectorMode.DROPDOWN,
         )
     )
@@ -1988,6 +2003,9 @@ class MarstekVenusConfigFlow(LegacyDomainMigrationMixin, ConfigFlow, domain=DOMA
                         self.config_data[CONF_SOLAR_FORECAST_SENSOR] = forecast_sensor
                         self.config_data[CONF_PREDICTIVE_SAFETY_MARGIN_KWH] = user_input.get(CONF_PREDICTIVE_SAFETY_MARGIN_KWH, DEFAULT_PREDICTIVE_SAFETY_MARGIN_KWH)
                         self.config_data[CONF_PREDICTIVE_GRID_CHARGE_MARGIN_PCT] = user_input.get(CONF_PREDICTIVE_GRID_CHARGE_MARGIN_PCT, DEFAULT_PREDICTIVE_GRID_CHARGE_MARGIN_PCT)
+                        self.config_data[CONF_SOLAR_PROFILE_MODE] = user_input.get(
+                            CONF_SOLAR_PROFILE_MODE, DEFAULT_SOLAR_PROFILE_MODE
+                        )
 
                         return await self._finish_setup()
                 except Exception as e:
@@ -2005,6 +2023,8 @@ class MarstekVenusConfigFlow(LegacyDomainMigrationMixin, ConfigFlow, domain=DOMA
         schema_dict[vol.Optional(CONF_PREDICTIVE_GRID_CHARGE_MARGIN_PCT, default=DEFAULT_PREDICTIVE_GRID_CHARGE_MARGIN_PCT)] = NumberSelector(
             NumberSelectorConfig(min=0, max=100, step=5, unit_of_measurement="%", mode=NumberSelectorMode.BOX)
         )
+        mode_field, mode_selector = _solar_profile_mode_selector()
+        schema_dict[mode_field] = mode_selector
 
         return self.async_show_form(
             step_id="predictive_charging_config",
@@ -2099,6 +2119,9 @@ class MarstekVenusConfigFlow(LegacyDomainMigrationMixin, ConfigFlow, domain=DOMA
                         self.config_data["charging_time_slot"] = None
                         self.config_data[CONF_PREDICTIVE_SAFETY_MARGIN_KWH] = user_input.get(CONF_PREDICTIVE_SAFETY_MARGIN_KWH, DEFAULT_PREDICTIVE_SAFETY_MARGIN_KWH)
                         self.config_data[CONF_PREDICTIVE_GRID_CHARGE_MARGIN_PCT] = user_input.get(CONF_PREDICTIVE_GRID_CHARGE_MARGIN_PCT, DEFAULT_PREDICTIVE_GRID_CHARGE_MARGIN_PCT)
+                        self.config_data[CONF_SOLAR_PROFILE_MODE] = user_input.get(
+                            CONF_SOLAR_PROFILE_MODE, DEFAULT_SOLAR_PROFILE_MODE
+                        )
                         self.config_data[CONF_NEGATIVE_PRICE_CHARGING_ENABLED] = user_input.get(
                             CONF_NEGATIVE_PRICE_CHARGING_ENABLED,
                             DEFAULT_NEGATIVE_PRICE_CHARGING_ENABLED,
@@ -2164,6 +2187,8 @@ class MarstekVenusConfigFlow(LegacyDomainMigrationMixin, ConfigFlow, domain=DOMA
         schema_dict[vol.Optional(CONF_PREDICTIVE_GRID_CHARGE_MARGIN_PCT, default=DEFAULT_PREDICTIVE_GRID_CHARGE_MARGIN_PCT)] = NumberSelector(
             NumberSelectorConfig(min=0, max=100, step=5, unit_of_measurement="%", mode=NumberSelectorMode.BOX)
         )
+        mode_field, mode_selector = _solar_profile_mode_selector()
+        schema_dict[mode_field] = mode_selector
         schema_dict[vol.Optional(CONF_NEGATIVE_PRICE_CHARGING_ENABLED, default=DEFAULT_NEGATIVE_PRICE_CHARGING_ENABLED)] = bool
         schema_dict[vol.Optional(CONF_SMART_PREDISCHARGE_ENABLED, default=DEFAULT_SMART_PREDISCHARGE_ENABLED)] = bool
         schema_dict[vol.Optional(CONF_NEGATIVE_INJECTION_THRESHOLD, default=DEFAULT_NEGATIVE_INJECTION_THRESHOLD)] = NumberSelector(
@@ -2250,6 +2275,9 @@ class MarstekVenusConfigFlow(LegacyDomainMigrationMixin, ConfigFlow, domain=DOMA
                     self.config_data["charging_time_slot"] = None
                     self.config_data[CONF_PREDICTIVE_SAFETY_MARGIN_KWH] = user_input.get(CONF_PREDICTIVE_SAFETY_MARGIN_KWH, DEFAULT_PREDICTIVE_SAFETY_MARGIN_KWH)
                     self.config_data[CONF_PREDICTIVE_GRID_CHARGE_MARGIN_PCT] = user_input.get(CONF_PREDICTIVE_GRID_CHARGE_MARGIN_PCT, DEFAULT_PREDICTIVE_GRID_CHARGE_MARGIN_PCT)
+                    self.config_data[CONF_SOLAR_PROFILE_MODE] = user_input.get(
+                        CONF_SOLAR_PROFILE_MODE, DEFAULT_SOLAR_PROFILE_MODE
+                    )
 
                     return await self._finish_setup()
             except Exception as e:
@@ -2275,6 +2303,8 @@ class MarstekVenusConfigFlow(LegacyDomainMigrationMixin, ConfigFlow, domain=DOMA
         schema_dict[vol.Optional(CONF_PREDICTIVE_GRID_CHARGE_MARGIN_PCT, default=DEFAULT_PREDICTIVE_GRID_CHARGE_MARGIN_PCT)] = NumberSelector(
             NumberSelectorConfig(min=0, max=100, step=5, unit_of_measurement="%", mode=NumberSelectorMode.BOX)
         )
+        mode_field, mode_selector = _solar_profile_mode_selector()
+        schema_dict[mode_field] = mode_selector
 
         return self.async_show_form(
             step_id="realtime_price_config",
@@ -4173,6 +4203,10 @@ class OptionsFlowHandler(OptionsFlow):
                     self.config_data[CONF_SOLAR_FORECAST_SENSOR] = forecast_sensor
                     self.config_data[CONF_PREDICTIVE_SAFETY_MARGIN_KWH] = user_input.get(CONF_PREDICTIVE_SAFETY_MARGIN_KWH, DEFAULT_PREDICTIVE_SAFETY_MARGIN_KWH)
                     self.config_data[CONF_PREDICTIVE_GRID_CHARGE_MARGIN_PCT] = user_input.get(CONF_PREDICTIVE_GRID_CHARGE_MARGIN_PCT, DEFAULT_PREDICTIVE_GRID_CHARGE_MARGIN_PCT)
+                    self.config_data[CONF_SOLAR_PROFILE_MODE] = user_input.get(
+                        CONF_SOLAR_PROFILE_MODE,
+                        existing_config.get(CONF_SOLAR_PROFILE_MODE, DEFAULT_SOLAR_PROFILE_MODE),
+                    )
                     return await self._save_and_finish()
             except Exception as e:
                 _LOGGER.error("Error validating predictive charging config: %s", e)
@@ -4182,6 +4216,7 @@ class OptionsFlowHandler(OptionsFlow):
             "sensor": forecast_sensor_current if forecast_sensor_current else "",
             "margin": existing_config.get(CONF_PREDICTIVE_SAFETY_MARGIN_KWH, DEFAULT_PREDICTIVE_SAFETY_MARGIN_KWH),
             "grid_margin": existing_config.get(CONF_PREDICTIVE_GRID_CHARGE_MARGIN_PCT, DEFAULT_PREDICTIVE_GRID_CHARGE_MARGIN_PCT),
+            "solar_profile_mode": existing_config.get(CONF_SOLAR_PROFILE_MODE, DEFAULT_SOLAR_PROFILE_MODE),
         }
 
         schema_dict = _charging_window_schema_fields(existing_windows)
@@ -4195,6 +4230,8 @@ class OptionsFlowHandler(OptionsFlow):
         schema_dict[vol.Optional(CONF_PREDICTIVE_GRID_CHARGE_MARGIN_PCT, default=defaults["grid_margin"])] = NumberSelector(
             NumberSelectorConfig(min=0, max=100, step=5, unit_of_measurement="%", mode=NumberSelectorMode.BOX)
         )
+        mode_field, mode_selector = _solar_profile_mode_selector(defaults["solar_profile_mode"])
+        schema_dict[mode_field] = mode_selector
 
         return self.async_show_form(
             step_id="predictive_charging_config",
@@ -4288,6 +4325,10 @@ class OptionsFlowHandler(OptionsFlow):
                         self.config_data["charging_time_slot"] = None
                         self.config_data[CONF_PREDICTIVE_SAFETY_MARGIN_KWH] = user_input.get(CONF_PREDICTIVE_SAFETY_MARGIN_KWH, DEFAULT_PREDICTIVE_SAFETY_MARGIN_KWH)
                         self.config_data[CONF_PREDICTIVE_GRID_CHARGE_MARGIN_PCT] = user_input.get(CONF_PREDICTIVE_GRID_CHARGE_MARGIN_PCT, DEFAULT_PREDICTIVE_GRID_CHARGE_MARGIN_PCT)
+                        self.config_data[CONF_SOLAR_PROFILE_MODE] = user_input.get(
+                            CONF_SOLAR_PROFILE_MODE,
+                            existing_config.get(CONF_SOLAR_PROFILE_MODE, DEFAULT_SOLAR_PROFILE_MODE),
+                        )
                         self.config_data[CONF_NEGATIVE_PRICE_CHARGING_ENABLED] = user_input.get(
                             CONF_NEGATIVE_PRICE_CHARGING_ENABLED,
                             existing_config.get(CONF_NEGATIVE_PRICE_CHARGING_ENABLED, DEFAULT_NEGATIVE_PRICE_CHARGING_ENABLED),
@@ -4333,6 +4374,7 @@ class OptionsFlowHandler(OptionsFlow):
         default_dp_discharge_control = existing_config.get(CONF_DP_PRICE_DISCHARGE_CONTROL, False)
         default_margin = existing_config.get(CONF_PREDICTIVE_SAFETY_MARGIN_KWH, DEFAULT_PREDICTIVE_SAFETY_MARGIN_KWH)
         default_grid_margin = existing_config.get(CONF_PREDICTIVE_GRID_CHARGE_MARGIN_PCT, DEFAULT_PREDICTIVE_GRID_CHARGE_MARGIN_PCT)
+        default_solar_profile_mode = existing_config.get(CONF_SOLAR_PROFILE_MODE, DEFAULT_SOLAR_PROFILE_MODE)
         default_negative_price_enabled = existing_config.get(
             CONF_NEGATIVE_PRICE_CHARGING_ENABLED,
             DEFAULT_NEGATIVE_PRICE_CHARGING_ENABLED,
@@ -4393,6 +4435,8 @@ class OptionsFlowHandler(OptionsFlow):
         schema_dict[vol.Optional(CONF_PREDICTIVE_GRID_CHARGE_MARGIN_PCT, default=default_grid_margin)] = NumberSelector(
             NumberSelectorConfig(min=0, max=100, step=5, unit_of_measurement="%", mode=NumberSelectorMode.BOX)
         )
+        mode_field, mode_selector = _solar_profile_mode_selector(default_solar_profile_mode)
+        schema_dict[mode_field] = mode_selector
         schema_dict[vol.Optional(CONF_NEGATIVE_PRICE_CHARGING_ENABLED, default=default_negative_price_enabled)] = bool
         schema_dict[vol.Optional(CONF_SMART_PREDISCHARGE_ENABLED, default=default_smart_predischarge)] = bool
         schema_dict[vol.Optional(CONF_NEGATIVE_INJECTION_THRESHOLD, default=default_negative_threshold)] = NumberSelector(
@@ -4480,6 +4524,10 @@ class OptionsFlowHandler(OptionsFlow):
                     self.config_data["charging_time_slot"] = None
                     self.config_data[CONF_PREDICTIVE_SAFETY_MARGIN_KWH] = user_input.get(CONF_PREDICTIVE_SAFETY_MARGIN_KWH, DEFAULT_PREDICTIVE_SAFETY_MARGIN_KWH)
                     self.config_data[CONF_PREDICTIVE_GRID_CHARGE_MARGIN_PCT] = user_input.get(CONF_PREDICTIVE_GRID_CHARGE_MARGIN_PCT, DEFAULT_PREDICTIVE_GRID_CHARGE_MARGIN_PCT)
+                    self.config_data[CONF_SOLAR_PROFILE_MODE] = user_input.get(
+                        CONF_SOLAR_PROFILE_MODE,
+                        existing_config.get(CONF_SOLAR_PROFILE_MODE, DEFAULT_SOLAR_PROFILE_MODE),
+                    )
                     return await self._save_and_finish()
             except Exception as e:
                 _LOGGER.error("Error validating real-time price config: %s", e)
@@ -4492,6 +4540,7 @@ class OptionsFlowHandler(OptionsFlow):
         default_forecast = existing_config.get("solar_forecast_sensor", "")
         default_margin = existing_config.get(CONF_PREDICTIVE_SAFETY_MARGIN_KWH, DEFAULT_PREDICTIVE_SAFETY_MARGIN_KWH)
         default_grid_margin = existing_config.get(CONF_PREDICTIVE_GRID_CHARGE_MARGIN_PCT, DEFAULT_PREDICTIVE_GRID_CHARGE_MARGIN_PCT)
+        default_solar_profile_mode = existing_config.get(CONF_SOLAR_PROFILE_MODE, DEFAULT_SOLAR_PROFILE_MODE)
 
         schema_dict: dict = {
             vol.Required(CONF_PRICE_SENSOR, default=default_sensor if default_sensor else vol.UNDEFINED):
@@ -4519,6 +4568,8 @@ class OptionsFlowHandler(OptionsFlow):
         schema_dict[vol.Optional(CONF_PREDICTIVE_GRID_CHARGE_MARGIN_PCT, default=default_grid_margin)] = NumberSelector(
             NumberSelectorConfig(min=0, max=100, step=5, unit_of_measurement="%", mode=NumberSelectorMode.BOX)
         )
+        mode_field, mode_selector = _solar_profile_mode_selector(default_solar_profile_mode)
+        schema_dict[mode_field] = mode_selector
 
         return self.async_show_form(
             step_id="realtime_price_config",

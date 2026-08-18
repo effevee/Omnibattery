@@ -77,6 +77,17 @@ integración. Cambiar la fuente, un ajuste de cargas o la zona horaria
 invalida deliberadamente el perfil guardado; después el backfill del Recorder lo
 reconstruye en segundo plano. Los huecos de más de cinco minutos no se interpolan.
 
+### El perfil solar sigue inmaduro o usa fallback
+
+Es seguro y esperado durante los primeros días. El aprendizaje necesita
+potencia FV directa del sensor externo configurado o canales MPPT legibles, al
+menos siete días cerrados de calidad, cobertura reciente y evidencia suficiente
+en el rango futuro solicitado. Se excluyen muestras inválidas, negativas y
+huecos largos. Las señales de curtailment pueden excluir intervalos y un cambio
+de fuente o capacidad inicia otra generación. Revisa `solar_profile` en los
+diagnósticos y `solar_timeline_fallback_reason`; el perfil no corrige una
+previsión meteorológica errónea ni modela curtailment no observable.
+
 ---
 
 ## El dispositivo de medida no está disponible o pierde conexión

@@ -155,3 +155,8 @@ Its `hourly_capture_kwh`, `interval_capture_kwh` and `interval_coverage_s`
 attributes locate that energy across the 24 hours and 96 quarter-hour bins. This
 sensor exposes the raw current-day capture rather than the forecast and resets at
 the next local day.
+
+This household profile is separate from the solar temporal profile. Consumption
+learns absolute home demand over local clock intervals and can provide a load
+fallback; the solar profile learns only a normalized daylight shape from direct
+PV power. Neither profile changes the forecast kWh budget.

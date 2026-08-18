@@ -80,6 +80,19 @@ CONF_SOLAR_FORECAST_SENSOR = "solar_forecast_sensor"
 # for backwards compatibility and must not be silently reinterpreted.
 CONF_SOLAR_FORECAST_REMAINING_SENSOR = "solar_forecast_remaining_sensor"
 CONF_SOLAR_PRODUCTION_SENSOR = "solar_production_sensor"
+# Temporal solar-profile rollout.  Missing values intentionally mean shadow:
+# existing entries must collect evidence before a learned curve can affect
+# scheduling.
+CONF_SOLAR_PROFILE_MODE = "solar_profile_mode"
+SOLAR_PROFILE_MODE_OFF = "off"
+SOLAR_PROFILE_MODE_SHADOW = "shadow"
+SOLAR_PROFILE_MODE_ACTIVE = "active"
+SOLAR_PROFILE_MODES = (
+    SOLAR_PROFILE_MODE_OFF,
+    SOLAR_PROFILE_MODE_SHADOW,
+    SOLAR_PROFILE_MODE_ACTIVE,
+)
+DEFAULT_SOLAR_PROFILE_MODE = SOLAR_PROFILE_MODE_SHADOW
 CONF_HOUSEHOLD_CONSUMPTION_SENSOR = "household_consumption_sensor"  # legacy; migrated out in v6
 CONF_MAX_CONTRACTED_POWER = "max_contracted_power"
 

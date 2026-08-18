@@ -159,3 +159,16 @@ forecasts mask predictive charging windows; those windows schedule battery grid
 charging rather than household operation. This keeps the same learned signal usable by daily predictive
 charging, Solar Charge Delay and Dynamic Pricing without coupling their runtime
 decisions to one another.
+
+## Solar temporal profile
+
+`tracking/solar_profile.py` stores direct-PV energy, coverage and compact quality
+flags in `omnibattery.<entry_id>.solar_profile`. It learns a normalized shape on
+solar-window progress, with bounded 42-day retention and an isolated
+fingerprint/generation. It never learns from grid balance, export, weather
+forecast or the rounded public daily-energy sensor.
+
+`pricing/solar_timeline.py` validates dated provider periods, maps learned
+progress bins, builds the sinusoidal fallback and applies the remaining budget
+exactly once. `pricing/chronological.py` continues to receive only finished
+`EnergyInterval` values and remains free of Home Assistant dependencies.

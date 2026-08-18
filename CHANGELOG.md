@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- Direct-PV solar temporal profile capture with bounded persistence, quality
+  diagnostics, DST-aware solar-window learning and shadow/active rollout modes.
+- A shared dated solar timeline for Dynamic Pricing and Time Slot with provider,
+  learned-profile, sinusoidal and zero fallbacks; the forecast total remains
+  authoritative and the safety margin is applied once.
+
+### Compatibility
+
+- Legacy whole-day solar forecast sensors are converted once to a remaining
+  budget. Existing entries default to shadow mode, so an immature or invalid
+  profile cannot change control decisions. Real-Time Price remains reactive.
+
 ## [1.4.0b2] - 2026-08-18
 
 ### Changed

@@ -89,4 +89,31 @@ The integration sends Home Assistant notifications:
 
 Use the **Override Predictive Charging** switch to cancel predictive charging at any time.
 
+## Solar timeline and rollout mode
+
+The forecast total and its temporal shape are separate contracts. The total
+comes from the configured forecast sensor; direct PV telemetry is used only to
+learn when that energy normally arrives. The timeline priority is:
+
+1. Valid dated periods explicitly supplied by the provider.
+2. A mature local profile learned from direct PV power and battery MPPT power.
+3. The existing sinusoidal daylight curve.
+4. A zero timeline when no safe daylight window exists.
+
+The `solar_profile_mode` setting defaults to `shadow`. Shadow mode calculates
+all candidates and reports their source, maturity, coverage and fallback reason,
+but keeps the sinusoidal curve for control. `active` applies the priority above;
+`off` stops capture and comparison. Entries without the setting remain in
+shadow mode.
+
+The profile is normalized to sum to one before the forecast budget is applied.
+It does not predict kWh, repair a bad weather forecast, control the inverter or
+reconstruct energy lost to curtailment. A forecast safety margin is subtracted
+once from the remaining budget before shaping.
+
+Useful decision attributes include `solar_timeline_source`,
+`solar_remaining_raw_kwh`, `solar_remaining_effective_kwh`,
+`solar_timeline_fallback_reason`, `solar_profile_mature` and
+`solar_profile_coverage_ratio`.
+
 ![Predictive charging notification](../../assets/screenshots/configuration/predictive-charging/notification-example.png){ width="500"  style="display: block; margin: 0 auto;"}

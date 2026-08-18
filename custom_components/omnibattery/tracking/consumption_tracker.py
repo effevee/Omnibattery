@@ -26,6 +26,7 @@ from homeassistant.util import dt as dt_util
 
 from ..const import DEFAULT_BASE_CONSUMPTION_KWH, DOMAIN
 from .consumption_profile import ConsumptionProfileTracker
+from .solar_profile import SolarProfileTracker
 
 if TYPE_CHECKING:
     from homeassistant.core import HomeAssistant
@@ -145,6 +146,8 @@ class ConsumptionTracker:
         # Public alias for diagnostics and consumers that do not need to know
         # which legacy tracker owns the input derivation.
         self.consumption_profile = self._consumption_profile
+        self._solar_profile = SolarProfileTracker(hass, config_entry, controller)
+        self.solar_profile = self._solar_profile
 
         # Transient state (not exposed to sensors)
         self._household_last_accumulation_time: Optional[float] = None
@@ -168,6 +171,18 @@ class ConsumptionTracker:
     def start_consumption_profile_backfill(self) -> None:
         """Start the non-blocking Recorder backfill for the quarter-hour profile."""
         self._consumption_profile.start_backfill()
+
+    async def load_solar_profile(self) -> bool:
+        """Restore the isolated direct-PV temporal profile Store."""
+        if self._solar_profile.mode == "off":
+            return False
+        return await self._solar_profile.async_load()
+
+    def start_solar_profile_backfill(self) -> None:
+        """Start best-effort direct-power Recorder backfill."""
+        if self._solar_profile.mode == "off":
+            return
+        self._solar_profile.start_backfill()
 
     # ------------------------------------------------------------------
     # Persistence
@@ -458,8 +473,14 @@ class ConsumptionTracker:
             value = float(state.state)
         except (ValueError, TypeError):
             return None
-        unit = state.attributes.get("unit_of_measurement", "W")
-        return value if unit == "kW" else value / 1000.0
+        if not math.isfinite(value) or value < 0.0:
+            return None
+        unit = str(state.attributes.get("unit_of_measurement", "W")).strip().lower()
+        if unit == "kw":
+            return value
+        if unit == "w":
+            return value / 1000.0
+        return None
 
     def _read_total_solar_power_kw(self) -> Optional[float]:
         """Total instantaneous solar production (kW): external sensor + Venus PV.
@@ -473,7 +494,7 @@ class ConsumptionTracker:
         ctrl = self._controller
         total_kw = 0.0
         have_reading = False
-        if ctrl.solar_production_sensor:
+        if getattr(ctrl, "solar_production_sensor", None):
             ext_kw = self._read_power_kw(ctrl.solar_production_sensor)
             if ext_kw is not None:
                 total_kw += max(0.0, ext_kw)
@@ -489,13 +510,90 @@ class ConsumptionTracker:
             seen = False
             for key in ("mppt1_power", "mppt2_power", "mppt3_power", "mppt4_power"):
                 value = coordinator.data.get(key)
-                if value is not None:
-                    mppt_w += value
+                try:
+                    parsed = float(value)
+                except (TypeError, ValueError):
+                    continue
+                if math.isfinite(parsed) and parsed >= 0.0:
+                    mppt_w += parsed
                     seen = True
             if seen:
                 total_kw += max(0.0, mppt_w) / 1000.0
                 have_reading = True
         return total_kw if have_reading else None
+
+    def _solar_runtime_context(self, forecast_reference_kwh: float | None) -> dict[str, bool]:
+        """Return conservative context used to flag possible curtailment."""
+        ctrl = self._controller
+        solar_coordinators = []
+        for coordinator in getattr(ctrl, "coordinators", ()) or ():
+            try:
+                has_mppt = bool(coordinator.capabilities.has_mppt_pv)
+            except AttributeError:
+                has_mppt = bool(getattr(coordinator, "has_mppt_pv", False))
+            if (
+                has_mppt
+                and getattr(coordinator, "is_available", False)
+                and getattr(coordinator, "data", None)
+            ):
+                solar_coordinators.append(coordinator)
+
+        battery_full_risk = bool(solar_coordinators)
+        for coordinator in solar_coordinators:
+            data = coordinator.data or {}
+            try:
+                soc = float(data.get("battery_soc"))
+                max_soc = float(getattr(coordinator, "max_soc", 100.0) or 100.0)
+                capacity = float(
+                    data.get(
+                        "battery_total_energy",
+                        getattr(coordinator, "battery_capacity_kwh", 0.0),
+                    )
+                    or 0.0
+                )
+            except (AttributeError, TypeError, ValueError):
+                battery_full_risk = False
+                break
+            headroom_kwh = max(0.0, (max_soc - soc) / 100.0 * max(0.0, capacity))
+            if soc < max_soc - 0.5 and headroom_kwh > max(0.05, capacity * 0.01):
+                battery_full_risk = False
+                break
+
+        export_zero = False
+        try:
+            meter_state = self._hass.states.get(
+                getattr(ctrl, "consumption_sensor", None)
+            )
+            grid_w = ctrl._apply_meter_transform(meter_state)
+            export_zero = grid_w is not None and abs(float(grid_w)) <= 50.0
+        except (AttributeError, TypeError, ValueError):
+            pass
+
+        try:
+            reference = float(
+                forecast_reference_kwh
+                if forecast_reference_kwh is not None
+                else getattr(ctrl, "_daily_solar_forecast_initial_kwh", 0.0) or 0.0
+            )
+        except (TypeError, ValueError):
+            reference = 0.0
+        explicit = bool(getattr(ctrl, "solar_curtailment_active", False))
+        for coordinator in solar_coordinators:
+            data = coordinator.data or {}
+            explicit = explicit or any(
+                bool(data.get(key, False))
+                for key in (
+                    "curtailment_active",
+                    "solar_curtailment",
+                    "anti_export_active",
+                )
+            )
+        return {
+            "battery_full_risk": battery_full_risk,
+            "export_zero": export_zero,
+            "expected_high": math.isfinite(reference) and reference >= 0.5,
+            "explicit_curtailment": explicit,
+        }
 
     async def accumulate_daily_solar_energy(self) -> None:
         """Integrate total solar production power → exact daily kWh.
@@ -508,8 +606,29 @@ class ConsumptionTracker:
         if power_kw is None:
             self._daily_solar_last_time = None
             self._daily_solar_last_power_kw = None
+            if self._solar_profile.mode != "off":
+                self._solar_profile.record_power_sample(None)
             return
         power_kw = max(0.0, power_kw)
+        # The direct sample is deliberately read once and shared by both the
+        # exact daily accumulator and the learned shape tracker.  This avoids
+        # a coordinator update between two reads producing divergent totals.
+        if self._solar_profile.mode != "off":
+            self._solar_profile.update_runtime_context(
+                **self._solar_runtime_context(
+                    getattr(
+                        self._controller,
+                        "_daily_solar_forecast_initial_kwh",
+                        None,
+                    )
+                )
+            )
+            self._solar_profile.record_power_sample(
+                power_kw,
+                forecast_reference_kwh=getattr(
+                    self._controller, "_daily_solar_forecast_initial_kwh", None
+                ),
+            )
         now = monotonic()
         if self._daily_solar_last_time is not None and self._daily_solar_last_power_kw is not None:
             dt_hours = (now - self._daily_solar_last_time) / 3600.0
@@ -932,6 +1051,7 @@ class ConsumptionTracker:
         # Start it here so existing startup behaviour remains available while
         # the new Store learns in the background.
         self.start_consumption_profile_backfill()
+        self.start_solar_profile_backfill()
 
         _LOGGER.info(
             "Startup backfill: attempting to replace defaults with real data "
@@ -1385,3 +1505,4 @@ class ConsumptionTracker:
         await self.async_save_accumulators()
         await self.async_save_daily_energy()
         await self._consumption_profile.async_save_all()
+        await self._solar_profile.async_save_all()

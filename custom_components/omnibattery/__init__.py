@@ -215,8 +215,10 @@ from .pricing import (
 )
 from .pricing.engine import DynamicPricingEvaluationHorizon, PricingManager
 from .solar_forecast import (
+    SolarForecastInput,
     get_configured_solar_forecast_sensor,
     normalize_solar_forecast_config,
+    read_remaining_solar_kwh,
     read_solar_forecast_kwh,
 )
 
@@ -673,6 +675,12 @@ class ChargeDischargeController:
         self.solar_forecast_source: str | None = None
         self.solar_forecast_diagnostic_source: str | None = None
         self.solar_production_sensor = config_entry.data.get(CONF_SOLAR_PRODUCTION_SENSOR, None)
+        self.solar_profile_mode = config_entry.data.get(
+            CONF_SOLAR_PROFILE_MODE,
+            DEFAULT_SOLAR_PROFILE_MODE,
+        )
+        if self.solar_profile_mode not in SOLAR_PROFILE_MODES:
+            self.solar_profile_mode = DEFAULT_SOLAR_PROFILE_MODE
         self.max_contracted_power = config_entry.data.get(CONF_MAX_CONTRACTED_POWER, 7000)
 
         # Derived Home Consumption sensor (our own aggregate). Resolved lazily by
@@ -1491,6 +1499,12 @@ class ChargeDischargeController:
             self, "remaining"
         )
         self.solar_production_sensor = self.config_entry.data.get(CONF_SOLAR_PRODUCTION_SENSOR, None)
+        self.solar_profile_mode = self.config_entry.data.get(
+            CONF_SOLAR_PROFILE_MODE,
+            DEFAULT_SOLAR_PROFILE_MODE,
+        )
+        if self.solar_profile_mode not in SOLAR_PROFILE_MODES:
+            self.solar_profile_mode = DEFAULT_SOLAR_PROFILE_MODE
         self.predictive_charging_mode = self.config_entry.data.get(CONF_PREDICTIVE_CHARGING_MODE, PREDICTIVE_MODE_TIME_SLOT)
         self.price_sensor = self.config_entry.data.get(CONF_PRICE_SENSOR, None)
         self.price_integration_type = self.config_entry.data.get(CONF_PRICE_INTEGRATION_TYPE, PRICE_INTEGRATION_NORDPOOL)
@@ -3336,6 +3350,7 @@ class ChargeDischargeController:
         # pre-slot re-evaluation can provide the remaining solar explicitly so
         # energy already produced today is not counted again.
         solar_forecast_kwh = None
+        solar_forecast_input = None
         if solar_forecast_override_kwh is not None:
             try:
                 solar_forecast_kwh = max(0.0, float(solar_forecast_override_kwh))
@@ -3346,12 +3361,43 @@ class ChargeDischargeController:
         forecast_source = None
         forecast_diagnostic_source = None
         if solar_forecast_kwh is None:
-            forecast = read_solar_forecast_kwh(self.hass, self)
-            if forecast is not None:
-                solar_forecast_kwh = forecast.kwh
-                forecast_source = forecast.source
-                forecast_diagnostic_source = forecast.diagnostic_source
-                forecast_state = self.hass.states.get(forecast.sensor)
+            try:
+                solar_forecast_input = read_remaining_solar_kwh(
+                    self.hass,
+                    self,
+                    now=dt_util.now(),
+                )
+            except (AttributeError, TypeError, ValueError):
+                solar_forecast_input = None
+            # Lightweight callers from the legacy public method contract do
+            # not own the daily accumulator/profile state. Preserve their
+            # historical full-day reading; real controllers always have the
+            # state above and therefore use the normalized adapter path.
+            if (
+                solar_forecast_input is not None
+                and solar_forecast_input.conversion == "unsafe_zero"
+                and not hasattr(self, "_daily_solar_energy_date")
+                and not hasattr(
+                    getattr(self, "_consumption_tracker", None),
+                    "solar_profile",
+                )
+            ):
+                legacy_forecast = read_solar_forecast_kwh(self.hass, self)
+                if legacy_forecast is not None:
+                    solar_forecast_input = SolarForecastInput(
+                        legacy_forecast.kwh,
+                        legacy_forecast.diagnostic_source,
+                        periods=legacy_forecast.periods or None,
+                        original_source="today_legacy",
+                        conversion="compat_full_day",
+                    )
+            if solar_forecast_input is not None and solar_forecast_input.source != "fallback":
+                solar_forecast_kwh = solar_forecast_input.remaining_kwh
+                forecast_source = solar_forecast_input.original_source or solar_forecast_input.source
+                forecast_diagnostic_source = solar_forecast_input.source
+                raw_forecast = read_solar_forecast_kwh(self.hass, self)
+                if raw_forecast is not None:
+                    forecast_state = self.hass.states.get(raw_forecast.sensor)
         if (
             solar_forecast_kwh is not None
             and consumption_override_kwh is None
@@ -3364,7 +3410,7 @@ class ChargeDischargeController:
         if solar_forecast_kwh is None:
             # Conservative mode: assume zero solar, compare usable vs consumption
             total_available_kwh = usable_energy_kwh
-            energy_deficit_kwh = max(avg_consumption_kwh + safety_margin_kwh - total_available_kwh, floor_deficit_kwh)
+            energy_deficit_kwh = max(avg_consumption_kwh - total_available_kwh, floor_deficit_kwh)
             should_charge = energy_deficit_kwh > 0
             planned_grid_charge_kwh = calculations.calculate_planned_grid_charge_kwh(
                 energy_deficit_kwh,
@@ -3386,6 +3432,9 @@ class ChargeDischargeController:
             return {
                 "should_charge": should_charge,
                 "solar_forecast_kwh": None,
+                "solar_remaining_raw_kwh": None,
+                "solar_safety_margin_kwh": safety_margin_kwh,
+                "solar_remaining_effective_kwh": 0.0,
                 "stored_energy_kwh": stored_energy_kwh,
                 "usable_energy_kwh": usable_energy_kwh,
                 "cutoff_energy_kwh": cutoff_energy_kwh,
@@ -3425,8 +3474,11 @@ class ChargeDischargeController:
             }
 
         # === STEP 6: Calculate Energy Balance and Decide ===
-        total_available_kwh = usable_energy_kwh + solar_forecast_kwh
-        base_deficit_kwh = avg_consumption_kwh + safety_margin_kwh - total_available_kwh
+        # Apply the safety margin once to the solar budget before any temporal
+        # shape is constructed from the remaining total.
+        solar_remaining_effective_kwh = max(0.0, solar_forecast_kwh - safety_margin_kwh)
+        total_available_kwh = usable_energy_kwh + solar_remaining_effective_kwh
+        base_deficit_kwh = avg_consumption_kwh - total_available_kwh
         energy_deficit_kwh = max(base_deficit_kwh, floor_deficit_kwh)
         should_charge = energy_deficit_kwh > 0
         floor_active = floor_deficit_kwh > 0 and floor_deficit_kwh > base_deficit_kwh
@@ -3449,7 +3501,7 @@ class ChargeDischargeController:
             avg_soc, stored_energy_kwh,
             min_soc, cutoff_energy_kwh,
             usable_energy_kwh,
-            solar_forecast_kwh,
+            solar_remaining_effective_kwh,
             avg_consumption_kwh, days_in_history,
             safety_margin_kwh,
             total_available_kwh,
@@ -3463,7 +3515,7 @@ class ChargeDischargeController:
         # Cap at battery headroom: only this much solar can actually land in the
         # battery, so the "solar will charge the remaining X" line can't quote a
         # figure larger than the pack (e.g. 12.94 kWh into a 5.12 kWh battery).
-        solar_surplus_kwh = max(0.0, min(solar_forecast_kwh - avg_consumption_kwh, _gap_to_max_kwh))
+        solar_surplus_kwh = max(0.0, min(solar_remaining_effective_kwh - avg_consumption_kwh, _gap_to_max_kwh))
         planned_grid_charge_kwh = calculations.calculate_planned_grid_charge_kwh(
             energy_deficit_kwh,
             _gap_to_max_kwh,
@@ -3473,6 +3525,9 @@ class ChargeDischargeController:
         return {
             "should_charge": should_charge,
             "solar_forecast_kwh": solar_forecast_kwh,
+            "solar_remaining_raw_kwh": solar_forecast_kwh,
+            "solar_safety_margin_kwh": safety_margin_kwh,
+            "solar_remaining_effective_kwh": solar_remaining_effective_kwh,
             "stored_energy_kwh": stored_energy_kwh,
             "usable_energy_kwh": usable_energy_kwh,
             "cutoff_energy_kwh": cutoff_energy_kwh,
@@ -3510,6 +3565,21 @@ class ChargeDischargeController:
             "solar_forecast_diagnostic_source": (
                 forecast_diagnostic_source
                 or getattr(self, "solar_forecast_diagnostic_source", None)
+            ),
+            "solar_forecast_original_source": (
+                solar_forecast_input.original_source
+                if solar_forecast_input is not None
+                else None
+            ),
+            "solar_forecast_conversion": (
+                solar_forecast_input.conversion
+                if solar_forecast_input is not None
+                else "none"
+            ),
+            "solar_forecast_periods": (
+                solar_forecast_input.periods
+                if solar_forecast_input is not None
+                else None
             ),
             "consumption_source": "derived (grid + battery AC + solar)",
             "reason": (
@@ -7767,6 +7837,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # is available.  A corrupt or incompatible profile is isolated and never
     # prevents the integration from starting.
     await consumption_tracker.load_consumption_profile()
+    await consumption_tracker.load_solar_profile()
 
     # Restore household and solar accumulators from persistent storage
     await consumption_tracker.load_accumulators()
@@ -7951,6 +8022,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             profile = getattr(tracker, "consumption_profile", None)
             if profile is not None and profile.invalidate_if_configuration_changed():
                 tracker.start_consumption_profile_backfill()
+            solar_profile = getattr(tracker, "solar_profile", None)
+            if solar_profile is not None:
+                solar_profile.refresh_mode(getattr(controller, "solar_profile_mode", None))
+                if solar_profile.invalidate_if_configuration_changed():
+                    tracker.start_solar_profile_backfill()
         # Keep the recovery copy in sync with the latest options.
         from .config_backup import async_save_config_backup
         await async_save_config_backup(hass)

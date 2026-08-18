@@ -33,3 +33,8 @@ The planner never opens an unconfigured charging window. A deadline shortfall me
 ## SOC-drop re-evaluation
 
 If the SOC drops 30 % or more from the last evaluation point during the slot (e.g. due to high consumption), the system automatically re-evaluates the energy balance. No additional notification is sent for these mid-slot re-evaluations.
+
+Time Slot and Dynamic Pricing use one shared dated solar timeline and one
+remaining-energy budget. The learned profile changes only the intraday
+deadlines when `solar_profile_mode` is `active`; it never increases the
+forecast total or opens a window that was not configured.

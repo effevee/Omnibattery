@@ -50,6 +50,7 @@ from ..const import (
 from ..solar_forecast import (
     SolarForecastInput,
     get_configured_solar_forecast_sensor,
+    read_remaining_solar_kwh,
     read_solar_forecast_kwh,
 )
 from ..tracking.consumption_profile import adjust_remaining_fallback_energy
@@ -69,6 +70,7 @@ from .chronological import (
     build_energy_deadlines,
     normalize_energy_shape,
 )
+from .solar_timeline import build_boundaries, build_solar_timeline
 from .curtailment import (
     BatterySnapshot,
     CurtailmentPlan,
@@ -1882,6 +1884,104 @@ class PricingManager:
     # DYNAMIC PRICING: Evaluation and notification methods
     # =========================================================================
 
+    def _solar_timeline_window(
+        self,
+        now: datetime,
+        tracker: Any,
+    ) -> tuple[datetime | None, datetime | None]:
+        """Resolve today's direct/astronomical solar window for pure mapping."""
+        midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        profile = getattr(tracker, "solar_profile", None) if tracker is not None else None
+        day = None
+        if profile is not None:
+            day = getattr(profile, "_days", {}).get(now.date())
+        observed_start = getattr(day, "solar_start", None) if day is not None else None
+        observed_end = getattr(day, "solar_end", None) if day is not None else None
+        if observed_start is not None and observed_start.tzinfo is None:
+            observed_start = observed_start.replace(tzinfo=now.tzinfo)
+        if observed_end is not None and observed_end.tzinfo is None:
+            observed_end = observed_end.replace(tzinfo=now.tzinfo)
+        if now.tzinfo is None:
+            if observed_start is not None and observed_start.tzinfo is not None:
+                observed_start = observed_start.replace(tzinfo=None)
+            if observed_end is not None and observed_end.tzinfo is not None:
+                observed_end = observed_end.replace(tzinfo=None)
+        if observed_start is not None and observed_start <= now:
+            start = observed_start
+        else:
+            start_hour = getattr(self._controller, "_solar_t_start", None)
+            if start_hour is None and tracker is not None:
+                try:
+                    start_hour = tracker.calculate_sunrise()
+                except (AttributeError, TypeError, ValueError):
+                    start_hour = None
+            if start_hour is None:
+                return None, None
+            start = midnight + timedelta(hours=float(start_hour))
+
+        end: datetime | None = None
+        # An observed end is safe only after it is in the past; while the
+        # window is live it is merely the last positive sample, not a future
+        # sunset prediction.
+        if observed_end is not None and getattr(day, "complete", False):
+            end = observed_end
+        if end is None and tracker is not None:
+            try:
+                end_hour = tracker.estimate_t_end()
+            except (AttributeError, TypeError, ValueError):
+                try:
+                    end_hour = 2 * tracker.calculate_solar_noon() - (
+                        start - midnight
+                    ).total_seconds() / 3600.0
+                except (AttributeError, TypeError, ValueError):
+                    end_hour = None
+            if end_hour is not None:
+                end = midnight + timedelta(hours=float(end_hour))
+        if end is None or end <= start:
+            return None, None
+        return start, end
+
+    def _solar_timeline_input(
+        self,
+        now: datetime,
+        decision_data: dict[str, Any],
+    ) -> SolarForecastInput:
+        """Read one normalized forecast input while preserving dated periods."""
+        provided = decision_data.get("solar_forecast_input")
+        if isinstance(provided, SolarForecastInput):
+            return provided
+        raw = decision_data.get("solar_remaining_raw_kwh")
+        if raw is None:
+            raw = decision_data.get("remaining_solar_kwh", decision_data.get("solar_forecast_kwh"))
+        periods = decision_data.get("solar_forecast_periods")
+        if raw is None:
+            try:
+                return read_remaining_solar_kwh(self._hass, self._controller, now=now)
+            except Exception as exc:  # noqa: BLE001
+                _LOGGER.debug("Solar timeline: forecast adapter failed: %s", exc)
+                return SolarForecastInput(
+                    0.0,
+                    "fallback",
+                    original_source=None,
+                    conversion="unsafe_zero",
+                )
+        temporal_shape = decision_data.get("solar_temporal_shape")
+        if temporal_shape is not None:
+            try:
+                temporal_shape = tuple(temporal_shape)
+            except TypeError:
+                temporal_shape = None
+        return SolarForecastInput(
+            raw,
+            decision_data.get("solar_forecast_diagnostic_source")
+            or decision_data.get("solar_forecast_source")
+            or "remaining",
+            temporal_shape=temporal_shape,
+            periods=tuple(periods) if periods else None,
+            original_source=decision_data.get("solar_forecast_original_source"),
+            conversion=decision_data.get("solar_forecast_conversion", "none"),
+        )
+
     def _build_chronological_plan(
         self,
         *,
@@ -1906,28 +2006,20 @@ class PricingManager:
                 exclude_charging_windows=False,
                 fallback="legacy_daily",
             )
-            cursor = now
-            boundaries: list[tuple[datetime, datetime]] = []
+            boundaries = build_boundaries(now, horizon_end)
             consumption_raw: list[float] = []
-            while cursor < horizon_end:
-                next_minute = ((cursor.minute // 15) + 1) * 15
-                if next_minute >= 60:
-                    boundary = cursor.replace(
-                        minute=0, second=0, microsecond=0
-                    ) + timedelta(hours=1)
-                else:
-                    boundary = cursor.replace(minute=next_minute, second=0, microsecond=0)
-                end = min(boundary, horizon_end)
-                index = cursor.hour * 4 + cursor.minute // 15
+            for start, end in boundaries:
+                index = start.hour * 4 + start.minute // 15
                 bucket = (
                     float(forecast.intervals_kwh[index])
                     if index < len(forecast.intervals_kwh)
                     else 0.0
                 )
-                fraction = (end - cursor).total_seconds() / 900.0
-                boundaries.append((cursor, end))
+                fraction = max(
+                    0.0,
+                    (end.timestamp() - start.timestamp()) / 900.0,
+                )
                 consumption_raw.append(max(0.0, bucket * fraction))
-                cursor = end
 
             consumption_total = max(
                 0.0,
@@ -1938,15 +2030,7 @@ class PricingManager:
             )
             consumption = normalize_energy_shape(consumption_raw, consumption_total)
 
-            normalized_solar = decision_data.get(
-                "remaining_solar_kwh", decision_data.get("solar_forecast_kwh")
-            )
-            solar_input = SolarForecastInput(
-                0.0 if normalized_solar is None else normalized_solar,
-                decision_data.get("solar_forecast_diagnostic_source")
-                or decision_data.get("solar_forecast_source")
-                or "fallback",
-            )
+            solar_input = self._solar_timeline_input(now, decision_data)
             safety = max(
                 0.0,
                 float(
@@ -1956,39 +2040,59 @@ class PricingManager:
                     or 0.0
                 ),
             )
-            solar_total = max(0.0, solar_input.remaining_kwh - safety)
-            solar_raw = [0.0] * len(boundaries)
-            solar_source = "zero_fallback"
-            solar_start_dt: datetime | None = None
-            shape = solar_input.normalized_shape()
-            if shape is not None and len(shape) == len(boundaries):
-                solar_raw = shape
-                solar_source = solar_input.source
-            elif tracker is not None:
-                t_start = getattr(self._controller, "_solar_t_start", None)
-                if t_start is None:
-                    t_start = tracker.calculate_sunrise()
-                if t_start is not None:
-                    solar_start_dt = now.replace(
-                        hour=0, minute=0, second=0, microsecond=0
-                    ) + timedelta(hours=float(t_start))
-                    t_end = (
-                        tracker.estimate_t_end()
-                        if getattr(self._controller, "_solar_t_start", None) is not None
-                        else 2 * tracker.calculate_solar_noon() - t_start
-                    )
-                    if t_end > t_start:
-                        if solar_total > 0:
-                            for index, (start, end) in enumerate(boundaries):
-                                start_h = start.hour + start.minute / 60 + start.second / 3600
-                                end_h = end.hour + end.minute / 60 + end.second / 3600
-                                solar_raw[index] = max(
-                                    0.0,
-                                    tracker.get_solar_fraction_done(end_h, t_start, t_end)
-                                    - tracker.get_solar_fraction_done(start_h, t_start, t_end),
-                                )
-                            solar_source = "sinusoidal"
-            solar = normalize_energy_shape(solar_raw, solar_total)
+            solar_start_dt, solar_end_dt = self._solar_timeline_window(now, tracker)
+            solar_profile = getattr(tracker, "solar_profile", None) if tracker is not None else None
+            learned_snapshot = None
+            if solar_profile is not None and getattr(self._controller, "solar_profile_mode", "shadow") != "off":
+                try:
+                    future_start = future_end = None
+                    if solar_start_dt is not None and solar_end_dt is not None:
+                        daylight_seconds = solar_end_dt.timestamp() - solar_start_dt.timestamp()
+                        if daylight_seconds > 0:
+                            future_start = max(
+                                0.0,
+                                min(
+                                    1.0,
+                                    (now.timestamp() - solar_start_dt.timestamp())
+                                    / daylight_seconds,
+                                ),
+                            )
+                            future_end = max(
+                                future_start,
+                                min(
+                                    1.0,
+                                    (horizon_end.timestamp() - solar_start_dt.timestamp())
+                                    / daylight_seconds,
+                                ),
+                            )
+                    try:
+                        learned_snapshot = solar_profile.get_snapshot(
+                            target_date=now.date(),
+                            future_progress_start=future_start,
+                            future_progress_end=future_end,
+                        )
+                    except TypeError:
+                        # Keep lightweight tracker doubles and older profile
+                        # implementations compatible during the rollout.
+                        learned_snapshot = solar_profile.get_snapshot(
+                            target_date=now.date()
+                        )
+                except Exception as exc:  # noqa: BLE001
+                    _LOGGER.debug("Solar timeline: learned profile unavailable: %s", exc)
+            timeline = build_solar_timeline(
+                boundaries,
+                solar_input.remaining_kwh,
+                safety_margin_kwh=safety,
+                provider_periods=solar_input.periods,
+                temporal_shape=solar_input.temporal_shape,
+                learned_shape=(learned_snapshot.shape if learned_snapshot else None),
+                learned_mature=bool(learned_snapshot and learned_snapshot.mature),
+                solar_start=solar_start_dt,
+                solar_end=solar_end_dt,
+                mode=getattr(self._controller, "solar_profile_mode", "shadow"),
+            )
+            solar = list(timeline.intervals_kwh)
+            solar_source = timeline.source
             intervals = [
                 EnergyInterval(start, end, consumption[index], solar[index])
                 for index, (start, end) in enumerate(boundaries)
@@ -2110,6 +2214,23 @@ class PricingManager:
                 "chronological_planning_active": True,
                 "chronological_source": forecast.source,
                 "solar_timeline_source": solar_source,
+                "solar_forecast_original_source": solar_input.original_source,
+                "solar_forecast_conversion": solar_input.conversion,
+                "solar_remaining_raw_kwh": timeline.remaining_raw_kwh,
+                "solar_safety_margin_kwh": timeline.safety_margin_kwh,
+                "solar_remaining_effective_kwh": timeline.remaining_effective_kwh,
+                "solar_timeline_effective_kwh": timeline.timeline_effective_kwh,
+                "solar_timeline_energy_error_kwh": timeline.energy_error_kwh,
+                "solar_timeline_fallback_reason": timeline.fallback_reason,
+                "solar_profile_mature": bool(learned_snapshot and learned_snapshot.mature),
+                "solar_profile_days": learned_snapshot.eligible_days if learned_snapshot else 0,
+                "solar_profile_coverage_ratio": learned_snapshot.future_coverage_ratio if learned_snapshot else 0.0,
+                "solar_profile_generation": learned_snapshot.generation if learned_snapshot else None,
+                "solar_shadow_selected_source": timeline.shadow_selected_source,
+                "curtailment_timeline_mismatch": bool(
+                    getattr(self._controller, "solar_profile_mode", "shadow") == "active"
+                    and solar_source != "sinusoidal"
+                ),
                 "earliest_projected_depletion": (
                     plan.earliest_depletion_at.isoformat()
                     if plan.earliest_depletion_at
@@ -3096,7 +3217,10 @@ class PricingManager:
                 )
             )
             consumption_scope = "remaining"
+        # Keep the scalar helper as the compatibility seam used by existing
+        # callers/tests; read the richer contract separately for dated periods.
         remaining_solar_kwh = self._remaining_solar_today_kwh(now_h)
+        solar_forecast_input = self._read_remaining_solar_input(now=now)
 
         decision = await controller._should_activate_grid_charging(
             consumption_override_kwh=remaining_consumption_kwh,
@@ -3110,6 +3234,11 @@ class PricingManager:
         decision["remaining_consumption_kwh"] = remaining_consumption_kwh
         decision["consumption_fallback_correction_kwh"] = fallback_correction_kwh
         decision["remaining_solar_kwh"] = remaining_solar_kwh
+        if solar_forecast_input is not None and solar_forecast_input.source != "fallback":
+            decision["solar_forecast_input"] = solar_forecast_input
+            decision["solar_forecast_original_source"] = solar_forecast_input.original_source
+            decision["solar_forecast_conversion"] = solar_forecast_input.conversion
+            decision["solar_forecast_periods"] = solar_forecast_input.periods
         decision["consumption_rate_kwh_h"] = consumption_rate_kwh_h
         decision["consumption_accumulator_ready"] = accumulator_ready
         decision["consumption_accumulator_source"] = consumption_source
@@ -3225,6 +3354,19 @@ class PricingManager:
         historical_remainder = max(0.0, avg_daily_kwh - consumed_today_kwh)
         return max(historical_remainder, normal_remaining), historical_rate
 
+    def _read_remaining_solar_input(
+        self, *, now: datetime | float | None = None
+    ) -> SolarForecastInput | None:
+        """Read the normalized remaining forecast, retaining dated periods."""
+        try:
+            return read_remaining_solar_kwh(
+                self._hass,
+                self._controller,
+                now=now,
+            )
+        except (AttributeError, TypeError, ValueError):
+            return None
+
     def _remaining_solar_today_kwh(self, now_h: float) -> float:
         """Solar generation still expected today (kWh), from the forecast sensor.
 
@@ -3238,26 +3380,8 @@ class PricingManager:
         After the cutoff hour with no production seen, keep the conservative
         0 (solar sensor likely broken; better to book the slots than run dry).
         """
-        forecast = read_solar_forecast_kwh(self._hass, self._controller)
-        if forecast is None:
-            return 0.0
-        if forecast.source == "remaining":
-            # Provider already removed production that has happened.  Do not
-            # subtract the accumulator or run a solar curve a second time.
-            return forecast.kwh
-        try:
-            forecast_today = forecast.kwh
-            if self._controller._daily_solar_energy_kwh > 0:
-                return max(0.0, forecast_today - self._controller._daily_solar_energy_kwh)
-            if self._controller._solar_t_start is not None:
-                t_end = self._controller._consumption_tracker.estimate_t_end()
-                fraction_done = self._controller._consumption_tracker.get_solar_fraction_done(now_h, self._controller._solar_t_start, t_end)
-                return forecast_today * (1.0 - fraction_done)
-            if now_h < T_START_FALLBACK_HOUR:
-                return forecast_today
-        except (ValueError, TypeError):
-            pass
-        return 0.0
+        solar_input = self._read_remaining_solar_input(now=now_h)
+        return solar_input.remaining_kwh if solar_input is not None else 0.0
 
     async def _evaluate_evening_recharge(self) -> None:
         """Late-day re-evaluation: charge batteries cheaply if solar fell short.

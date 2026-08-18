@@ -169,3 +169,11 @@ kWh. Sus atributos incluyen `interval_profile_kwh`, `hourly_profile_kwh`,
 acotado por día está disponible en los diagnósticos de la integración. El origen
 es `profile` solo cuando se cumple el
 contrato de madurez; `legacy_daily` identifica el fallback.
+
+La carga predictiva también publica `solar_timeline_source`,
+`solar_remaining_raw_kwh`, `solar_remaining_effective_kwh`,
+`solar_timeline_fallback_reason`, `solar_profile_mature`,
+`solar_profile_days`, `solar_profile_coverage_ratio` y
+`solar_profile_generation`. Los diagnósticos contienen una sección acotada
+`solar_profile` con origen de telemetría, contadores de calidad, generación,
+estado de backfill y como máximo 24 valores resumidos de progreso.

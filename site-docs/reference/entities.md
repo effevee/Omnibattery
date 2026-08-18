@@ -181,6 +181,14 @@ Attributes include `interval_profile_kwh`, `hourly_profile_kwh`, `target_date`,
 available through the integration diagnostics endpoint.
 The source is `profile` only when the maturity contract is satisfied;
 `legacy_daily` identifies the fallback.
+
+Predictive charging also reports `solar_timeline_source`,
+`solar_remaining_raw_kwh`, `solar_remaining_effective_kwh`,
+`solar_timeline_fallback_reason`, `solar_profile_mature`,
+`solar_profile_days`, `solar_profile_coverage_ratio` and
+`solar_profile_generation`. Integration diagnostics contain a bounded
+`solar_profile` section with telemetry source, quality counters, generation,
+backfill status and at most 24 summarized progress values.
 - `system_battery_power` — Total system power
 - `system_battery_soc` — System average SOC
 - `system_total_charging_energy` — Total system charging energy

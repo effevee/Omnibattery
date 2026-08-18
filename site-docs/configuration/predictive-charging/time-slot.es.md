@@ -31,3 +31,8 @@ El planificador nunca abre una ventana no configurada. Un *shortfall* de plazo s
 ## Reevaluación por caída de SOC
 
 Si el SOC cae un 30 % o más respecto al último punto de evaluación durante el slot (p. ej. por un consumo elevado), el sistema reevalúa el balance energético automáticamente. No se envía notificación adicional en estas reevaluaciones intermedias.
+
+Franja Horaria y Precio Dinámico usan un único timeline solar fechado y un
+único presupuesto de energía restante. El perfil aprendido solo cambia los
+plazos intradía cuando `solar_profile_mode` está en `active`; nunca aumenta el
+total previsto ni abre una ventana que no esté configurada.

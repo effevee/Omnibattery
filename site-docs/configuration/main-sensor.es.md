@@ -79,3 +79,17 @@ Sensor de potencia de producción fotovoltaica (W o kW) en tiempo real de un inv
 **Consumo del hogar = Potencia de red + Potencia AC de baterías + Producción solar**
 
 Es el valor que muestra el diagrama de flujo de energía y el sensor `sensor.marstek_venus_system_home_consumption`, y alimenta el historial de 7 días que usan la carga predictiva y el retraso de carga. La acumulación cubre todo el día local, incluidas las franjas de carga predictiva; la potencia AC negativa de la batería cancela la energía de red usada para cargarla. El contador se reinicia a medianoche y sobrevive reinicios de HA.
+
+### Total de previsión frente al timeline solar
+
+El sensor de previsión es el presupuesto energético. Un sensor de «restante de
+hoy» ya representa energía futura y el acumulador de producción local no lo
+reduce otra vez. Los sensores legados de día completo (`today`) se convierten
+una sola vez a presupuesto restante. El sensor opcional de producción real, y
+los canales MPPT legibles de las baterías, solo aprenden la forma intradía; no
+sustituyen el total de la previsión.
+
+Cuando está disponible, la prioridad es periodos fechados del proveedor,
+perfil solar local maduro y, finalmente, la curva sinusoidal existente. El
+perfil no predice kWh, no corrige una previsión meteorológica incorrecta, no
+controla el inversor ni garantiza producción cuando hay curtailment.

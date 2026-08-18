@@ -77,6 +77,17 @@ diagnostics endpoint. A source, excluded-load adjustment or timezone change
 intentionally invalidates the stored profile; Recorder backfill then
 rebuilds it in the background. A gap longer than five minutes is not interpolated.
 
+### The solar profile remains immature or falls back
+
+This is safe and expected during the first days. Learning requires direct PV
+power from the configured external sensor or readable MPPT channels, at least
+seven closed quality days, recent coverage and enough evidence in the requested
+future range. Invalid, negative and long-gap samples are excluded. Curtailment
+signals can exclude intervals, and a source or capacity change starts a new
+generation. Check the `solar_profile` diagnostics section and
+`solar_timeline_fallback_reason`; the profile does not repair a bad weather
+forecast or model unobservable curtailment.
+
 ---
 
 ## Metering device unavailable or losing connectivity

@@ -221,3 +221,8 @@ The `predictive_charging_active` binary sensor exposes:
 | `slot_energy_targets_kwh` / `slot_deadlines` | Per-slot quotas and their deadlines, serialized with local timestamps |
 
 ![Diagnostic attributes of predictive_charging_active](../../assets/screenshots/configuration/predictive-charging/diagnostic-attributes.png){ width="650"  style="display: block; margin: 0 auto;"}
+
+The dynamic calendar consumes the same dated solar timeline as Time Slot. A
+provider curve has priority over a mature learned profile, and an invalid
+candidate falls back atomically to the next source. `shadow` mode records the
+comparison without changing selected slots or deadlines.

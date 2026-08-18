@@ -199,3 +199,8 @@ El sensor binario `predictive_charging_active` expone:
 | `slot_energy_targets_kwh` / `slot_deadlines` | Cuotas y plazos por slot, serializados con timestamps locales |
 
 ![Atributos del sensor predictive_charging_active](../../assets/screenshots/configuration/predictive-charging/diagnostic-attributes.png){ width="650"  style="display: block; margin: 0 auto;"}
+
+El calendario dinámico consume el mismo timeline solar fechado que Franja
+Horaria. Una curva del proveedor tiene prioridad sobre un perfil local maduro y
+una candidata inválida cae de forma atómica a la siguiente fuente. El modo
+`shadow` registra la comparación sin cambiar slots ni plazos.

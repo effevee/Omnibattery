@@ -89,4 +89,31 @@ La integración envía notificaciones de Home Assistant:
 
 Usa el switch **Override Predictive Charging** para cancelar la carga predictiva en cualquier momento.
 
+## Timeline solar y modo de despliegue
+
+El total de la previsión y su forma temporal son contratos separados. El total
+procede del sensor de previsión configurado; la telemetría FV directa solo se
+usa para aprender cuándo suele llegar esa energía. La prioridad del timeline es:
+
+1. Periodos fechados válidos proporcionados explícitamente por el proveedor.
+2. Perfil local maduro aprendido de potencia FV directa y MPPT de baterías.
+3. La curva sinusoidal de luz ya existente.
+4. Timeline cero cuando no existe una ventana solar segura.
+
+El ajuste `solar_profile_mode` tiene por defecto `shadow`. Este modo calcula
+los candidatos y publica origen, madurez, cobertura y motivo de fallback, pero
+mantiene la curva sinusoidal para el control. `active` aplica la prioridad
+anterior y `off` detiene captura y comparación. Las entradas sin el ajuste
+permanecen en `shadow`.
+
+El perfil se normaliza para sumar uno antes de aplicar el presupuesto de la
+previsión. No predice kWh, no corrige una previsión meteorológica errónea, no
+controla el inversor ni reconstruye energía perdida por curtailment. El margen
+de seguridad se resta una sola vez del presupuesto restante antes de darle forma.
+
+Atributos útiles de la decisión son `solar_timeline_source`,
+`solar_remaining_raw_kwh`, `solar_remaining_effective_kwh`,
+`solar_timeline_fallback_reason`, `solar_profile_mature` y
+`solar_profile_coverage_ratio`.
+
 ![Notificación de carga predictiva en HA](../../assets/screenshots/configuration/predictive-charging/notification-example.png){ width="500"  style="display: block; margin: 0 auto;"}

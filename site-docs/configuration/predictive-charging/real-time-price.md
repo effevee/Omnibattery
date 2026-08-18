@@ -82,3 +82,8 @@ When discharge is blocked by price, the controller completely freezes its state 
 | Reacts to live price | ❌ | ✅ |
 | Optimal hour selection | ✅ | ❌ |
 | Discharge threshold | Daily average (calculated at 00:05) | Configurable threshold (fixed or dynamic sensor) |
+
+Real-Time Price remains reactive: it uses the normalized remaining total for its
+gate and does not consume the learned temporal curve or create future
+deadlines. A future anticipatory implementation should enter through the same
+chronological planner as the other scheduling modes.

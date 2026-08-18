@@ -157,3 +157,9 @@ el momento. Sus atributos `hourly_capture_kwh`, `interval_capture_kwh` e
 `interval_coverage_s` permiten localizar el consumo en las 24 horas y en los 96
 intervalos de 15 minutos. Este sensor muestra la captura cruda del día actual;
 no es la previsión y se reinicia al comenzar el siguiente día local.
+
+Este perfil del hogar es independiente del perfil temporal solar. El consumo
+aprende demanda absoluta por intervalos de hora local y puede servir como
+fallback de carga; el perfil solar solo aprende una forma normalizada de luz a
+partir de potencia FV directa. Ninguno de los dos cambia el presupuesto de kWh
+de la previsión.

@@ -160,3 +160,16 @@ rango solicitado o un fallback heredado explícito. La captura nunca aplica
 franjas de carga, y las previsiones de demanda tampoco: esas franjas programan
 la carga de la batería desde la red, no el funcionamiento del hogar. Así la misma señal sirve a la carga predictiva diaria, el Retraso de
 Carga Solar y Precio Dinámico sin acoplar sus decisiones de ejecución.
+
+## Perfil temporal solar
+
+`tracking/solar_profile.py` guarda energía FV directa, cobertura y flags de
+calidad compactos en `omnibattery.<entry_id>.solar_profile`. Aprende una forma
+normalizada sobre el progreso de la ventana solar, con retención limitada a 42
+días y fingerprint/generación aislados. Nunca aprende del balance de red, la
+exportación, la previsión meteorológica ni del sensor diario redondeado.
+
+`pricing/solar_timeline.py` valida periodos fechados, mapea bins de progreso,
+construye el fallback sinusoidal y aplica el presupuesto restante una sola vez.
+`pricing/chronological.py` sigue recibiendo solo `EnergyInterval` terminados y
+no depende de Home Assistant.
