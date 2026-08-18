@@ -2,6 +2,8 @@
 
 The integration automatically creates entities for each configured battery and aggregated sensors for the whole system.
 
+The predictive-charging status binary sensor includes deadline-aware Dynamic Pricing diagnostics: `chronological_planning_active`, curve sources, `earliest_projected_depletion`, deadline/flexible kWh, shortfalls, cumulative `energy_deadlines`, and JSON-safe per-slot quota/deadline maps. These attributes describe planning intent; live battery and grid limits remain authoritative.
+
 ## Sensors (per battery)
 
 | Entity | Description | Unit |

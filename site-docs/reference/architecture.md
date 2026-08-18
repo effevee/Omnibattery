@@ -52,6 +52,7 @@ subpackages by responsibility.
 | `infra/entity_naming.py` | — | Translation-key based entity IDs and registry migrations |
 | `const/` | — | All Modbus register and entity definitions (split per battery version) |
 | `pricing/engine.py` | — | Predictive charging: dynamic pricing, time slot, real-time price, SOC floor |
+| `pricing/chronological.py` | — | Pure 15-minute energy simulation, cumulative deadlines and price-slot allocation; no Home Assistant or device I/O |
 | `control/power_distribution.py` | — | Splits the system setpoint across active batteries |
 | `control/charge_delay.py` | — | Solar charge delay |
 | `control/max_soc_charge.py` | — | 100 % voltage taper / top-of-charge protection |

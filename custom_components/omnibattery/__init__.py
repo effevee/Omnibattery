@@ -715,6 +715,9 @@ class ChargeDischargeController:
         self._last_decision_data = None  # Store last decision for diagnostics
         self._slot_entry_time = None  # When we first entered the time slot (for 5-min delay)
         self._predictive_charge_target_soc: Optional[dict] = None  # Per-battery grid-only SOC targets {coordinator: target_%}
+        self._active_time_slot_quota_kwh: Optional[float] = None
+        self._time_slot_chronological_plan = None
+        self._time_slot_chronological_preview_date = None
         # Snapshot of the deficit-only target at entry to a typed dynamic-price
         # slot.  If a combined slot later loses its opportunistic purpose, this
         # avoids rebasing the same planned deficit on top of energy already stored.
@@ -3224,9 +3227,25 @@ class ChargeDischargeController:
         min_soc = max(min_soc_values) if min_soc_values else 20  # Default 20% if unavailable
 
         # Calculate energy components
-        stored_energy_kwh = (avg_soc / 100) * total_capacity_kwh
-        cutoff_energy_kwh = (min_soc / 100) * total_capacity_kwh
-        usable_energy_kwh = max(0, stored_energy_kwh - cutoff_energy_kwh)
+        stored_energy_kwh = sum(
+            max(0.0, float(c.data.get("battery_soc", 0) or 0.0)) / 100.0
+            * float(c.data.get("battery_total_energy", 0) or 0.0)
+            for c in coordinators_with_data
+        )
+        cutoff_energy_kwh = sum(
+            max(0.0, float(c.min_soc)) / 100.0
+            * float(c.data.get("battery_total_energy", 0) or 0.0)
+            for c in coordinators_with_data
+        )
+        usable_energy_kwh = sum(
+            max(
+                0.0,
+                (float(c.data.get("battery_soc", 0) or 0.0) - float(c.min_soc))
+                / 100.0
+                * float(c.data.get("battery_total_energy", 0) or 0.0),
+            )
+            for c in coordinators_with_data
+        )
         effective_min_soc = min_soc  # Actual hardware cutoff, no safety margin
 
         # Safety margin: user-configurable buffer added to consumption forecast.
@@ -3244,8 +3263,18 @@ class ChargeDischargeController:
         # at the boundary don't re-fire every cycle (relay churn).
         # Band: soc < (floor - margin) triggers; charges up to floor.
         floor_deficit_kwh = 0.0
-        if self._predictive_min_soc_floor_enabled and self._predictive_min_soc_floor > 0 and avg_soc < self._predictive_min_soc_floor - FLOOR_HYSTERESIS_PCT:
-            floor_deficit_kwh = (self._predictive_min_soc_floor - avg_soc) / 100.0 * total_capacity_kwh
+        if self._predictive_min_soc_floor_enabled and self._predictive_min_soc_floor > 0:
+            floor_deficit_kwh = sum(
+                max(
+                    0.0,
+                    (self._predictive_min_soc_floor - float(c.data.get("battery_soc", 0) or 0.0))
+                    / 100.0
+                    * float(c.data.get("battery_total_energy", 0) or 0.0),
+                )
+                for c in coordinators_with_data
+                if float(c.data.get("battery_soc", 0) or 0.0)
+                < self._predictive_min_soc_floor - FLOOR_HYSTERESIS_PCT
+            )
 
         # Get dynamic consumption forecast.  The normal 00:05 evaluation uses
         # the full-day average; a pre-slot re-evaluation may provide the
@@ -3556,7 +3585,9 @@ class ChargeDischargeController:
 
         return self._check_time_window()
 
-    def _compute_deficit_target_soc(self) -> Optional[dict]:
+    def _compute_deficit_target_soc(
+        self, planned_kwh: float | None = None
+    ) -> Optional[dict]:
         """Calculate per-battery grid-only SOC targets for a forecast deficit.
 
         Each battery's share of grid charge is proportional to its gap to max_soc,
@@ -3604,7 +3635,9 @@ class ChargeDischargeController:
         # additive safety margin; the optional grid-charge percentage margin is
         # applied by the shared planning calculation before the headroom cap. #409
         energy_deficit_kwh = max(0.0, decision_data.get("energy_deficit_kwh", 0.0))
-        planned_grid_charge_kwh = decision_data.get("planned_grid_charge_kwh")
+        planned_grid_charge_kwh = planned_kwh
+        if planned_grid_charge_kwh is None:
+            planned_grid_charge_kwh = decision_data.get("planned_grid_charge_kwh")
         if planned_grid_charge_kwh is None:
             planned_grid_charge_kwh = calculations.calculate_planned_grid_charge_kwh(
                 energy_deficit_kwh,
@@ -3672,7 +3705,25 @@ class ChargeDischargeController:
         purpose = getattr(self, "_active_dynamic_slot_purpose", None)
         # Call the helpers through the class so this method remains usable in
         # the lightweight controller stand-ins used by the planning tests.
-        deficit_targets = ChargeDischargeController._compute_deficit_target_soc(self)
+        planned_kwh = None
+        if getattr(self, "predictive_charging_mode", None) == PREDICTIVE_MODE_TIME_SLOT:
+            planned_kwh = getattr(self, "_active_time_slot_quota_kwh", None)
+        schedule = getattr(self, "_dynamic_pricing_schedule", None)
+        if (
+            planned_kwh is None
+            and schedule is not None
+            and getattr(schedule, "chronological_planning_active", False)
+        ):
+            now = datetime.now()
+            active_slot = next(
+                (slot for slot in schedule.selected_slots if slot.start <= now < slot.end),
+                None,
+            )
+            if active_slot is not None:
+                planned_kwh = schedule.slot_energy_targets_kwh.get(active_slot)
+        deficit_targets = ChargeDischargeController._compute_deficit_target_soc(
+            self, planned_kwh=planned_kwh
+        )
         self._predictive_deficit_target_soc = (
             deficit_targets
             if purpose in {SLOT_PURPOSE_DEFICIT, SLOT_PURPOSE_COMBINED}

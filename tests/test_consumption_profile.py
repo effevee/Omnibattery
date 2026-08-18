@@ -331,7 +331,9 @@ def test_partial_query_maturity_uses_requested_intervals_only():
         date(2026, 8, 7): _single_interval_day(date(2026, 8, 7), 1.0),
     }
 
-    forecast = _profile(days).forecast_for_date(
+    profile = _profile(days)
+    profile._today = lambda: date(2026, 8, 15)
+    forecast = profile.forecast_for_date(
         date(2026, 8, 17),
         interval_indices={40},
     )

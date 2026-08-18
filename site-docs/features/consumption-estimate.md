@@ -2,6 +2,8 @@
 
 Predictive charging needs to know how much energy your home consumes to decide whether grid charging is needed. The integration learns a **15-minute consumption profile** from up to 28 complete local days. Until that profile is mature, the existing 7-day daily estimate remains the safe fallback.
 
+Dynamic Pricing uses this as a chronological curve, not only as a daily total. It can therefore reserve grid energy before an early projected depletion while leaving the rest of the daily deficit flexible by price. The mature profile and temporary curve are normalized to the same aggregate kWh used by the predictive decision.
+
 While the learned profile is immature, that daily total is not distributed
 completely flat: a temporary household-shaped curve is used. Overnight
 (00:00–06:00) receives the minimum weight, breakfast has a small lift, the

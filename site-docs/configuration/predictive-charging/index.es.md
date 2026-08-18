@@ -51,7 +51,7 @@ En sistemas con varias baterías a distintos niveles de SOC, la carga de red se 
 
 La carga predictiva solo carga desde la red cuando el día arroja un déficit. En un día soleado el balance del día completo puede ser positivo aunque la batería esté casi vacía al amanecer — dejando el hueco de la mañana (antes de que arranque la solar) cubierto desde la red a precio completo, o la batería agotada.
 
-El slider **SOC Mínimo Garantizado** opcional (pestaña Control, `0` = desactivado) fuerza una carga de red nocturna para alcanzar **al menos** ese SOC al final de la ventana de carga, sin importar el balance neto del día. Dimensiona el déficit hasta el suelo, así fluye sin cambios por el SOC objetivo de cada batería y por el dimensionado de slots de precio dinámico — siguen eligiéndose los slots más baratos para alcanzarlo.
+El slider **SOC Mínimo Garantizado** opcional (pestaña Control, `0` = desactivado) reserva energía suficiente para mantener cada batería en ese suelo hasta que comience la producción solar efectiva, sin importar el balance neto del día. Precio Dinámico elige los slots elegibles más baratos que pueden entregar la reserva antes de ese plazo. El techo máximo de precio explícito y los bloqueos físicos siguen siendo autoritativos: una garantía imposible se muestra como *shortfall* en vez de asignarse a una franja posterior.
 
 Se reactiva con histéresis: una vez que el SOC recupera el suelo configurado, la carga se detiene si el suelo era la única razón para cargar; se rearma cuando el SOC baja a `suelo − 5 %`. Configúralo con el slider `number.*_predictive_min_soc_floor`, junto al switch **SOC Mínimo Garantizado**.
 

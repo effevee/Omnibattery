@@ -123,6 +123,22 @@ def format_predictive_notification_message(
         )
         return (title, message)
 
+    if decision_data.get("chronological_deferred"):
+        shortfall = float(decision_data.get("deadline_shortfall_kwh", 0.0) or 0.0)
+        title = "Predictive Charging: Deferred by timeline"
+        message = (
+            "🕒 This configured window has no energy quota.\n\n"
+            f"🔋 Battery: {avg_soc:.0f}% ({usable_energy:.2f} kWh usable)\n"
+            f"{forecast_lines}"
+            f"⚡ Aggregate grid need: {energy_deficit:.2f} kWh\n"
+            + (
+                f"⚠️ Deadline shortfall: {shortfall:.2f} kWh\n"
+                if shortfall > 0
+                else "The energy is reserved for another configured window.\n"
+            )
+        )
+        return (title, message)
+
     # Sufficient energy — no charging needed
     if not should_charge:
         title = "Predictive Charging: Not required"
@@ -281,8 +297,25 @@ def format_dynamic_pricing_notification(
         slot_lines = "\n".join(
             f"  • {s.start.strftime('%H:%M')}-{s.end.strftime('%H:%M')} → {s.price:.4f} {unit}"
             + (
-                f" [{schedule.purpose_for(s)}]"
+                f", {float(schedule.slot_energy_targets_kwh[s]):.2f} kWh"
+                if s in getattr(schedule, "slot_energy_targets_kwh", {})
+                else ""
+            )
+            + (
+                f" [before {schedule.slot_deadlines[s].strftime('%H:%M')}]"
+                if getattr(schedule, "slot_deadlines", {}).get(s) is not None
+                else (
+                    " [flexible]"
+                    if s in getattr(schedule, "slot_energy_targets_kwh", {})
+                    else f" [{schedule.purpose_for(s)}]"
+                    if hasattr(schedule, "purpose_for")
+                    else ""
+                )
+            )
+            + (
+                f" + {schedule.purpose_for(s)}"
                 if hasattr(schedule, "purpose_for")
+                and schedule.purpose_for(s) in {"negative_price", "combined"}
                 else ""
             )
             for s in schedule.selected_slots
@@ -325,6 +358,25 @@ def format_dynamic_pricing_notification(
                     "⚡ Negative-price opportunity: "
                     f"{float(getattr(schedule, 'negative_price_energy_kwh', 0.0) or 0.0):.2f} kWh\n"
                 )
+            chronological_lines = ""
+            if getattr(schedule, "chronological_planning_active", False):
+                deadline = float(getattr(schedule, "deadline_required_kwh", 0.0) or 0.0)
+                flexible = float(getattr(schedule, "flexible_required_kwh", 0.0) or 0.0)
+                chronological_lines = (
+                    f"🕒 Required before deadlines: {deadline:.2f} kWh\n"
+                    f"💰 Flexible by price: {flexible:.2f} kWh\n"
+                )
+                shortfall = float(getattr(schedule, "deadline_shortfall_kwh", 0.0) or 0.0)
+                if shortfall > 0:
+                    chronological_lines += (
+                        f"⚠️ Cannot deliver {shortfall:.2f} kWh before its deadline "
+                        f"({getattr(schedule, 'chronological_plan_reason', 'insufficient capacity')}).\n"
+                    )
+            selected_label = (
+                "Selected slots (cheapest able to meet each deadline)"
+                if getattr(schedule, "chronological_planning_active", False)
+                else "Selected hours (cheapest)"
+            )
             message = (
                 f"🔋 Battery: {avg_soc:.0f}% ({usable_energy:.2f} kWh usable)\n"
                 f"{forecast_lines}"
@@ -332,7 +384,8 @@ def format_dynamic_pricing_notification(
                 f"{opportunity_line}"
                 f"🔌 Grid charge planned: {planned_grid_charge:.2f} kWh → "
                 f"{hours_needed:.1f}h of charging needed\n\n"
-                f"💰 Selected hours (cheapest):\n{slot_lines}\n\n"
+                f"{chronological_lines}"
+                f"💰 {selected_label}:\n{slot_lines}\n\n"
                 f"Average price: {schedule.average_price:.4f} {unit}\n"
                 f"Estimated cost: ~{schedule.estimated_cost:.2f} {cost_unit}\n"
                 f"{price_config_line}"

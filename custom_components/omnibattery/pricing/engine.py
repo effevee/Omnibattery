@@ -45,8 +45,10 @@ from ..const import (
     EVENING_DEFICIT_THRESHOLD_KWH,
     T_START_FALLBACK_HOUR,
     FLOOR_HYSTERESIS_PCT,
+    CHARGE_EFFICIENCY,
 )
 from ..solar_forecast import (
+    SolarForecastInput,
     get_configured_solar_forecast_sensor,
     read_solar_forecast_kwh,
 )
@@ -59,6 +61,13 @@ from . import (
     SLOT_PURPOSE_NEGATIVE_PRICE,
     calculations,
     notifications,
+)
+from .chronological import (
+    ChronologicalPlan,
+    EnergyInterval,
+    allocate_price_slots,
+    build_energy_deadlines,
+    normalize_energy_shape,
 )
 from .curtailment import (
     BatterySnapshot,
@@ -1873,6 +1882,393 @@ class PricingManager:
     # DYNAMIC PRICING: Evaluation and notification methods
     # =========================================================================
 
+    def _build_chronological_plan(
+        self,
+        *,
+        now: datetime,
+        slots: list[PriceSlot],
+        decision_data: dict[str, Any],
+        price_ceiling: float | None,
+    ) -> ChronologicalPlan | None:
+        """Adapt live controller forecasts to the pure chronological planner."""
+        tracker = getattr(self._controller, "_consumption_tracker", None)
+        profile = getattr(tracker, "consumption_profile", None)
+        if profile is None:
+            return None
+
+        horizon_end = now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
+        if horizon_end <= now:
+            return None
+        try:
+            forecast = profile.forecast_energy_between(
+                now,
+                horizon_end,
+                exclude_charging_windows=False,
+                fallback="legacy_daily",
+            )
+            cursor = now
+            boundaries: list[tuple[datetime, datetime]] = []
+            consumption_raw: list[float] = []
+            while cursor < horizon_end:
+                next_minute = ((cursor.minute // 15) + 1) * 15
+                if next_minute >= 60:
+                    boundary = cursor.replace(
+                        minute=0, second=0, microsecond=0
+                    ) + timedelta(hours=1)
+                else:
+                    boundary = cursor.replace(minute=next_minute, second=0, microsecond=0)
+                end = min(boundary, horizon_end)
+                index = cursor.hour * 4 + cursor.minute // 15
+                bucket = (
+                    float(forecast.intervals_kwh[index])
+                    if index < len(forecast.intervals_kwh)
+                    else 0.0
+                )
+                fraction = (end - cursor).total_seconds() / 900.0
+                boundaries.append((cursor, end))
+                consumption_raw.append(max(0.0, bucket * fraction))
+                cursor = end
+
+            consumption_total = max(
+                0.0,
+                float(
+                    decision_data.get("avg_consumption_kwh", forecast.energy_kwh)
+                    or 0.0
+                ),
+            )
+            consumption = normalize_energy_shape(consumption_raw, consumption_total)
+
+            normalized_solar = decision_data.get(
+                "remaining_solar_kwh", decision_data.get("solar_forecast_kwh")
+            )
+            solar_input = SolarForecastInput(
+                0.0 if normalized_solar is None else normalized_solar,
+                decision_data.get("solar_forecast_diagnostic_source")
+                or decision_data.get("solar_forecast_source")
+                or "fallback",
+            )
+            safety = max(
+                0.0,
+                float(
+                    getattr(
+                        self._controller, "_predictive_safety_margin_kwh", 0.0
+                    )
+                    or 0.0
+                ),
+            )
+            solar_total = max(0.0, solar_input.remaining_kwh - safety)
+            solar_raw = [0.0] * len(boundaries)
+            solar_source = "zero_fallback"
+            solar_start_dt: datetime | None = None
+            shape = solar_input.normalized_shape()
+            if shape is not None and len(shape) == len(boundaries):
+                solar_raw = shape
+                solar_source = solar_input.source
+            elif tracker is not None:
+                t_start = getattr(self._controller, "_solar_t_start", None)
+                if t_start is None:
+                    t_start = tracker.calculate_sunrise()
+                if t_start is not None:
+                    solar_start_dt = now.replace(
+                        hour=0, minute=0, second=0, microsecond=0
+                    ) + timedelta(hours=float(t_start))
+                    t_end = (
+                        tracker.estimate_t_end()
+                        if getattr(self._controller, "_solar_t_start", None) is not None
+                        else 2 * tracker.calculate_solar_noon() - t_start
+                    )
+                    if t_end > t_start:
+                        if solar_total > 0:
+                            for index, (start, end) in enumerate(boundaries):
+                                start_h = start.hour + start.minute / 60 + start.second / 3600
+                                end_h = end.hour + end.minute / 60 + end.second / 3600
+                                solar_raw[index] = max(
+                                    0.0,
+                                    tracker.get_solar_fraction_done(end_h, t_start, t_end)
+                                    - tracker.get_solar_fraction_done(start_h, t_start, t_end),
+                                )
+                            solar_source = "sinusoidal"
+            solar = normalize_energy_shape(solar_raw, solar_total)
+            intervals = [
+                EnergyInterval(start, end, consumption[index], solar[index])
+                for index, (start, end) in enumerate(boundaries)
+            ]
+
+            eligible = [
+                c for c in self._controller.coordinators
+                if c.data and not self._controller._is_battery_manual_owned(c)
+            ]
+            total_capacity = sum(
+                float(c.data.get("battery_total_energy", 0) or 0)
+                for c in eligible
+            )
+            weighted_min_soc = (
+                sum(
+                    float(c.min_soc)
+                    * float(c.data.get("battery_total_energy", 0) or 0)
+                    for c in eligible
+                )
+                / total_capacity
+                if total_capacity > 0
+                else 0.0
+            )
+            usable = sum(
+                max(0.0, (float(c.data.get("battery_soc", 0) or 0) - float(c.min_soc)) / 100.0
+                    * float(c.data.get("battery_total_energy", 0) or 0))
+                for c in eligible
+            )
+            headroom = sum(
+                max(0.0, (float(c.max_soc) - float(c.data.get("battery_soc", 0) or 0)) / 100.0
+                    * float(c.data.get("battery_total_energy", 0) or 0))
+                for c in eligible
+            )
+            deadlines = build_energy_deadlines(intervals, usable)
+            required = max(0.0, float(decision_data.get("planned_grid_charge_kwh", 0.0) or 0.0))
+            if (
+                getattr(self._controller, "_predictive_min_soc_floor_enabled", False)
+                and solar_start_dt is not None
+                and solar_start_dt > now
+            ):
+                floor = max(
+                    0.0,
+                    float(
+                        getattr(
+                            self._controller, "_predictive_min_soc_floor", 0.0
+                        )
+                        or 0.0
+                    ),
+                )
+                reserve = sum(
+                    max(0.0, floor - float(c.min_soc)) / 100.0
+                    * float(c.data.get("battery_total_energy", 0) or 0)
+                    for c in eligible
+                )
+                pre_solar = [item for item in intervals if item.end <= solar_start_dt]
+                floor_deadlines = build_energy_deadlines(
+                    pre_solar,
+                    max(0.0, usable - reserve),
+                    kind="guaranteed_floor",
+                )
+                floor_required = max(
+                    (item.required_cumulative_kwh for item in floor_deadlines),
+                    default=0.0,
+                )
+                hysteresis_kwh = sum(
+                    float(c.data.get("battery_total_energy", 0) or 0)
+                    for c in eligible
+                ) * FLOOR_HYSTERESIS_PCT / 100.0
+                if floor_required > hysteresis_kwh:
+                    # The floor requirement dominates ordinary depletion until
+                    # sunrise. Preserve later, larger ordinary requirements.
+                    combined: list = []
+                    maximum = 0.0
+                    for item in sorted(
+                        deadlines + floor_deadlines,
+                        key=lambda value: value.deadline,
+                    ):
+                        if item.required_cumulative_kwh > maximum + 1e-9:
+                            combined.append(item)
+                            maximum = item.required_cumulative_kwh
+                    deadlines = combined
+                    margin_pct = max(
+                        0.0,
+                        float(
+                            getattr(
+                                self._controller,
+                                "_predictive_grid_charge_margin_pct",
+                                0.0,
+                            )
+                            or 0.0
+                        ),
+                    )
+                    required = max(required, floor_required * (1.0 + margin_pct / 100.0))
+                    decision_data["should_charge"] = True
+                    decision_data["floor_active"] = True
+                    decision_data["energy_deficit_kwh"] = max(
+                        float(decision_data.get("energy_deficit_kwh", 0.0) or 0.0),
+                        floor_required,
+                    )
+                    decision_data["planned_grid_charge_kwh"] = min(required, headroom)
+                    decision_data["guaranteed_floor_deadline"] = solar_start_dt.isoformat()
+            power_kw = min(
+                max(0.0, float(self._controller.max_contracted_power)),
+                max(0.0, float(self._controller.max_charge_capacity)),
+            ) / 1000.0
+            plan = allocate_price_slots(
+                intervals,
+                deadlines,
+                slots,
+                total_required_kwh=required,
+                effective_power_kw=power_kw,
+                now=now,
+                horizon_end=horizon_end,
+                headroom_kwh=headroom,
+                usable_initial_kwh=usable,
+                max_price_threshold=price_ceiling,
+            )
+            decision_data.update({
+                "chronological_planning_active": True,
+                "chronological_source": forecast.source,
+                "solar_timeline_source": solar_source,
+                "earliest_projected_depletion": (
+                    plan.earliest_depletion_at.isoformat()
+                    if plan.earliest_depletion_at
+                    else None
+                ),
+                "minimum_projected_energy_kwh": round(plan.minimum_projected_energy_kwh, 3),
+                "minimum_projected_soc": round(
+                    weighted_min_soc
+                    + plan.minimum_projected_energy_kwh
+                    / total_capacity
+                    * 100.0,
+                    2,
+                )
+                if total_capacity > 0
+                else None,
+                "deadline_required_kwh": round(plan.deadline_required_kwh, 3),
+                "flexible_required_kwh": round(plan.flexible_required_kwh, 3),
+                "deadline_shortfall_kwh": round(plan.deadline_shortfall_kwh, 3),
+                "total_shortfall_kwh": round(plan.total_shortfall_kwh, 3),
+                "chronological_plan_reason": plan.reason,
+                "energy_deadlines": [
+                    {
+                        "deadline": item.deadline.isoformat(),
+                        "required_kwh": round(item.required_cumulative_kwh, 3),
+                        "kind": item.kind,
+                    }
+                    for item in plan.deadlines
+                ],
+            })
+            return plan
+        except (AttributeError, IndexError, TypeError, ValueError) as exc:
+            _LOGGER.warning("Dynamic pricing: chronological planning fallback: %s", exc)
+            decision_data.update({
+                "chronological_planning_active": False,
+                "chronological_plan_reason": f"fallback: {exc}",
+            })
+            return None
+
+    def _time_slot_price_slots(self, now: datetime) -> list[PriceSlot]:
+        """Materialize today's configured predictive windows as price slots.
+
+        Time Slot has no price ranking, so every window receives the same
+        synthetic price. Splitting overnight windows at midnight keeps the
+        energy horizon strict while retaining the currently active portion.
+        """
+        day_name = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"][
+            now.weekday()
+        ]
+        midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        horizon_end = midnight + timedelta(days=1)
+        result: list[PriceSlot] = []
+        for configured in getattr(self._controller, "charging_time_slots", []):
+            if not isinstance(configured, dict):
+                continue
+            if configured.get("enabled", True) is False:
+                continue
+            days = configured.get("days", []) or []
+            if days and day_name not in days:
+                continue
+            try:
+                start_time = datetime.strptime(
+                    str(configured["start_time"]), "%H:%M"
+                ).time()
+                end_time = datetime.strptime(
+                    str(configured["end_time"]), "%H:%M"
+                ).time()
+            except (KeyError, TypeError, ValueError):
+                continue
+            start = datetime.combine(now.date(), start_time)
+            end = datetime.combine(now.date(), end_time)
+            pieces = (
+                [(start, end)]
+                if start_time <= end_time
+                else [(midnight, end), (start, horizon_end)]
+            )
+            result.extend(
+                PriceSlot(piece_start, piece_end, 0.0)
+                for piece_start, piece_end in pieces
+                if piece_end > now
+                and piece_start < horizon_end
+                and piece_end > piece_start
+            )
+        return sorted(set(result), key=lambda slot: (slot.start, slot.end))
+
+    def _apply_time_slot_chronological_plan(
+        self,
+        decision_data: dict[str, Any],
+        *,
+        now: datetime,
+    ) -> dict[str, Any]:
+        """Apply the active configured-window quota to a Time Slot decision."""
+        controller = self._controller
+        controller._active_time_slot_quota_kwh = None
+        candidates = self._time_slot_price_slots(now)
+        if not candidates:
+            return decision_data
+        plan = self._build_chronological_plan(
+            now=now,
+            slots=candidates,
+            decision_data=decision_data,
+            price_ceiling=None,
+        )
+        if plan is None:
+            return decision_data
+
+        controller._time_slot_chronological_plan = plan
+        quota = sum(
+            allocation.planned_battery_kwh
+            for allocation in plan.allocations
+            if allocation.slot.start <= now < allocation.slot.end
+        )
+        aggregate_should_charge = bool(decision_data.get("should_charge", False))
+        decision_data["aggregate_should_charge"] = aggregate_should_charge
+        decision_data["time_slot_chronological_active"] = True
+        decision_data["active_slot_energy_target_kwh"] = round(quota, 3)
+        decision_data["should_charge"] = quota > 1e-6
+        if quota > 1e-6:
+            controller._active_time_slot_quota_kwh = quota
+        elif aggregate_should_charge:
+            decision_data["chronological_deferred"] = True
+            decision_data["reason"] = (
+                "Energy is assigned to another configured window or cannot be "
+                "delivered before its deadline"
+            )
+        return decision_data
+
+    async def _ensure_time_slot_chronological_preview(
+        self, *, now: datetime
+    ) -> None:
+        """Build today's fixed-window plan before the first window starts."""
+        controller = self._controller
+        if getattr(controller, "_time_slot_chronological_preview_date", None) == now.date():
+            return
+        evaluation_start = now.replace(
+            hour=0, minute=5, second=0, microsecond=0
+        )
+        if now < evaluation_start or not self._time_slot_price_slots(now):
+            return
+        forecast_configured = bool(
+            get_configured_solar_forecast_sensor(controller, "remaining")
+            or get_configured_solar_forecast_sensor(controller, "today")
+        )
+        if (
+            forecast_configured
+            and read_solar_forecast_kwh(self._hass, controller) is None
+        ):
+            return
+        decision_data = await self._current_horizon_grid_charging_decision()
+        decision_data = self._apply_time_slot_chronological_plan(
+            decision_data,
+            now=now,
+        )
+        controller._last_decision_data = decision_data
+        controller._time_slot_chronological_preview_date = now.date()
+        if float(decision_data.get("deadline_shortfall_kwh", 0.0) or 0.0) > 0:
+            await self._send_predictive_charging_notification(
+                decision_data=decision_data
+            )
+
     async def _evaluate_dynamic_pricing(
         self,
         *,
@@ -2020,7 +2416,42 @@ class PricingManager:
         )
         opportunity_selected = bool(negative_price_selected)
 
-        if deficit_charging_needed or not opportunity_selected:
+        chronological_plan = None
+        if deficit_charging_needed or getattr(
+            self._controller, "_predictive_min_soc_floor_enabled", False
+        ):
+            chronological_plan = self._build_chronological_plan(
+                now=eval_now,
+                slots=slots,
+                decision_data=decision_data,
+                price_ceiling=ceiling,
+            )
+            if (
+                chronological_plan is not None
+                and decision_data.get("floor_active", False)
+            ):
+                # Guaranteed-floor energy bypasses the optimization-only
+                # arbitrage margin, while the user's explicit ceiling remains
+                # authoritative.
+                chronological_plan = self._build_chronological_plan(
+                    now=eval_now,
+                    slots=slots,
+                    decision_data=decision_data,
+                    price_ceiling=self._controller.max_price_threshold,
+                )
+            deficit_charging_needed = bool(decision_data.get("should_charge", False))
+            if deficit_charging_needed and chronological_plan is not None:
+                deficit_kwh = float(
+                    decision_data.get("energy_deficit_kwh", deficit_kwh) or 0.0
+                )
+                deficit_hours_needed = calculations.calculate_exact_charging_hours_needed(
+                    chronological_plan.total_required_kwh,
+                    self._controller.max_contracted_power,
+                    self._controller.max_charge_capacity,
+                )
+        if chronological_plan is not None:
+            deficit_selected = [allocation.slot for allocation in chronological_plan.allocations]
+        elif deficit_charging_needed or not opportunity_selected:
             deficit_selected = calculations.select_cheapest_hours(
                 slots, deficit_hours_needed, ceiling, now=eval_now
             )
@@ -2109,6 +2540,17 @@ class PricingManager:
                 deficit_selected = calculations.select_cheapest_hours(
                     safe_slots, deficit_hours_needed, ceiling, now=eval_now
                 )
+                if chronological_plan is not None:
+                    chronological_plan = self._build_chronological_plan(
+                        now=eval_now,
+                        slots=safe_slots,
+                        decision_data=decision_data,
+                        price_ceiling=ceiling,
+                    )
+                    if chronological_plan is not None:
+                        deficit_selected = [
+                            allocation.slot for allocation in chronological_plan.allocations
+                        ]
             elif not deficit_charging_needed and opportunity_selected:
                 # The legacy no-deficit calendar is informational only.  Do not
                 # resurrect it while relocating a real opportunity, or the safe
@@ -2176,6 +2618,64 @@ class PricingManager:
             ),
             negative_price_energy_kwh=(
                 negative_price_energy_kwh if opportunity_selected else 0.0
+            ),
+            slot_energy_targets_kwh=(
+                {
+                    allocation.slot: allocation.planned_battery_kwh
+                    for allocation in chronological_plan.allocations
+                }
+                if chronological_plan is not None
+                else {}
+            ),
+            slot_deadlines=(
+                {
+                    allocation.slot: allocation.deadline
+                    for allocation in chronological_plan.allocations
+                }
+                if chronological_plan is not None
+                else {}
+            ),
+            slot_plan_kinds=(
+                {
+                    allocation.slot: allocation.kind
+                    for allocation in chronological_plan.allocations
+                }
+                if chronological_plan is not None
+                else {}
+            ),
+            chronological_planning_active=chronological_plan is not None,
+            chronological_source=decision_data.get("chronological_source"),
+            solar_timeline_source=decision_data.get("solar_timeline_source"),
+            earliest_depletion_at=(
+                chronological_plan.earliest_depletion_at
+                if chronological_plan
+                else None
+            ),
+            deadline_required_kwh=(
+                chronological_plan.deadline_required_kwh
+                if chronological_plan
+                else 0.0
+            ),
+            flexible_required_kwh=(
+                chronological_plan.flexible_required_kwh
+                if chronological_plan
+                else 0.0
+            ),
+            deadline_shortfall_kwh=(
+                chronological_plan.deadline_shortfall_kwh
+                if chronological_plan
+                else 0.0
+            ),
+            total_shortfall_kwh=(
+                chronological_plan.total_shortfall_kwh
+                if chronological_plan
+                else 0.0
+            ),
+            energy_deadlines=(chronological_plan.deadlines if chronological_plan else []),
+            chronological_plan_reason=(
+                chronological_plan.reason
+                if chronological_plan
+                else decision_data.get("chronological_plan_reason")
             ),
         )
         self._controller._dynamic_pricing_schedule = schedule
@@ -2315,6 +2815,15 @@ class PricingManager:
             decision = await self._evaluate_remaining_grid_charging(now=now)
             self._controller._last_decision_data = decision
             deficit_needed = bool(decision["should_charge"])
+            if (
+                getattr(schedule, "chronological_planning_active", False)
+                and getattr(schedule, "slot_deadlines", {}).get(next_slot)
+                is not None
+            ):
+                # A positive aggregate balance can be caused by solar arriving
+                # after this deadline. It is not evidence that the urgent slot
+                # became unnecessary.
+                deficit_needed = True
 
         opportunity_needed = False
         if has_opportunity and self._negative_price_feature_enabled():
@@ -2425,7 +2934,14 @@ class PricingManager:
         if not coords:
             return False
         current = sum(c.data.get("battery_soc", 0) for c in coords) / len(coords)
-        return (ref - current) >= SOC_REEVALUATION_THRESHOLD
+        schedule = getattr(self._controller, "_dynamic_pricing_schedule", None)
+        threshold = (
+            5.0
+            if schedule is not None
+            and getattr(schedule, "chronological_planning_active", False)
+            else SOC_REEVALUATION_THRESHOLD
+        )
+        return (ref - current) >= threshold
 
     @staticmethod
     def _get_consumed_today_kwh(controller, now: datetime) -> tuple[float, bool, str]:
@@ -2916,9 +3432,12 @@ class PricingManager:
             remaining_solar_kwh, consumption_rate_kwh_h, remaining_window_hours,
         )
 
-        # --- Find cheap slots (extended horizon: now + 12h to capture cheap overnight slots) ---
-        end_of_day = now.replace(hour=23, minute=59, second=59, microsecond=0)
-        slots = self._parse_price_data(horizon_end=max(end_of_day, now + timedelta(hours=12)))
+        # This deficit belongs to the remaining energy horizon for today. Price
+        # data beyond midnight may be available, but cannot cover consumption
+        # that occurs before midnight.
+        midnight = now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
+        slots = self._parse_price_data(horizon_end=midnight)
+        slots = [slot for slot in slots if slot.end <= midnight]
         if not slots:
             _LOGGER.warning("Evening recharge: no price data available")
             return
@@ -3113,10 +3632,65 @@ class PricingManager:
     ) -> None:
         """Stop a live price-slot charge and return battery ownership safely."""
         controller = self._controller
+        active_slot = getattr(controller, "_active_dynamic_price_slot", None)
+        schedule = getattr(controller, "_dynamic_pricing_schedule", None)
+        if (
+            reason == "slot_ended"
+            and active_slot is not None
+            and schedule is not None
+            and getattr(schedule, "chronological_planning_active", False)
+            and active_slot in schedule.slot_energy_targets_kwh
+        ):
+            targets = getattr(controller, "_predictive_deficit_target_soc", None) or {}
+            shortfall = 0.0
+            for coordinator, target_soc in targets.items():
+                data = getattr(coordinator, "data", None) or {}
+                capacity = max(0.0, float(data.get("battery_total_energy", 0.0) or 0.0))
+                current_soc = float(data.get("battery_soc", 0.0) or 0.0)
+                shortfall += max(0.0, float(target_soc) - current_soc) / 100.0 * capacity
+            deadline = schedule.slot_deadlines.get(active_slot)
+            remaining = shortfall
+            if remaining > 0.01:
+                power_kw = min(
+                    max(0.0, float(controller.max_contracted_power)),
+                    max(0.0, float(controller.max_charge_capacity)),
+                ) / 1000.0
+                for slot in sorted(schedule.selected_slots, key=lambda item: item.start):
+                    if (
+                        slot.start < datetime.now()
+                        or slot == active_slot
+                        or (deadline is not None and slot.end > deadline)
+                    ):
+                        continue
+                    capacity = power_kw * max(0.0, (slot.end - slot.start).total_seconds() / 3600.0) * CHARGE_EFFICIENCY
+                    current = float(schedule.slot_energy_targets_kwh.get(slot, 0.0) or 0.0)
+                    take = min(remaining, max(0.0, capacity - current))
+                    if take <= 0:
+                        continue
+                    schedule.slot_energy_targets_kwh[slot] = current + take
+                    remaining -= take
+                    if remaining <= 0.01:
+                        break
+            if remaining > 0.01:
+                schedule.deadline_shortfall_kwh += remaining
+                schedule.total_shortfall_kwh += remaining
+                if isinstance(getattr(controller, "_last_decision_data", None), dict):
+                    controller._last_decision_data["deadline_shortfall_kwh"] = round(
+                        schedule.deadline_shortfall_kwh, 3
+                    )
+                    controller._last_decision_data["total_shortfall_kwh"] = round(
+                        schedule.total_shortfall_kwh, 3
+                    )
+                _LOGGER.warning(
+                    "Dynamic pricing: %.2f kWh not delivered before deadline %s",
+                    remaining,
+                    deadline.isoformat() if deadline is not None else "unknown",
+                )
         controller._current_price_slot_active = False
         controller._grid_charging_initialized = False
         controller.grid_charging_active = False
         controller._active_dynamic_slot_purpose = None
+        controller._active_dynamic_price_slot = None
         controller._predictive_charge_target_soc = None
         controller._curtailment_opportunistic_target_soc = None
         controller._predictive_deficit_target_soc = None
@@ -3261,6 +3835,7 @@ class PricingManager:
                     self._controller._current_price_slot_active = True
                     self._controller._grid_charging_initialized = False
                     self._controller._active_dynamic_slot_purpose = effective_purpose
+                    self._controller._active_dynamic_price_slot = current_slot
                     self._controller.grid_charging_active = True
                     if current_slot:
                         await self._send_dynamic_pricing_slot_start_notification(current_slot)
@@ -3602,6 +4177,11 @@ class PricingManager:
                     )
                     return
 
+                decision_data = self._apply_time_slot_chronological_plan(
+                    decision_data,
+                    now=datetime.now(),
+                )
+
                 self._controller.grid_charging_active = decision_data["should_charge"]
                 self._controller.last_evaluation_soc = current_avg_soc
                 self._controller._last_decision_data = decision_data
@@ -3619,6 +4199,9 @@ class PricingManager:
                 _LOGGER.info("In predictive charging slot but charging not needed - continuing normal operation")
                 return
         else:
+            await self._ensure_time_slot_chronological_preview(
+                now=datetime.now()
+            )
             # `last_evaluation_soc is not None` marks that we evaluated during a
             # slot (set on every slot's initial eval, charging or not). Including
             # it makes this a one-shot cleanup that also fires on solar-sufficient
@@ -3644,6 +4227,7 @@ class PricingManager:
                 )
 
             self._controller._slot_entry_time = None
+            self._controller._active_time_slot_quota_kwh = None
 
     async def _send_predictive_charging_notification(
         self,

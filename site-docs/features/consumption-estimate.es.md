@@ -2,6 +2,8 @@
 
 La carga predictiva necesita saber cuánta energía consume tu hogar para decidir si hace falta cargar desde la red. La integración aprende un **perfil de consumo de 15 minutos** a partir de hasta 28 días locales completos. Hasta que ese perfil alcanza la madurez, la estimación diaria existente de 7 días sigue siendo el fallback seguro.
 
+Precio Dinámico lo usa como curva cronológica, no solo como total diario. Así puede reservar energía de red antes de un agotamiento temprano previsto y mantener flexible por precio el resto del déficit diario. Tanto el perfil maduro como la curva provisional se normalizan a los mismos kWh agregados usados por la decisión predictiva.
+
 Mientras el perfil aprendido no está maduro, ese total diario no se reparte de
 forma completamente plana: se usa una curva temporal provisional de hogar. La
 noche (00:00–06:00) recibe el peso mínimo, el desayuno tiene un pequeño repunte,

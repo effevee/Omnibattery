@@ -52,6 +52,7 @@ subpaquetes por responsabilidad.
 | `infra/entity_naming.py` | — | IDs de entidad basados en translation-key y migraciones del registro |
 | `const/` | — | Definiciones de todos los registros Modbus y entidades (divididas por versión de batería) |
 | `pricing/engine.py` | — | Carga predictiva: precio dinámico, franja horaria, precio en tiempo real, SOC garantizado |
+| `pricing/chronological.py` | — | Simulación energética pura de 15 minutos, plazos acumulados y asignación de slots; sin Home Assistant ni E/S de dispositivos |
 | `control/power_distribution.py` | — | Reparte el setpoint del sistema entre las baterías activas |
 | `control/charge_delay.py` | — | Retraso de carga solar |
 | `control/max_soc_charge.py` | — | Reducción por voltaje al 100 % / protección de tope de carga |

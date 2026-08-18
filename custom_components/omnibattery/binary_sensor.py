@@ -402,6 +402,7 @@ class PredictiveChargingStatusSensor(BinarySensorEntity):
         "consumption_scope", "daily_avg_consumption_kwh", "consumed_today_kwh",
         "remaining_consumption_kwh", "remaining_solar_kwh",
         "consumption_rate_kwh_h", "consumption_accumulator_source",
+        "energy_deadlines", "slot_energy_targets_kwh", "slot_deadlines",
         "decision_reason",
     })
 
@@ -525,7 +526,53 @@ class PredictiveChargingStatusSensor(BinarySensorEntity):
                 "solar_forecast_kwh": decision.get("solar_forecast_kwh"),
                 "solar_surplus_kwh": decision.get("solar_surplus_kwh"),
                 "decision_reason": decision.get("reason"),
+                "chronological_planning_active": bool(decision.get("chronological_planning_active", False)),
+                "chronological_source": decision.get("chronological_source"),
+                "solar_timeline_source": decision.get("solar_timeline_source"),
+                "earliest_projected_depletion": decision.get("earliest_projected_depletion"),
+                "minimum_projected_energy_kwh": decision.get("minimum_projected_energy_kwh"),
+                "minimum_projected_soc": decision.get("minimum_projected_soc"),
+                "deadline_required_kwh": decision.get("deadline_required_kwh", 0.0),
+                "flexible_required_kwh": decision.get("flexible_required_kwh", 0.0),
+                "deadline_shortfall_kwh": decision.get("deadline_shortfall_kwh", 0.0),
+                "total_shortfall_kwh": decision.get("total_shortfall_kwh", 0.0),
+                "energy_deadlines": decision.get("energy_deadlines", []),
+                "chronological_plan_reason": decision.get("chronological_plan_reason"),
+                "guaranteed_floor_deadline": decision.get("guaranteed_floor_deadline"),
             })
+
+        schedule = getattr(self.controller, "_dynamic_pricing_schedule", None)
+        if schedule is not None and getattr(schedule, "chronological_planning_active", False):
+            attrs["slot_energy_targets_kwh"] = {
+                f"{slot.start.isoformat()}/{slot.end.isoformat()}": round(float(value), 3)
+                for slot, value in schedule.slot_energy_targets_kwh.items()
+            }
+            attrs["slot_deadlines"] = {
+                f"{slot.start.isoformat()}/{slot.end.isoformat()}": (
+                    deadline.isoformat() if deadline is not None else None
+                )
+                for slot, deadline in schedule.slot_deadlines.items()
+            }
+        elif getattr(self.controller, "_time_slot_chronological_plan", None) is not None:
+            plan = self.controller._time_slot_chronological_plan
+            targets = {}
+            deadlines = {}
+            for allocation in plan.allocations:
+                key = (
+                    f"{allocation.slot.start.isoformat()}/"
+                    f"{allocation.slot.end.isoformat()}"
+                )
+                targets[key] = round(
+                    targets.get(key, 0.0) + allocation.planned_battery_kwh,
+                    3,
+                )
+                deadlines[key] = (
+                    allocation.deadline.isoformat()
+                    if allocation.deadline is not None
+                    else None
+                )
+            attrs["slot_energy_targets_kwh"] = targets
+            attrs["slot_deadlines"] = deadlines
 
         # Keep the live remainder current even between pricing reevaluations.
         # This also gives legacy whole-day forecast sensors the same dashboard
