@@ -541,7 +541,6 @@ class PredictiveChargingStatusSensor(BinarySensorEntity):
                 "solar_profile_days": decision.get("solar_profile_days"),
                 "solar_profile_coverage_ratio": decision.get("solar_profile_coverage_ratio"),
                 "solar_profile_generation": decision.get("solar_profile_generation"),
-                "solar_shadow_selected_source": decision.get("solar_shadow_selected_source"),
                 "curtailment_timeline_mismatch": decision.get("curtailment_timeline_mismatch", False),
                 "earliest_projected_depletion": decision.get("earliest_projected_depletion"),
                 "minimum_projected_energy_kwh": decision.get("minimum_projected_energy_kwh"),
@@ -554,6 +553,12 @@ class PredictiveChargingStatusSensor(BinarySensorEntity):
                 "chronological_plan_reason": decision.get("chronological_plan_reason"),
                 "guaranteed_floor_deadline": decision.get("guaranteed_floor_deadline"),
             })
+            # This was a rollout-only diagnostic. Keep exposing it for an
+            # explicit legacy shadow evaluation, but do not publish an
+            # ``unknown`` attribute in the normal automatic mode.
+            shadow_source = decision.get("solar_shadow_selected_source")
+            if shadow_source is not None:
+                attrs["solar_shadow_selected_source"] = shadow_source
 
         schedule = getattr(self.controller, "_dynamic_pricing_schedule", None)
         if schedule is not None and getattr(schedule, "chronological_planning_active", False):

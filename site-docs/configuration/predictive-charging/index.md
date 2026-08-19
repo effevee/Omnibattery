@@ -170,11 +170,12 @@ learn when that energy normally arrives. The timeline priority is:
 3. The existing sinusoidal daylight curve.
 4. A zero timeline when no safe daylight window exists.
 
-The `solar_profile_mode` setting defaults to `shadow`. Shadow mode calculates
-all candidates and reports their source, maturity, coverage and fallback reason,
-but keeps the sinusoidal curve for control. `active` applies the priority above;
-`off` stops capture and comparison. Entries without the setting remain in
-shadow mode.
+Solar-timeline selection is automatic. While the learned profile is immature or
+cannot cover the requested range, the integration uses the sinusoidal curve.
+Once the profile is mature, it is applied automatically using the priority
+above. Users do not need to select a rollout mode. Existing entries that stored
+`shadow` are normalized to this behaviour; `off` is retained only as an
+internal compatibility override.
 
 The profile is normalized to sum to one before the forecast budget is applied.
 It does not predict kWh, repair a bad weather forecast, control the inverter or

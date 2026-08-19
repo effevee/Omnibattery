@@ -174,11 +174,12 @@ usa para aprender cuándo suele llegar esa energía. La prioridad del timeline e
 3. La curva sinusoidal de luz ya existente.
 4. Timeline cero cuando no existe una ventana solar segura.
 
-El ajuste `solar_profile_mode` tiene por defecto `shadow`. Este modo calcula
-los candidatos y publica origen, madurez, cobertura y motivo de fallback, pero
-mantiene la curva sinusoidal para el control. `active` aplica la prioridad
-anterior y `off` detiene captura y comparación. Las entradas sin el ajuste
-permanecen en `shadow`.
+La selección temporal es automática. Mientras el perfil aprendido no es maduro
+o no puede cubrir el rango solicitado, se usa la curva sinusoidal. Cuando el
+perfil alcanza la madurez, se aplica automáticamente siguiendo la prioridad
+anterior. No hace falta seleccionar ningún modo en la configuración. Las
+entradas antiguas que guardaban `shadow` se normalizan a este comportamiento;
+`off` se conserva únicamente como compatibilidad interna.
 
 El perfil se normaliza para sumar uno antes de aplicar el presupuesto de la
 previsión. No predice kWh, no corrige una previsión meteorológica errónea, no

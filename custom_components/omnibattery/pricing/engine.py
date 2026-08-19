@@ -46,6 +46,7 @@ from ..const import (
     T_START_FALLBACK_HOUR,
     FLOOR_HYSTERESIS_PCT,
     CHARGE_EFFICIENCY,
+    normalize_solar_profile_mode,
 )
 from ..solar_forecast import (
     SolarForecastInput,
@@ -2045,6 +2046,9 @@ class PricingManager:
         if horizon_end <= now:
             return None
         try:
+            solar_profile_mode = normalize_solar_profile_mode(
+                getattr(self._controller, "solar_profile_mode", None)
+            )
             forecast = profile.forecast_energy_between(
                 now,
                 horizon_end,
@@ -2088,7 +2092,7 @@ class PricingManager:
             solar_start_dt, solar_end_dt = self._solar_timeline_window(now, tracker)
             solar_profile = getattr(tracker, "solar_profile", None) if tracker is not None else None
             learned_snapshot = None
-            if solar_profile is not None and getattr(self._controller, "solar_profile_mode", "shadow") != "off":
+            if solar_profile is not None and solar_profile_mode != "off":
                 try:
                     future_start = future_end = None
                     if solar_start_dt is not None and solar_end_dt is not None:
@@ -2134,7 +2138,7 @@ class PricingManager:
                 learned_mature=bool(learned_snapshot and learned_snapshot.mature),
                 solar_start=solar_start_dt,
                 solar_end=solar_end_dt,
-                mode=getattr(self._controller, "solar_profile_mode", "shadow"),
+                mode=solar_profile_mode,
             )
             solar = list(timeline.intervals_kwh)
             solar_source = timeline.source
@@ -2273,7 +2277,7 @@ class PricingManager:
                 "solar_profile_generation": learned_snapshot.generation if learned_snapshot else None,
                 "solar_shadow_selected_source": timeline.shadow_selected_source,
                 "curtailment_timeline_mismatch": bool(
-                    getattr(self._controller, "solar_profile_mode", "shadow") == "active"
+                    solar_profile_mode == "active"
                     and solar_source != "sinusoidal"
                 ),
                 "earliest_projected_depletion": (

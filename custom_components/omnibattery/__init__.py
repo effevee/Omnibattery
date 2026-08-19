@@ -45,6 +45,7 @@ from .const import (
     CONF_SOLAR_PROFILE_MODE,
     SOLAR_PROFILE_MODES,
     DEFAULT_SOLAR_PROFILE_MODE,
+    normalize_solar_profile_mode,
     CONF_MAX_CONTRACTED_POWER,
     CONF_THREE_PHASE_ENABLED,
     CONF_PHASE_1_CURRENT_SENSOR,
@@ -681,12 +682,9 @@ class ChargeDischargeController:
         self.solar_forecast_source: str | None = None
         self.solar_forecast_diagnostic_source: str | None = None
         self.solar_production_sensor = config_entry.data.get(CONF_SOLAR_PRODUCTION_SENSOR, None)
-        self.solar_profile_mode = config_entry.data.get(
-            CONF_SOLAR_PROFILE_MODE,
-            DEFAULT_SOLAR_PROFILE_MODE,
+        self.solar_profile_mode = normalize_solar_profile_mode(
+            config_entry.data.get(CONF_SOLAR_PROFILE_MODE, DEFAULT_SOLAR_PROFILE_MODE)
         )
-        if self.solar_profile_mode not in SOLAR_PROFILE_MODES:
-            self.solar_profile_mode = DEFAULT_SOLAR_PROFILE_MODE
         self.max_contracted_power = config_entry.data.get(CONF_MAX_CONTRACTED_POWER, 7000)
 
         # Derived Home Consumption sensor (our own aggregate). Resolved lazily by
@@ -1516,12 +1514,9 @@ class ChargeDischargeController:
             self, "remaining"
         )
         self.solar_production_sensor = self.config_entry.data.get(CONF_SOLAR_PRODUCTION_SENSOR, None)
-        self.solar_profile_mode = self.config_entry.data.get(
-            CONF_SOLAR_PROFILE_MODE,
-            DEFAULT_SOLAR_PROFILE_MODE,
+        self.solar_profile_mode = normalize_solar_profile_mode(
+            self.config_entry.data.get(CONF_SOLAR_PROFILE_MODE, DEFAULT_SOLAR_PROFILE_MODE)
         )
-        if self.solar_profile_mode not in SOLAR_PROFILE_MODES:
-            self.solar_profile_mode = DEFAULT_SOLAR_PROFILE_MODE
         self.predictive_charging_mode = self.config_entry.data.get(CONF_PREDICTIVE_CHARGING_MODE, PREDICTIVE_MODE_TIME_SLOT)
         self.price_sensor = self.config_entry.data.get(CONF_PRICE_SENSOR, None)
         self.price_integration_type = self.config_entry.data.get(CONF_PRICE_INTEGRATION_TYPE, PRICE_INTEGRATION_NORDPOOL)

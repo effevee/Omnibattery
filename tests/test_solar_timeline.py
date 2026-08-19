@@ -100,12 +100,29 @@ def test_mature_profile_is_used_when_provider_is_absent():
         learned_mature=True,
         solar_start=solar_start,
         solar_end=solar_end,
-        mode="active",
     )
 
     assert result.source == "learned_profile"
     assert sum(result.intervals_kwh) == pytest.approx(3.0)
     assert max(result.intervals_kwh) == pytest.approx(3.0)
+
+
+def test_automatic_timeline_falls_back_to_sinusoidal_until_profile_is_mature():
+    solar_start, solar_end = _solar_window()
+    shape = [0.0] * 96
+    shape[48] = 1.0
+
+    result = build_solar_timeline(
+        _horizon(),
+        3.0,
+        learned_shape=shape,
+        learned_mature=False,
+        solar_start=solar_start,
+        solar_end=solar_end,
+    )
+
+    assert result.source == "sinusoidal"
+    assert "profile_not_mature" in (result.fallback_reason or "")
 
 
 def test_shadow_keeps_sinusoidal_control_and_reports_selected_candidate():

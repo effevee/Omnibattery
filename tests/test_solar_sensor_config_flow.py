@@ -93,6 +93,7 @@ async def test_predictive_steps_recognize_global_remaining_forecast():
         }
 
         assert "solar_forecast_sensor" not in fields
+        assert "solar_profile_mode" not in fields
 
 
 async def test_options_flow_reports_production_sensor_unit_error_on_that_field():

@@ -84,6 +84,7 @@ def test_predictive_attributes_omit_redundant_fields():
     assert attrs["daily_consumption_history"] == [("2026-08-16", 7.5)]
     assert attrs["planned_grid_charge_kwh"] == 1.5
     assert attrs["consumption_accumulator_source"] == "daily_home_energy"
+    assert "solar_shadow_selected_source" not in attrs
 
     redundant = {
         "consumption_accumulator_ready",

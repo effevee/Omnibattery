@@ -202,5 +202,6 @@ El sensor binario `predictive_charging_active` expone:
 
 El calendario dinámico consume el mismo timeline solar fechado que Franja
 Horaria. Una curva del proveedor tiene prioridad sobre un perfil local maduro y
-una candidata inválida cae de forma atómica a la siguiente fuente. El modo
-`shadow` registra la comparación sin cambiar slots ni plazos.
+una candidata inválida cae de forma atómica a la siguiente fuente. El perfil
+aprendido se aplica automáticamente cuando es maduro; mientras tanto se usa la
+curva sinusoidal.

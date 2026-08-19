@@ -24,7 +24,7 @@ from homeassistant.util import dt as dt_util
 from ..const import (
     DEFAULT_SOLAR_PROFILE_MODE,
     DOMAIN,
-    SOLAR_PROFILE_MODE_ACTIVE,
+    normalize_solar_profile_mode,
 )
 from ..pricing.solar_timeline import PROGRESS_BIN_COUNT
 from .consumption_profile import (
@@ -468,10 +468,11 @@ class SolarProfileTracker:
         self._runtime_expected_high = False
         self._runtime_explicit_curtailment = False
         self._runtime_curtailment_active = False
-        self._active_mode = (getattr(config_entry, "data", {}) or {}).get(
-            "solar_profile_mode", DEFAULT_SOLAR_PROFILE_MODE
+        self._active_mode = normalize_solar_profile_mode(
+            (getattr(config_entry, "data", {}) or {}).get(
+                "solar_profile_mode", DEFAULT_SOLAR_PROFILE_MODE
+            )
         )
-        self._active_mode = self._active_mode if self._active_mode in ("off", "shadow", "active") else DEFAULT_SOLAR_PROFILE_MODE
 
     # ------------------------------------------------------------------
     # Time, source and persistence
@@ -511,10 +512,9 @@ class SolarProfileTracker:
         return self._active_mode
 
     def refresh_mode(self, mode: str | None = None) -> None:
-        """Refresh the rollout mode without touching captured evidence."""
+        """Refresh the automatic profile mode without touching evidence."""
         candidate = mode or getattr(self._controller, "solar_profile_mode", None)
-        if candidate in ("off", "shadow", "active"):
-            self._active_mode = candidate
+        self._active_mode = normalize_solar_profile_mode(candidate)
 
     def telemetry_source(self) -> str:
         external = bool(getattr(self._controller, "solar_production_sensor", None))

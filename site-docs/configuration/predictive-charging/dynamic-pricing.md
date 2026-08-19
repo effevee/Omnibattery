@@ -224,5 +224,5 @@ The `predictive_charging_active` binary sensor exposes:
 
 The dynamic calendar consumes the same dated solar timeline as Time Slot. A
 provider curve has priority over a mature learned profile, and an invalid
-candidate falls back atomically to the next source. `shadow` mode records the
-comparison without changing selected slots or deadlines.
+candidate falls back atomically to the next source. The learned profile is
+applied automatically once mature; until then the sinusoidal curve is used.

@@ -25,8 +25,12 @@ MADRID = ZoneInfo("Europe/Madrid")
 def test_controller_module_imports_solar_profile_configuration():
     """The controller constructor must have the profile constants at runtime."""
     assert omnibattery.CONF_SOLAR_PROFILE_MODE == "solar_profile_mode"
-    assert omnibattery.DEFAULT_SOLAR_PROFILE_MODE == "shadow"
+    assert omnibattery.DEFAULT_SOLAR_PROFILE_MODE == "active"
     assert omnibattery.SOLAR_PROFILE_MODES == ("off", "shadow", "active")
+    assert omnibattery.normalize_solar_profile_mode(None) == "active"
+    assert omnibattery.normalize_solar_profile_mode("shadow") == "active"
+    assert omnibattery.normalize_solar_profile_mode("active") == "active"
+    assert omnibattery.normalize_solar_profile_mode("off") == "off"
 
 
 def _profile() -> SolarProfileTracker:
@@ -117,6 +121,17 @@ def test_mature_profile_requires_recent_complete_days():
     assert snapshot.eligible_days == 7
     assert sum(snapshot.shape) == pytest.approx(1.0)
     assert all(count == 7 for count in snapshot.bin_contributions)
+
+
+def test_legacy_shadow_mode_is_normalized_to_automatic_profile_mode():
+    profile = _profile()
+
+    profile.refresh_mode("shadow")
+
+    assert profile.mode == "active"
+
+    profile.refresh_mode("off")
+    assert profile.mode == "off"
 
 
 def test_curtailment_context_is_persisted_as_quality_flags():

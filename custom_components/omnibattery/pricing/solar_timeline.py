@@ -401,13 +401,16 @@ def build_solar_timeline(
     learned_mature: bool = False,
     solar_start: datetime | None = None,
     solar_end: datetime | None = None,
-    mode: str = "shadow",
+    mode: str = "active",
 ) -> SolarTimelineResult:
     """Select provider > learned > sinusoidal and normalize exactly once.
 
-    In shadow mode the best candidate is calculated and returned as metadata,
-    while the active curve remains the historical sinusoid.  In off mode no
-    new source is selected and the historical sinusoid is used directly.
+    ``active`` is the normal automatic mode: provider periods, a mature local
+    profile and finally the historical sinusoid are selected in that order.
+    ``shadow`` remains a compatibility mode for callers from the rollout
+    release and continues to report the best candidate without applying it.
+    In ``off`` mode no new source is selected and the historical sinusoid is
+    used directly.
     """
     raw = _safe_budget(remaining_raw_kwh)
     margin = _safe_budget(safety_margin_kwh)
@@ -423,7 +426,7 @@ def build_solar_timeline(
 
     if mode not in ("off", "shadow", "active"):
         reasons.append("invalid_mode")
-        mode = "shadow"
+        mode = "active"
 
     if mode != "off":
         provider, reason = provider_weights(
