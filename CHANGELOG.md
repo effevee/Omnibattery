@@ -1,26 +1,19 @@
 # Changelog
 
-## Unreleased
+## [1.4.0b2] - 2026-08-18
 
 ### Added
 
-- Direct-PV solar temporal profile capture with bounded persistence, quality
-  diagnostics, DST-aware solar-window learning and shadow/active rollout modes.
-- A shared dated solar timeline for Dynamic Pricing and Time Slot with provider,
-  learned-profile, sinusoidal and zero fallbacks; the forecast total remains
-  authoritative and the safety margin is applied once.
-
-### Compatibility
-
-- Legacy whole-day solar forecast sensors are converted once to a remaining
-  budget. Existing entries default to shadow mode, so an immature or invalid
-  profile cannot change control decisions. Real-Time Price remains reactive.
-
-## [1.4.0b2] - 2026-08-18
+- **Direct-PV solar temporal profile capture**: bounded persistence, quality diagnostics, DST-aware solar-window learning and shadow/active rollout modes are now available. Existing whole-day solar forecast sensors are converted once to a remaining budget; existing entries default to shadow mode, so immature or invalid profiles cannot change control decisions. Real-Time Price remains reactive.
+- **Shared dated solar timeline for Dynamic Pricing and Time Slot**: provider, learned-profile, sinusoidal and zero fallbacks distribute the forecast across time while keeping the forecast total authoritative and applying the safety margin only once.
 
 ### Changed
 
 - **Predictive price and time-slot charging now schedules energy before it is needed**: the planner simulates the remaining day in 15-minute intervals. Dynamic Pricing reserves the cheapest eligible capacity before each projected battery-depletion deadline, while fixed Time Slot mode distributes distinct kWh quotas across the configured windows instead of letting the first window consume the complete daily target. Impossible plans expose an explicit shortfall. Guaranteed Minimum SOC can create a pre-solar reserve even on a solar-positive day, with its existing hysteresis, explicit price ceiling and physical safety limits preserved. Real-Time Price remains deliberately reactive because it has no future price calendar from which to select feasible slots.
+
+### Fixed
+
+- **Predictive charging could start and stop repeatedly with three-phase protection enabled**: phase-safety replay now preserves predictive's negative charge sign in `previous_power`, preventing active charging from being misread as discharge and clamped to `0 W`.
 
 ## [1.4.0b1] - 2026-08-17
 

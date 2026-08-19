@@ -7,6 +7,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
+import custom_components.omnibattery as omnibattery
 from custom_components.omnibattery.tracking.consumption_tracker import ConsumptionTracker
 from custom_components.omnibattery.tracking.solar_profile import (
     SOLAR_PROFILE_INTERVAL_COUNT,
@@ -19,6 +20,13 @@ from custom_components.omnibattery.tracking.solar_profile import (
 
 
 MADRID = ZoneInfo("Europe/Madrid")
+
+
+def test_controller_module_imports_solar_profile_configuration():
+    """The controller constructor must have the profile constants at runtime."""
+    assert omnibattery.CONF_SOLAR_PROFILE_MODE == "solar_profile_mode"
+    assert omnibattery.DEFAULT_SOLAR_PROFILE_MODE == "shadow"
+    assert omnibattery.SOLAR_PROFILE_MODES == ("off", "shadow", "active")
 
 
 def _profile() -> SolarProfileTracker:

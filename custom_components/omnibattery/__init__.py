@@ -42,6 +42,9 @@ from .const import (
     CONF_SOLAR_FORECAST_REMAINING_SENSOR,
     CONF_HOUSEHOLD_CONSUMPTION_SENSOR,
     CONF_SOLAR_PRODUCTION_SENSOR,
+    CONF_SOLAR_PROFILE_MODE,
+    SOLAR_PROFILE_MODES,
+    DEFAULT_SOLAR_PROFILE_MODE,
     CONF_MAX_CONTRACTED_POWER,
     CONF_THREE_PHASE_ENABLED,
     CONF_PHASE_1_CURRENT_SENSOR,
@@ -5351,11 +5354,27 @@ class ChargeDischargeController:
                 allocations[False].get(coordinator, 0),
             )
 
-        self.previous_power = (
-            sum(allocations[True].values())
-            - sum(allocations[False].values())
+        self.previous_power = self._signed_power_from_allocations(
+            sum(allocations[True].values()),
+            sum(allocations[False].values()),
         )
         self._phase_safety_pending = False
+
+    def _signed_power_from_allocations(
+        self, charging_power: float, discharging_power: float
+    ) -> float:
+        """Return allocated power using the active controller sign convention.
+
+        Normal control stores charging as positive and discharging as negative.
+        Predictive grid charging uses the opposite sign for its incremental
+        state, so a phase-safety replay must preserve that convention or the
+        next predictive cycle interprets an active charge as a discharge.
+        """
+        if self.grid_charging_active:
+            if charging_power > 0:
+                return -charging_power
+            return -discharging_power
+        return charging_power - discharging_power
 
     def _compute_no_pd_new_power(self, error):
         """No-PD direct-tracking control law: deadbeat 1:1 load tracking.
