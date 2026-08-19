@@ -193,7 +193,7 @@
           "full_charge_voltage_taper_enabled": "When the target is 100%, limit charge to 200 W from 3.48 V max cell voltage. Venus E models stop at 3.60 V to measure imbalance after 60 seconds; Venus A/D with coupled packs keep charging at 200 W until the BMS cuts off.",
           "battery_capacity_kwh": "Nominal usable capacity of the battery pack. Used to calculate stored energy and efficiency from SOC. Sessy requires its actual capacity; for other batteries, leave at 0 if unknown.",
           "battery_phase": "Physical AC phase (L1/L2/L3) where this battery is wired, or Unassigned when it is outside the protected phase layout. An unassigned battery is outside the three-phase envelope and continues normal automatic operation.",
-          "track_mac": "The MAC address is the battery's permanent hardware address: unlike the IP address above, it never changes. Home Assistant uses it to find the battery again and update the IP address by itself.",
+          "track_mac": "The MAC address is the battery's permanent hardware address: unlike the IP address above, it never changes. Home Assistant uses it to find the battery again and update the IP address by itself. Behind a Wi-Fi-to-LAN bridge or a powerline adapter the address you see is the adapter's own, shared with everything behind it, so tracking only works while a single battery sits behind that adapter.",
           "mac": "Permanent hardware address of the interface the battery uses on your network. Take it from your router's device list: a battery can report a different MAC than the one its wired interface actually uses. Filled in automatically when Home Assistant's DHCP cache is available."
         }
       },
@@ -662,6 +662,7 @@
     },
     "abort": {
       "ip_updated": "The battery's IP address changed; the connection was updated automatically.",
+      "candidate_silent": "A new IP address was announced for this battery, but nothing answered there; the connection was left unchanged.",
       "no_tracked_battery": "No configured battery is tracked by this device's MAC address.",
       "already_configured": "This integration is already configured.",
       "reconfigure_successful": "Battery connection settings updated successfully.",
@@ -827,7 +828,7 @@
           "full_charge_voltage_taper_enabled": "When the target is 100%, limit charge to 200 W from 3.48 V max cell voltage. Venus E models stop at 3.60 V to measure imbalance after 60 seconds; Venus A/D with coupled packs keep charging at 200 W until the BMS cuts off.",
           "battery_capacity_kwh": "Nominal usable capacity of the battery pack. Used to calculate stored energy and efficiency from SOC. Sessy requires its actual capacity; for other batteries, leave at 0 if unknown.",
           "battery_phase": "Physical AC phase (L1/L2/L3) where this battery is wired, or Unassigned when it is outside the protected phase layout. An unassigned battery is outside the three-phase envelope and continues normal automatic operation.",
-          "track_mac": "The MAC address is the battery's permanent hardware address: unlike the IP address above, it never changes. Home Assistant uses it to find the battery again and update the IP address by itself.",
+          "track_mac": "The MAC address is the battery's permanent hardware address: unlike the IP address above, it never changes. Home Assistant uses it to find the battery again and update the IP address by itself. Behind a Wi-Fi-to-LAN bridge or a powerline adapter the address you see is the adapter's own, shared with everything behind it, so tracking only works while a single battery sits behind that adapter.",
           "mac": "Permanent hardware address of the interface the battery uses on your network. Take it from your router's device list: a battery can report a different MAC than the one its wired interface actually uses. Filled in automatically when Home Assistant's DHCP cache is available."
         }
       },

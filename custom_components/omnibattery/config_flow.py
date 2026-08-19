@@ -38,6 +38,7 @@ from homeassistant.helpers.selector import (
 )
 
 from .infra.mac_tracking import (
+    CANDIDATE_SILENT,
     CONF_MAC,
     CONF_TRACK_MAC,
     detect_mac,
@@ -1021,14 +1022,21 @@ class MarstekVenusConfigFlow(LegacyDomainMigrationMixin, ConfigFlow, domain=DOMA
         slave_id: int = DEFAULT_SLAVE_ID,
         brand: str = "marstek",
         serial_port: str | None = None,
+        username: str = "",
+        password: str = "",
     ) -> bool:
-        """Test connection to a battery."""
+        """Test connection to a battery.
+
+        ``username`` and ``password`` are only read for Sessy, whose local API
+        can require authentication: probing it with empty credentials returns a
+        refusal that is indistinguishable from an absent device (#289).
+        """
         if brand == "zendure":
             _LOGGER.info("Probing Zendure device at %s:%s", host, port)
             result, _ = await ZendureLocalDriver.probe(host, port)
         elif brand == "sessy":
             _LOGGER.info("Probing Sessy device at %s:%s", host, port)
-            result = await SessyLocalDriver.probe(host, port)
+            result = await SessyLocalDriver.probe(host, port, username, password)
         elif brand == "anker":
             _LOGGER.info("Probing Anker Solarbank at %s:%s slave %s", host, port, slave_id)
             result, _ = await AnkerModbusDriver.probe(host, port, slave_id)
@@ -2796,15 +2804,25 @@ class MarstekVenusConfigFlow(LegacyDomainMigrationMixin, ConfigFlow, domain=DOMA
 
         Reached through the ``registered_devices`` matcher in the manifest, which
         fires for any device whose MAC sits in the device registry. All this step
-        does is turn the lease into a verdict and act on it; every guard lives in
-        ``infra.mac_tracking`` so it can be tested without a running Home
-        Assistant. It always aborts — there is no user-facing flow here.
+        does is turn the lease into a verdict and act on it; the decision guards
+        live in ``infra.mac_tracking`` so they can be tested without a running
+        Home Assistant, and the one guard that needs the network — the candidate
+        has to answer as the battery — runs here. It always aborts; there is no
+        user-facing flow.
         """
         reason = await self._async_apply_dhcp_lease(
             getattr(discovery_info, "macaddress", None),
             getattr(discovery_info, "ip", "") or "",
         )
         return self.async_abort(reason=reason)
+
+    def _dhcp_coordinator(self, entry: ConfigEntry, index: int):
+        """Return the live coordinator of battery *index*, or None if there is none."""
+        data = (self.hass.data.get(DOMAIN) or {}).get(entry.entry_id) or {}
+        coordinators = data.get("coordinators") or []
+        if index >= len(coordinators):
+            return None
+        return coordinators[index]
 
     def _dhcp_reachability_probe(self, entry: ConfigEntry):
         """Return a callable answering whether battery *index* still responds.
@@ -2814,13 +2832,59 @@ class MarstekVenusConfigFlow(LegacyDomainMigrationMixin, ConfigFlow, domain=DOMA
         """
 
         def _is_reachable(index: int) -> bool:
-            data = (self.hass.data.get(DOMAIN) or {}).get(entry.entry_id) or {}
-            coordinators = data.get("coordinators") or []
-            if index >= len(coordinators):
-                return False
-            return bool(getattr(coordinators[index], "is_available", False))
+            coordinator = self._dhcp_coordinator(entry, index)
+            return bool(getattr(coordinator, "is_available", False))
 
         return _is_reachable
+
+    async def _async_probe_battery_endpoint(self, battery: dict, host: str) -> bool:
+        """Open a connection to ``host`` using this battery's stored settings."""
+        return await self._test_connection(
+            host,
+            battery.get(CONF_PORT),
+            battery.get(CONF_BATTERY_VERSION, DEFAULT_VERSION),
+            battery.get(CONF_SLAVE_ID, DEFAULT_SLAVE_ID),
+            brand=battery.get("brand", "marstek"),
+            username=battery.get(CONF_USERNAME, ""),
+            password=battery.get(CONF_PASSWORD, ""),
+        )
+
+    async def _async_probe_candidate(
+        self, entry: ConfigEntry, index: int, battery: dict, host: str
+    ) -> bool:
+        """Require the candidate address to answer before moving a battery onto it.
+
+        A matching MAC only proves that *something* at ``host`` carries the
+        battery's hardware address. A Wi-Fi-to-LAN bridge or a powerline adapter
+        answers for everything behind it, so one MAC can cover both the battery
+        and the bridge's own management address (#289): the lease alone cannot
+        say which one arrived. Talking to the candidate is what tells them apart.
+
+        It also makes the move symmetric with ``STILL_REACHABLE``. That guard
+        refuses to leave an endpoint that answers; without this one, the same
+        code would happily arrive on an endpoint that never did.
+
+        The battery's own coordinator is closed first: a v3 Marstek accepts a
+        single Modbus TCP connection at a time, and ``is_available`` being False
+        does not prove its socket was released. On failure the previous
+        connection is restored, so a lease that leads nowhere leaves the battery
+        exactly as it was. On success it is left closed on purpose, because the
+        entry is reloaded immediately after and rebuilds it on the new address.
+        """
+        coordinator = self._dhcp_coordinator(entry, index)
+        if coordinator is None:
+            return await self._async_probe_battery_endpoint(battery, host)
+
+        async with coordinator.lock:
+            await coordinator.driver.close()
+            # Same settle margins as the options-flow probe: the device needs a
+            # moment to release the slot before it accepts the next connection.
+            await asyncio.sleep(0.5)
+            answered = await self._async_probe_battery_endpoint(battery, host)
+            if not answered:
+                await asyncio.sleep(0.3)
+                await coordinator.driver.connect()
+            return answered
 
     async def _async_apply_dhcp_lease(self, mac: Any, host: str) -> str:
         """Move a battery onto ``host`` when exactly one may safely be moved.
@@ -2828,6 +2892,7 @@ class MarstekVenusConfigFlow(LegacyDomainMigrationMixin, ConfigFlow, domain=DOMA
         Returns the abort reason, which doubles as the log line: every refusal
         names the single guard that fired.
         """
+        refusal = "no_tracked_battery"
         for entry in self.hass.config_entries.async_entries(DOMAIN):
             batteries = [dict(b) for b in entry.data.get("batteries", [])]
             verdict = evaluate_lease(
@@ -2842,6 +2907,19 @@ class MarstekVenusConfigFlow(LegacyDomainMigrationMixin, ConfigFlow, domain=DOMA
                 continue
 
             battery = batteries[verdict.index]
+
+            # Last guard, and the only one that needs the network: the address
+            # has to answer as this battery before anything is written.
+            if not await self._async_probe_candidate(
+                entry, verdict.index, battery, host
+            ):
+                _LOGGER.debug(
+                    "DHCP lease %s -> %s not applied to %s: %s",
+                    mac, host, entry.title, CANDIDATE_SILENT,
+                )
+                refusal = CANDIDATE_SILENT
+                continue
+
             old_host = battery.get(CONF_HOST) or ""
             port = battery.get(CONF_PORT)
             slave = battery.get(CONF_SLAVE_ID, DEFAULT_SLAVE_ID)
@@ -2861,7 +2939,7 @@ class MarstekVenusConfigFlow(LegacyDomainMigrationMixin, ConfigFlow, domain=DOMA
             )
             await self.hass.config_entries.async_reload(entry.entry_id)
             return "ip_updated"
-        return "no_tracked_battery"
+        return refusal
 
 
 class OptionsFlowHandler(OptionsFlow):
