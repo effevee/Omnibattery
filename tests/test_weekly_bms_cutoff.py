@@ -29,9 +29,10 @@ class _Coord:
     """Identity-hashable coordinator stand-in (name-keyed in the counter dict)."""
 
     def __init__(self, name, *, soc, power, commanded, vmax=_IN_ZONE, inv=_STANDBY,
-                 battery_version="v2"):
+                 battery_version="v2", brand=None):
         self.name = name
         self.battery_version = battery_version
+        self.brand = brand
         self.commanded_charge_power = commanded
         self.data = {
             "battery_soc": soc,
@@ -71,6 +72,25 @@ def test_commanded_refusal_confirms_cutoff():
     for _ in range(_BMS_CUTOFF_REQUIRED_CYCLES):
         m.tick_bms_cutoff()
     assert m._bms_cutoff_counts["bat"] >= _BMS_CUTOFF_REQUIRED_CYCLES
+    assert m.is_battery_full(coord) is True
+
+
+def test_zendure_commanded_refusal_confirms_without_inverter_state():
+    """Zendure has no inverter_state, but its active command still gates a cutoff."""
+    coord = _Coord(
+        "zendure",
+        soc=99,
+        power=0,
+        commanded=200,
+        inv=None,
+        brand="zendure",
+    )
+    m = _mgr(coord)
+
+    for _ in range(_BMS_CUTOFF_REQUIRED_CYCLES):
+        m.tick_bms_cutoff()
+
+    assert m._bms_cutoff_counts["zendure"] >= _BMS_CUTOFF_REQUIRED_CYCLES
     assert m.is_battery_full(coord) is True
 
 

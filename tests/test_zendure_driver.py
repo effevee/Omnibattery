@@ -556,6 +556,16 @@ async def test_write_control_maps_key_to_property():
     assert props == {"socSet": 900, "smartMode": 0}
 
 
+async def test_set_charge_cutoff_scales_restore_value():
+    sess = _session()
+
+    ok = await _driver(session=sess).set_charge_cutoff(95)
+
+    assert ok is True
+    props = sess.post.call_args.kwargs["json"]["properties"]
+    assert props == {"socSet": 950, "smartMode": 0}
+
+
 async def test_write_control_grid_off_mode_posts_raw_enum():
     sess = _session()
     ok = await _driver(session=sess).write_control("grid_off_mode", 2)
