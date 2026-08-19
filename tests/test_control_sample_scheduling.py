@@ -13,6 +13,7 @@ from types import SimpleNamespace
 from homeassistant.core import State
 
 from custom_components.omnibattery import ChargeDischargeController
+from custom_components.omnibattery.const import PREDICTIVE_MODE_DYNAMIC_PRICING
 
 
 class _HashableNamespace(SimpleNamespace):
@@ -338,6 +339,7 @@ def _predictive_controller(state_holder, writes):
         _max_sensor_stale_s=65.0,
         _grid_charging_initialized=True,
         grid_charging_active=True,
+        predictive_charging_mode=PREDICTIVE_MODE_DYNAMIC_PRICING,
         first_execution=False,
         _predictive_charge_target_soc={coordinator: 80.0},
         _get_available_batteries=lambda is_charging: [coordinator],
@@ -371,6 +373,9 @@ def _predictive_controller(state_holder, writes):
         controller, ChargeDischargeController
     )
     controller._handle_predictive_grid_charging = ChargeDischargeController._handle_predictive_grid_charging.__get__(
+        controller, ChargeDischargeController
+    )
+    controller._suspend_predictive_grid_charging_for_demand = ChargeDischargeController._suspend_predictive_grid_charging_for_demand.__get__(
         controller, ChargeDischargeController
     )
     return controller
@@ -407,3 +412,25 @@ def test_predictive_pd_does_not_integrate_identical_publications():
     )
     asyncio.run(controller._handle_predictive_grid_charging())
     assert controller.previous_power != first_power
+
+
+def test_predictive_demand_spike_yields_to_normal_pd():
+    first_report = datetime.now(timezone.utc)
+    state_holder = {"state": _state(3000, first_report)}
+    writes = []
+    controller = _predictive_controller(state_holder, writes)
+
+    asyncio.run(controller._handle_predictive_grid_charging())
+
+    assert controller.grid_charging_active is False
+    assert controller._predictive_charge_suspended_for_demand is True
+    assert controller._grid_charging_initialized is False
+    assert controller.first_execution is False
+    assert controller.previous_power == 0
+    assert [(charge, discharge) for _, charge, discharge in writes] == [(0, 0)]
+
+    # The controller-side guard prevents the active slot from retrying the
+    # predictive command before PricingManager observes recovery headroom.
+    write_count = len(writes)
+    asyncio.run(controller._handle_predictive_grid_charging())
+    assert len(writes) == write_count

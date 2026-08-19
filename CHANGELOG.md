@@ -13,6 +13,7 @@
 
 ### Fixed
 
+- **Dynamic Pricing could clamp discharge demand to 0 W during a load spike** (#299): active predictive slots now suspend import charging and yield to normal PD, preserving the slot plan and using a 200 W recovery hysteresis before resuming predictive charging.
 - **Predictive charging could start and stop repeatedly with three-phase protection enabled**: phase-safety replay now preserves predictive's negative charge sign in `previous_power`, preventing active charging from being misread as discharge and clamped to `0 W`.
 
 ## [1.4.0b1] - 2026-08-17

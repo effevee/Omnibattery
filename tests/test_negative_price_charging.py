@@ -625,6 +625,61 @@ def _prepare_runtime_manager(
     return manager
 
 
+def test_demand_handoff_preserves_slot_and_reactivates_after_hysteresis():
+    battery = _Battery("b1", 30, 10)
+    ctrl = _controller([battery])
+    now = datetime.now()
+    slot = PriceSlot(now - timedelta(minutes=10), now + timedelta(minutes=50), 0.10)
+    state_holder = {"state": SimpleNamespace(state="1900")}
+    ctrl._dynamic_pricing_schedule = _schedule(
+        [slot], {slot: SLOT_PURPOSE_DEFICIT}, deficit_needed=True
+    )
+    ctrl._dynamic_pricing_evaluated_date = now.date()
+    ctrl._dp_evening_reevaluated_date = now.date()
+    ctrl._current_price_slot_active = True
+    ctrl._active_dynamic_slot_purpose = SLOT_PURPOSE_DEFICIT
+    ctrl._predictive_charge_suspended_for_demand = True
+    ctrl.grid_charging_active = False
+    ctrl.consumption_sensor = "sensor.grid"
+    ctrl._apply_meter_transform = lambda state: float(state.state)
+    ctrl.deadband = 40.0
+    ctrl.max_contracted_power = 2000.0
+
+    calls = []
+
+    async def handle_predictive():
+        calls.append("predictive")
+
+    ctrl._handle_predictive_grid_charging = handle_predictive
+    manager = PricingManager(
+        SimpleNamespace(
+            states=SimpleNamespace(get=lambda _entity_id: state_holder["state"])
+        ),
+        ctrl,
+    )
+    manager._maybe_refresh_service_prices = _noop
+    manager._check_dp_pre_slot_reevaluation = _noop
+    manager._is_evening_reevaluation_time = lambda: False
+    manager._is_dp_soc_drop_reeval = lambda: False
+
+    # 1900 W is below the 2000 W contract but still inside the 200 W resume
+    # margin, so normal PD keeps ownership without churning the slot.
+    asyncio.run(manager.handle_dynamic_pricing_predictive_charging())
+    assert ctrl._predictive_charge_suspended_for_demand is True
+    assert ctrl._current_price_slot_active is True
+    assert ctrl.grid_charging_active is False
+    assert calls == []
+
+    # Once import falls below the hysteresis threshold, the same slot resumes
+    # predictive charging without being discarded or rebuilt.
+    state_holder["state"] = SimpleNamespace(state="1700")
+    asyncio.run(manager.handle_dynamic_pricing_predictive_charging())
+    assert ctrl._predictive_charge_suspended_for_demand is False
+    assert ctrl._current_price_slot_active is True
+    assert ctrl.grid_charging_active is True
+    assert calls == ["predictive"]
+
+
 def test_reaching_target_stops_inside_slot_prunes_future_and_does_not_resume():
     battery = _Battery("b1", 80, 10, max_soc=80)
     ctrl = _controller([battery])

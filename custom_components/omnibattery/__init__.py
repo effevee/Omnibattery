@@ -723,6 +723,10 @@ class ChargeDischargeController:
         self.last_evaluation_soc = None    # SOC at last check
         self.predictive_charging_overridden = config_entry.data.get(CONF_PREDICTIVE_CHARGING_OVERRIDDEN, False)
         self._grid_charging_initialized = False  # Flag for initialization
+        # Dynamic-price predictive charging temporarily gives control back to PD
+        # when a demand spike requires discharge. The slot remains active so its
+        # energy plan is preserved while this flag prevents an immediate retry.
+        self._predictive_charge_suspended_for_demand = False
         self._last_decision_data = None  # Store last decision for diagnostics
         self._slot_entry_time = None  # When we first entered the time slot (for 5-min delay)
         self._predictive_charge_target_soc: Optional[dict] = None  # Per-battery grid-only SOC targets {coordinator: target_%}
@@ -3828,6 +3832,44 @@ class ChargeDischargeController:
             )
         return combined
 
+    async def _suspend_predictive_grid_charging_for_demand(
+        self, *, grid_power: float, target_power: float
+    ) -> None:
+        """Yield the current dynamic-price slot to normal PD for a demand step."""
+        already_suspended = getattr(
+            self, "_predictive_charge_suspended_for_demand", False
+        )
+        self._predictive_charge_suspended_for_demand = True
+        self.grid_charging_active = False
+        self._grid_charging_initialized = False
+        self.previous_power = 0
+        self.previous_error = 0
+        self.derivative_filtered = 0.0
+        # Keep normal PD in its incremental path so its configured ramp limit
+        # applies to the first discharge command after the handoff.
+        self.first_execution = False
+        self.error_integral = 0.0
+        self.last_output_sign = 0
+        self.sign_changes = 0
+        self._active_discharge_batteries = []
+        self._active_charge_batteries = []
+
+        if not already_suspended:
+            _LOGGER.info(
+                "Predictive: demand %.1fW exceeds charge target %.1fW; "
+                "suspending predictive charging and yielding to normal PD",
+                grid_power,
+                target_power,
+            )
+
+        # Remove the predictive charging command before normal PD takes over in
+        # the same control cycle. This also leaves a safe idle state if PD is
+        # subsequently blocked by a separate safety or operation rule.
+        for coordinator in self.coordinators:
+            if ChargeDischargeController._is_battery_manual_owned(coordinator):
+                continue
+            await self._set_battery_power(coordinator, 0, 0)
+
     async def _handle_predictive_grid_charging(self):
         """
         Handle predictive grid charging mode.
@@ -3835,6 +3877,9 @@ class ChargeDischargeController:
         Target: Keep consumption/export sensor at max_contracted_power.
         If home consumption increases, reduce battery charging to avoid exceeding ICP.
         """
+        if getattr(self, "_predictive_charge_suspended_for_demand", False):
+            return
+
         if self.is_charge_blocked():
             _LOGGER.debug(
                 "Predictive charging paused by charge blockers: %s",
@@ -3990,13 +4035,29 @@ class ChargeDischargeController:
         else:
             new_power = new_power_raw
         
+        # A positive predictive command means the grid demand now requires
+        # discharge. Predictive grid charging cannot own that direction: hand
+        # the active slot to normal PD instead of clamping the request to idle.
+        if (
+            new_power > 0
+            and self.predictive_charging_mode == PREDICTIVE_MODE_DYNAMIC_PRICING
+        ):
+            await self._suspend_predictive_grid_charging_for_demand(
+                grid_power=sensor_filtered,
+                target_power=target_power,
+            )
+            return
+
         # Clamp to battery limits (negative = charging)
         if new_power < -max_battery_charge:
             _LOGGER.info("Predictive: Clamping charge to max available: %dW", max_battery_charge)
             new_power = -max_battery_charge
         elif new_power > 0:
-            # Should never charge positively (discharge) in this mode
-            _LOGGER.warning("Predictive: Negative power detected (discharge), clamping to 0W")
+            _LOGGER.debug(
+                "Predictive: discharge request %.1fW is outside charging mode; "
+                "clamping charge output to 0W",
+                new_power,
+            )
             new_power = 0
         
         _LOGGER.info(
