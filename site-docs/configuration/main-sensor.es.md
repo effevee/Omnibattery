@@ -41,7 +41,21 @@ Déjalo desactivado si no estás seguro.
 
 La potencia contratada de tu conexión de red, en **W** (por defecto `7000`).
 
-La integración limita la carga de las baterías para que la **importación de red proyectada nunca supere este límite**, evitando que salte el diferencial. Aplica en **todos los modos** — control normal de setpoint, un objetivo/offset positivo, balance neto horario y carga predictiva desde red — no solo al cargar desde la red de forma programada. Solo limita la carga; nunca fuerza una descarga.
+La integración limita la carga de las baterías para que la **importación de red proyectada nunca supere este límite**, evitando que salte el diferencial. Aplica en **todos los modos** — control normal de setpoint, un objetivo/offset positivo, balance neto horario y carga predictiva desde red — no solo al cargar desde la red de forma programada.
+
+`max_contracted_power` protege la instalación de dos formas complementarias:
+
+- Es un techo estricto para la carga de baterías en todos los modos.
+- Mientras una franja de carga predictiva mantiene el control, también es el
+  límite de importación de emergencia. Omnibattery detiene primero la carga y
+  espera telemetría estabilizada; si la importación física continúa por encima,
+  descarga únicamente el exceso confirmado.
+
+Esta protección de emergencia **no** necesita que Protección de Capacidad/Peak
+Shaving esté activado. Peak Shaving es una estrategia de reserva opcional e
+independiente, con su propio límite configurable. Fuera de una franja de carga
+predictiva, el PD normal sigue regulando hacia el objetivo de red configurado.
+Consulta [Consumo del hogar durante la carga predictiva](predictive-charging/index.es.md#consumo-del-hogar-durante-una-franja-de-carga).
 
 ---
 
@@ -79,6 +93,20 @@ Sensor de potencia de producción fotovoltaica (W o kW) en tiempo real de un inv
 **Consumo del hogar = Potencia de red + Potencia AC de baterías + Producción solar**
 
 Es el valor que muestra el diagrama de flujo de energía y el sensor `sensor.marstek_venus_system_home_consumption`, y alimenta el historial de 7 días que usan la carga predictiva y el retraso de carga. La acumulación cubre todo el día local, incluidas las franjas de carga predictiva; la potencia AC negativa de la batería cancela la energía de red usada para cargarla. El contador se reinicia a medianoche y sobrevive reinicios de HA.
+
+La telemetría de red, solar y baterías es independiente y puede no representar
+exactamente el mismo instante. Justo después de cambiar una orden de carga, su
+combinación temporal puede producir un balance doméstico negativo imposible o
+anormalmente pequeño. El sensor de Consumo del Hogar conserva el último valor
+coherente durante un máximo de **15 segundos**; si las entradas siguen sin
+cuadrar, muestra `unknown` en lugar de publicar un `0 W` falso. El acumulador
+físico de energía diaria aplica su propia validación equivalente e interrumpe el
+intervalo de integración en vez de sumar un cero inventado. Tampoco aplica las
+exclusiones de cargas externas predictivas al total físico del panel.
+
+Una telemetría rápida y coherente de red y batería acorta estas transiciones. Un
+valor retenido o `unknown` breve durante un cambio de dirección del inversor es,
+por tanto, una protección de calidad de datos, no una orden para descargar.
 
 ### Total de previsión frente al timeline solar
 

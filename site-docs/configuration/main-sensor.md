@@ -41,7 +41,21 @@ Leave it disabled if you are unsure.
 
 The contracted power of your grid connection, in **W** (default `7000`).
 
-The integration caps battery charging so that **projected grid import never exceeds this limit**, preventing the main breaker from tripping. This applies in **every mode** — normal setpoint control, a positive target/offset, hourly net balance and predictive grid charging — not only while charging from the grid on a schedule. It only limits charging; it never forces a discharge.
+The integration caps battery charging so that **projected grid import never exceeds this limit**, preventing the main breaker from tripping. This applies in **every mode** — normal setpoint control, a positive target/offset, hourly net balance and predictive grid charging — not only while charging from the grid on a schedule.
+
+`max_contracted_power` protects the installation in two complementary ways:
+
+- It is a hard ceiling for battery charging in every mode.
+- While a predictive grid-charging slot owns the batteries, it is also the
+  emergency import limit. Omnibattery first stops charging and waits for settled
+  telemetry; if physical import still exceeds the limit, it discharges only the
+  confirmed excess.
+
+This emergency protection does **not** require Capacity Protection/Peak Shaving
+to be enabled. Peak Shaving is a separate optional reserve strategy with its own
+configurable limit. Outside a predictive charging slot, normal PD continues to
+regulate towards its configured grid target. See
+[Household demand during predictive charging](predictive-charging/index.md#household-demand-during-a-charging-slot).
 
 ---
 
@@ -79,6 +93,20 @@ There is **no household consumption sensor field** in setup — the integration 
 **Home consumption = Grid power + Battery AC power + Solar power**
 
 This is the value shown by the energy-flow diagram and the `sensor.marstek_venus_system_home_consumption` sensor, and it feeds the 7-day history used by predictive charging and charge delay. Accumulation runs for the full local day, including predictive charging windows; the battery's negative AC power cancels grid energy used to charge it. The counter resets at midnight and survives HA restarts.
+
+Grid, solar and battery telemetry are independent and may not describe exactly
+the same instant. Immediately after a charge command changes, their temporary
+combination can produce an impossible negative or implausibly small home
+balance. The live Home Consumption sensor keeps its last coherent value for up
+to **15 seconds**; if the inputs still disagree, it reports `unknown` instead of
+publishing a false `0 W`. The physical daily-energy accumulator applies its own
+equivalent validation and breaks the integration interval rather than adding a
+fabricated zero. It does not apply predictive external-load exclusions to the
+physical dashboard total.
+
+Fast, coherent grid and battery telemetry shortens these transitions. A brief
+held or `unknown` value during an inverter direction change is therefore a
+data-quality safeguard, not a request for the battery to discharge.
 
 ### Forecast total versus solar timeline
 

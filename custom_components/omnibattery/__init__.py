@@ -723,10 +723,17 @@ class ChargeDischargeController:
         self.last_evaluation_soc = None    # SOC at last check
         self.predictive_charging_overridden = config_entry.data.get(CONF_PREDICTIVE_CHARGING_OVERRIDDEN, False)
         self._grid_charging_initialized = False  # Flag for initialization
-        # Dynamic-price predictive charging temporarily gives control back to PD
-        # when a demand spike requires discharge. The slot remains active so its
-        # energy plan is preserved while this flag prevents an immediate retry.
+        # A predictive slot owns the automatic batteries for its whole lifetime.
+        # A demand spike therefore moves it through an idle/settling/protection
+        # state instead of yielding to normal PD (whose first sample can still
+        # include the just-stopped grid charge).
         self._predictive_charge_suspended_for_demand = False
+        self._predictive_demand_state = "charging"
+        self._predictive_demand_fresh_samples = 0
+        self._predictive_demand_recovery_samples = 0
+        self._predictive_demand_transition_monotonic = 0.0
+        self._predictive_protection_command_w = 0.0
+        self._predictive_protection_reason = None
         self._last_decision_data = None  # Store last decision for diagnostics
         self._slot_entry_time = None  # When we first entered the time slot (for 5-min delay)
         self._predictive_charge_target_soc: Optional[dict] = None  # Per-battery grid-only SOC targets {coordinator: target_%}
@@ -1852,13 +1859,19 @@ class ChargeDischargeController:
             return True
         return bool(coordinator is not None and self._battery_charge_blockers.get(coordinator))
 
-    def is_discharge_blocked(self, coordinator=None) -> bool:
+    def is_discharge_blocked(self, coordinator=None, *, ignore_economic: bool = False) -> bool:
         """Return True if discharge is blocked globally or for the given battery."""
-        if self._global_discharge_blockers:
+        economic = {"price_discharge", "curtailment_negative_window"}
+        global_blockers = self._global_discharge_blockers
+        if ignore_economic:
+            global_blockers = {k: v for k, v in global_blockers.items() if k not in economic}
+        if global_blockers:
             return True
         if coordinator is None:
             return False
         blockers = self._battery_discharge_blockers.get(coordinator, {})
+        if ignore_economic:
+            blockers = {k: v for k, v in blockers.items() if k not in economic}
         if self._capacity_protection_overrides_curtailment():
             return bool(
                 set(blockers) - {"curtailment_negative_window"}
@@ -2495,7 +2508,13 @@ class ChargeDischargeController:
             for coordinator in self.coordinators
         )
 
-    def _get_available_batteries(self, is_charging: bool, include_operation_blocks: bool = True) -> list:
+    def _get_available_batteries(
+        self,
+        is_charging: bool,
+        include_operation_blocks: bool = True,
+        *,
+        protection_discharge: bool = False,
+    ) -> list:
         """Get list of available batteries for the current operation.
         
         For charging with hysteresis:
@@ -2557,13 +2576,19 @@ class ChargeDischargeController:
                     )
                     continue
 
-            if include_operation_blocks and not is_charging and self.is_discharge_blocked(coordinator):
-                _LOGGER.debug(
-                    "%s: Skipping discharge - blocked by %s",
-                    coordinator.name,
-                    ", ".join(self.get_discharge_blockers(coordinator).keys()),
+            if include_operation_blocks and not is_charging:
+                discharge_blocked = (
+                    self.is_discharge_blocked(coordinator, ignore_economic=True)
+                    if protection_discharge
+                    else self.is_discharge_blocked(coordinator)
                 )
-                continue
+                if discharge_blocked:
+                    _LOGGER.debug(
+                        "%s: Skipping discharge - blocked by %s",
+                        coordinator.name,
+                        ", ".join(self.get_discharge_blockers(coordinator).keys()),
+                    )
+                    continue
 
             current_soc = coordinator.data.get("battery_soc", 0)
             
@@ -2954,9 +2979,20 @@ class ChargeDischargeController:
         # solar surplus and the controller starts a short discharge/stop loop.
         active_target = self.compute_active_target_excluding("capacity_protection")
         original_target = active_target
+        # Reconstruct from AC telemetry co-incident with the grid meter.  A
+        # command can lag by several seconds (and predictive historically uses
+        # the inverse sign), so ``previous_power`` is a last-resort fallback,
+        # never the preferred source for a peak-safety decision.
+        measured_power = None
+        measured_reader = getattr(self, "_measured_battery_power", None)
+        if callable(measured_reader):
+            measured_power = measured_reader()
+        battery_power = (
+            measured_power if measured_power is not None else self.previous_power
+        )
         estimated_house_load = (
             sensor_actual + self._excluded_included_adjustment
-        ) - self.previous_power
+        ) - battery_power
         self._capacity_protection_status["excluded_peak_excess"] = 0
 
         if avg_soc < self.capacity_protection_soc_threshold:
@@ -3835,18 +3871,33 @@ class ChargeDischargeController:
     async def _suspend_predictive_grid_charging_for_demand(
         self, *, grid_power: float, target_power: float
     ) -> None:
-        """Yield the current dynamic-price slot to normal PD for a demand step."""
+        """Stop predictive charging before considering any protective discharge.
+
+        The price slot deliberately keeps ownership.  In particular, do not let
+        the ordinary PD controller use a meter sample which still contains the
+        previous charge command as household demand.
+        """
         already_suspended = getattr(
             self, "_predictive_charge_suspended_for_demand", False
         )
         self._predictive_charge_suspended_for_demand = True
-        self.grid_charging_active = False
+        self._predictive_demand_state = "settling_after_charge"
+        self._predictive_demand_fresh_samples = 0
+        self._predictive_demand_recovery_samples = 0
+        if not already_suspended:
+            self._predictive_demand_transition_monotonic = time.monotonic()
+        self._predictive_protection_command_w = 0.0
+        self._predictive_protection_reason = None
+        # Keep the predictive mode owning this slot.  grid_charging_active is
+        # historical naming; it means predictive slot active, not necessarily a
+        # physical charge command.
+        self.grid_charging_active = True
         self._grid_charging_initialized = False
         self.previous_power = 0
         self.previous_error = 0
         self.derivative_filtered = 0.0
-        # Keep normal PD in its incremental path so its configured ramp limit
-        # applies to the first discharge command after the handoff.
+        # Do not use the predictive controller's initialization sentinel while
+        # the slot is deliberately idle.
         self.first_execution = False
         self.error_integral = 0.0
         self.last_output_sign = 0
@@ -3857,18 +3908,227 @@ class ChargeDischargeController:
         if not already_suspended:
             _LOGGER.info(
                 "Predictive: demand %.1fW exceeds charge target %.1fW; "
-                "suspending predictive charging and yielding to normal PD",
+                "stopping predictive charge and waiting for meter settling",
                 grid_power,
                 target_power,
             )
 
-        # Remove the predictive charging command before normal PD takes over in
-        # the same control cycle. This also leaves a safe idle state if PD is
-        # subsequently blocked by a separate safety or operation rule.
+        # Remove the predictive charging command before any protective decision.
+        # This leaves a safe idle state while the meter and inverter settle.
         for coordinator in self.coordinators:
             if ChargeDischargeController._is_battery_manual_owned(coordinator):
                 continue
             await self._set_battery_power(coordinator, 0, 0)
+
+    def _predictive_charge_ceiling(self) -> float:
+        """Return the import ceiling used while a predictive slot is active."""
+        ceiling = float(self.max_contracted_power)
+        if self.capacity_protection_enabled and self.capacity_protection_limit > 0:
+            ceiling = min(ceiling, float(self.capacity_protection_limit))
+        return ceiling
+
+    def _predictive_demand_settle_window_s(self) -> float:
+        """Return the minimum wait before post-command telemetry is trusted."""
+        slowest_readback_s = 0.0
+        for coordinator in self.coordinators:
+            capabilities = getattr(coordinator, "capabilities", None)
+            if capabilities is None:
+                continue
+            latency_s = getattr(capabilities, "readback_latency_s", None)
+            if latency_s is None:
+                latency_s = getattr(capabilities, "actuator_latency_s", 0.0)
+            try:
+                slowest_readback_s = max(slowest_readback_s, float(latency_s))
+            except (TypeError, ValueError):
+                continue
+        return max(PD_ZERO_CROSS_MIN_HOLD_S, 2.0 * slowest_readback_s)
+
+    def _reset_predictive_demand_runtime(self) -> None:
+        """Clear transient predictive demand protection at a slot boundary."""
+        self._predictive_charge_suspended_for_demand = False
+        self._predictive_demand_state = "charging"
+        self._predictive_demand_fresh_samples = 0
+        self._predictive_demand_recovery_samples = 0
+        self._predictive_demand_transition_monotonic = 0.0
+        self._predictive_protection_command_w = 0.0
+        self._predictive_protection_reason = None
+        status = getattr(self, "_capacity_protection_status", None)
+        if isinstance(status, dict) and status.get("action") in {
+            "peak_shaving", "emergency", "settling", "idle"
+        }:
+            self._capacity_protection_active = False
+            status.update({"active": False, "action": "idle"})
+
+    def _set_predictive_protection_status(self, active: bool, action: str, **details) -> None:
+        """Publish a non-stale diagnostic status for predictive protection."""
+        self._capacity_protection_active = active
+        status = getattr(self, "_capacity_protection_status", None)
+        if isinstance(status, dict):
+            status.update({"active": active, "action": action, **details})
+
+    async def _handle_predictive_demand_protection(
+        self, *, sensor_filtered: float, has_new_control_sample: bool,
+        allow_charge_resume: bool = True,
+        sensor_within_stale_tolerance: bool = True,
+    ) -> None:
+        """Run the idle -> settle -> peak/emergency state for a predictive slot.
+
+        Commands and measured AC power use the normal controller convention
+        (+charge / -discharge).  The legacy predictive incremental state uses
+        the inverse convention, so it is reset to zero at the boundary and is
+        never used to infer household load here.
+        """
+        state = getattr(self, "_predictive_demand_state", "settling_after_charge")
+        measured = self._measured_battery_power()
+        settled_w = max(float(self.deadband), 50.0)
+
+        # A watchdog tick must never reinterpret an old grid value after the
+        # battery command has changed.  In particular, subtracting a newly
+        # ramped discharge from an old grid sample would manufacture additional
+        # household load and ratchet the protection command upward.
+        if not sensor_within_stale_tolerance:
+            if state in {"peak_shaving", "emergency_discharge"}:
+                for coordinator in self.coordinators:
+                    if not ChargeDischargeController._is_battery_manual_owned(coordinator):
+                        await self._set_battery_power(coordinator, 0, 0)
+                self._predictive_demand_state = "settling_after_discharge"
+                self._predictive_demand_transition_monotonic = time.monotonic()
+                self._predictive_demand_fresh_samples = 0
+                self._predictive_protection_command_w = 0.0
+                self.previous_power = 0
+            self._set_predictive_protection_status(False, "settling")
+            return
+
+        if state in {"settling_after_charge", "settling_after_discharge"}:
+            # Some drivers do not expose AC telemetry. Two fresh grid samples
+            # after the latency window are still safer than immediately
+            # reversing a charge command.
+            physically_idle = measured is None or abs(measured) <= settled_w
+            if not physically_idle:
+                # Publications observed while the old command is still visible
+                # do not count as post-idle evidence.
+                self._predictive_demand_fresh_samples = 0
+            transition_at = getattr(
+                self, "_predictive_demand_transition_monotonic", 0.0
+            )
+            settle_elapsed_s = time.monotonic() - transition_at
+            latency_elapsed = (
+                transition_at > 0.0
+                and settle_elapsed_s >= self._predictive_demand_settle_window_s()
+            )
+            if physically_idle and latency_elapsed and has_new_control_sample:
+                self._predictive_demand_fresh_samples += 1
+            if (
+                self._predictive_demand_fresh_samples < 2
+                or not physically_idle
+                or not latency_elapsed
+            ):
+                self.previous_power = 0
+                self._set_predictive_protection_status(False, "settling")
+                return
+            state = "holding_idle"
+            self._predictive_demand_state = state
+            self._predictive_demand_fresh_samples = 0
+
+        # Within the normal stale tolerance an unchanged watchdog sample keeps
+        # the current idle/protection command, but cannot recalculate it. A real
+        # meter publication (even with the same numeric value) is required.
+        if not has_new_control_sample:
+            return
+
+        ceiling = self._predictive_charge_ceiling()
+        physical_base_load = (
+            sensor_filtered - measured if measured is not None else sensor_filtered
+        )
+        # Peak Shaving's optional excluded-device switch retains its existing
+        # meaning during a predictive slot.  Contracted-power emergency is
+        # always based on physical import because the meter/ICP sees all loads.
+        excluded_adjustment = float(
+            getattr(self, "_excluded_included_adjustment", 0.0) or 0.0
+        )
+        base_load = (
+            physical_base_load
+            if getattr(self, "capacity_protection_excluded_devices", False)
+            else physical_base_load - excluded_adjustment
+        )
+        trigger = max(float(self.deadband), 50.0)
+        emergency = physical_base_load > float(self.max_contracted_power) + trigger
+        peak = self.capacity_protection_enabled and base_load > ceiling + trigger
+        if emergency or peak:
+            # Emergency is always physical: excluded-device policy may reduce
+            # ordinary Peak Shaving, but never the import seen by the ICP.
+            peak_requested = max(0.0, base_load - ceiling) if peak else 0.0
+            emergency_requested = (
+                max(0.0, physical_base_load - float(self.max_contracted_power))
+                if emergency else 0.0
+            )
+            requested = max(peak_requested, emergency_requested)
+            available = self._get_available_batteries(
+                is_charging=False, protection_discharge=True
+            )
+            capacity = self._effective_system_capacity(available, is_charging=False)
+            requested = min(requested, capacity)
+            selected = self._power_distribution._select_batteries_for_operation(
+                requested, available, is_charging=False
+            )
+            allocation = self._power_distribution._distribute_power_by_limits(
+                requested, selected, is_charging=False
+            )
+            allocated = sum(allocation.values())
+            for coordinator in self.coordinators:
+                power = allocation.get(coordinator, 0)
+                await self._set_battery_power(
+                    coordinator, 0, power,
+                    # Safety protection may only bypass economic policies.
+                    ignore_discharge_blockers={
+                        "price_discharge", "curtailment_negative_window"
+                    },
+                )
+            self._predictive_protection_command_w = allocated
+            self._predictive_protection_reason = "emergency" if emergency else "peak_shaving"
+            self._predictive_demand_state = (
+                "emergency_discharge" if emergency else "peak_shaving"
+            )
+            self.previous_power = 0
+            self._set_predictive_protection_status(
+                bool(peak or emergency), self._predictive_protection_reason,
+                estimated_house_load=round(
+                    physical_base_load if emergency else base_load
+                ),
+                peak_limit=ceiling,
+            )
+            return
+
+        # Do not restart on a single near-limit reading.  First command idle,
+        # wait for its measured effect, then require two headroom samples.
+        if state in {"peak_shaving", "emergency_discharge"}:
+            for coordinator in self.coordinators:
+                if not ChargeDischargeController._is_battery_manual_owned(coordinator):
+                    await self._set_battery_power(coordinator, 0, 0)
+            self._predictive_demand_state = "settling_after_discharge"
+            self._predictive_demand_transition_monotonic = time.monotonic()
+            self._predictive_demand_fresh_samples = 0
+            self._predictive_protection_command_w = 0.0
+            self.previous_power = 0
+            self._set_predictive_protection_status(False, "settling")
+            return
+
+        resume_threshold = ceiling - max(200.0, 2.0 * float(self.deadband))
+        if sensor_filtered <= resume_threshold and has_new_control_sample:
+            self._predictive_demand_recovery_samples += 1
+        elif has_new_control_sample:
+            self._predictive_demand_recovery_samples = 0
+        if not allow_charge_resume:
+            self._set_predictive_protection_status(False, "idle")
+            return
+        if self._predictive_demand_recovery_samples >= 2:
+            self._reset_predictive_demand_runtime()
+            self._grid_charging_initialized = False
+            self.previous_power = 0
+            self.previous_error = 0
+            self.derivative_filtered = 0.0
+            self.first_execution = True
+            _LOGGER.info("Predictive: stable headroom recovered; resuming charge")
 
     async def _handle_predictive_grid_charging(self):
         """
@@ -3877,22 +4137,6 @@ class ChargeDischargeController:
         Target: Keep consumption/export sensor at max_contracted_power.
         If home consumption increases, reduce battery charging to avoid exceeding ICP.
         """
-        if getattr(self, "_predictive_charge_suspended_for_demand", False):
-            return
-
-        if self.is_charge_blocked():
-            _LOGGER.debug(
-                "Predictive charging paused by charge blockers: %s",
-                ", ".join(self.get_charge_blockers().keys()),
-            )
-            self.grid_charging_active = False
-            self._grid_charging_initialized = False
-            self.previous_power = 0
-            self.previous_error = 0
-            for coordinator in self.coordinators:
-                await self._set_battery_power(coordinator, 0, 0)
-            return
-
         consumption_state = self.hass.states.get(self.consumption_sensor)
         sensor_raw = self._apply_meter_transform(consumption_state)
         if sensor_raw is None:
@@ -3947,6 +4191,34 @@ class ChargeDischargeController:
         sensor_filtered = self._filter_grid_sample(
             sensor_raw, 0.0 if not has_new_control_sample else sensor_elapsed_s
         )
+        sensor_within_stale_tolerance = (
+            sensor_report_time is None
+            or self._sensor_is_within_stale_tolerance(sensor_report_time)
+        )
+
+        charge_blocked = self.is_charge_blocked()
+        if getattr(self, "_predictive_charge_suspended_for_demand", False):
+            await self._handle_predictive_demand_protection(
+                sensor_filtered=sensor_filtered,
+                # Settling needs distinct meter publications, not distinct
+                # numeric values. A stable 3 kW value reported twice is the
+                # evidence required to distinguish a settled overload from a
+                # stale command-inclusive sample; a timer-only repeat is not.
+                has_new_control_sample=not is_stale,
+                allow_charge_resume=not charge_blocked,
+                sensor_within_stale_tolerance=sensor_within_stale_tolerance,
+            )
+            return
+        if charge_blocked:
+            _LOGGER.debug(
+                "Predictive charging paused by charge blockers: %s",
+                ", ".join(self.get_charge_blockers().keys()),
+            )
+            await self._suspend_predictive_grid_charging_for_demand(
+                grid_power=sensor_filtered,
+                target_power=self._predictive_charge_ceiling(),
+            )
+            return
         
         # Establish the typed per-battery ceiling before availability is
         # evaluated.  This prevents a battery that already reached its
@@ -3975,12 +4247,14 @@ class ChargeDischargeController:
             is_charging=True,
         )
         
-        # TARGET: max_contracted_power (e.g., 7000W)
+        # Capacity protection constrains predictive import too.  The battery
+        # must stop charging before it turns an otherwise harmless cheap-slot
+        # load into a contracted-power/peak-limit breach.
         # ERROR: target - sensor_actual (INVERTED for predictive mode)
         # Positive error = importing LESS than target → increase charging
         # Negative error = importing MORE than target → reduce charging
         
-        target_power = self.max_contracted_power
+        target_power = self._predictive_charge_ceiling()
         error = target_power - sensor_filtered  # INVERTED: target - sensor
         
         # PD Control with modified target
@@ -4035,13 +4309,10 @@ class ChargeDischargeController:
         else:
             new_power = new_power_raw
         
-        # A positive predictive command means the grid demand now requires
-        # discharge. Predictive grid charging cannot own that direction: hand
-        # the active slot to normal PD instead of clamping the request to idle.
-        if (
-            new_power > 0
-            and self.predictive_charging_mode == PREDICTIVE_MODE_DYNAMIC_PRICING
-        ):
+        # A limit breach (or an incremental request beyond idle) never falls
+        # through to normal PD.  Stop first and make the peak decision only
+        # after fresh, settled telemetry arrives.
+        if sensor_filtered > target_power + max(float(self.deadband), 50.0) or new_power > 0:
             await self._suspend_predictive_grid_charging_for_demand(
                 grid_power=sensor_filtered,
                 target_power=target_power,

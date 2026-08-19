@@ -100,11 +100,6 @@ _LOGGER = logging.getLogger(__name__)
 CURTAILMENT_AUTO_REPLAN_HEADROOM_DELTA_KWH = 0.5
 CURTAILMENT_AUTO_REPLAN_COOLDOWN_S = 60.0
 
-# Keep a clear gap between the demand level that suspended predictive charging
-# and the level that is allowed to resume it. This prevents a noisy meter near
-# max_contracted_power from alternating ownership between predictive and PD.
-PREDICTIVE_DEMAND_HANDOFF_HYSTERESIS_W = 200.0
-
 # Sensor attributes each integration expects to hold a LIST of price entries.
 # Used only to detect an attribute that arrived as a string; PVPC is absent
 # because it reads scalar per-hour attributes, not a list.
@@ -137,63 +132,47 @@ class PricingManager:
         self._hass = hass
         self._controller = controller
 
-    def _predictive_demand_handoff_recovered(self) -> bool:
-        """Return whether grid headroom is sufficient to resume slot charging."""
-        controller = self._controller
-        states = getattr(self._hass, "states", None)
-        meter_state = (
-            states.get(getattr(controller, "consumption_sensor", None))
-            if states is not None
-            else None
-        )
-        transform = getattr(controller, "_apply_meter_transform", None)
-        if meter_state is None or not callable(transform):
-            return False
+    def _reset_predictive_demand_runtime(self) -> None:
+        """Clear demand-protection state whenever a predictive slot aborts."""
+        reset = getattr(self._controller, "_reset_predictive_demand_runtime", None)
+        if callable(reset):
+            reset()
+            return
+        # Lightweight controller stand-ins and older restored runtimes.
+        self._controller._predictive_charge_suspended_for_demand = False
+        self._controller._predictive_demand_state = "charging"
+        self._controller._predictive_demand_fresh_samples = 0
+        self._controller._predictive_demand_recovery_samples = 0
+        self._controller._predictive_protection_command_w = 0.0
+        self._controller._predictive_protection_reason = None
 
-        reported_at = getattr(meter_state, "last_reported", None)
-        stale_check = getattr(controller, "_sensor_is_within_stale_tolerance", None)
-        if reported_at is not None and callable(stale_check):
+    def _record_predictive_shortfall(self, mode: str) -> float:
+        """Record target energy still missing when a non-calendar slot ends."""
+        targets = getattr(self._controller, "_predictive_charge_target_soc", None) or {}
+        missing = 0.0
+        for coordinator, target_soc in targets.items():
+            data = getattr(coordinator, "data", None) or {}
             try:
-                if not stale_check(reported_at):
-                    return False
+                capacity = max(0.0, float(data.get("battery_total_energy", 0.0) or 0.0))
+                current = float(data.get("battery_soc", 0.0) or 0.0)
+                missing += max(0.0, float(target_soc) - current) * capacity / 100.0
             except (TypeError, ValueError):
-                return False
-
-        try:
-            grid_power = transform(meter_state)
-            target_power = float(controller.max_contracted_power)
-            deadband = max(0.0, float(getattr(controller, "deadband", 0.0) or 0.0))
-        except (TypeError, ValueError):
-            return False
-        if grid_power is None:
-            return False
-
-        try:
-            grid_power = float(grid_power)
-        except (TypeError, ValueError):
-            return False
-        if not math.isfinite(grid_power) or not math.isfinite(target_power):
-            return False
-
-        resume_threshold = target_power - max(
-            PREDICTIVE_DEMAND_HANDOFF_HYSTERESIS_W,
-            2.0 * deadband,
-        )
-        return grid_power <= resume_threshold
-
-    def _resume_predictive_after_demand_handoff(self) -> None:
-        """Restore predictive ownership after grid headroom returns."""
-        controller = self._controller
-        controller._predictive_charge_suspended_for_demand = False
-        controller.grid_charging_active = True
-        controller._grid_charging_initialized = False
-        controller.previous_power = 0
-        controller.previous_error = 0
-        controller.derivative_filtered = 0.0
-        controller.first_execution = True
-        _LOGGER.info(
-            "Dynamic pricing: grid headroom recovered; resuming predictive charging"
-        )
+                continue
+        if missing <= 0.01:
+            self._controller._predictive_charge_target_soc = None
+            return 0.0
+        decision = getattr(self._controller, "_last_decision_data", None)
+        if not isinstance(decision, dict):
+            decision = {}
+            self._controller._last_decision_data = decision
+        # RT has no future calendar. Time Slot may immediately replace this
+        # with a rebuilt quota for a later configured window.
+        decision["predictive_shortfall_kwh"] = round(missing, 3)
+        decision["deadline_shortfall_kwh"] = round(missing, 3)
+        decision["shortfall_mode"] = mode
+        self._controller._predictive_charge_target_soc = None
+        _LOGGER.info("%s predictive slot ended with %.2f kWh pending", mode, missing)
+        return missing
 
     # =========================================================================
     # Startup
@@ -3885,7 +3864,7 @@ class PricingManager:
         controller._curtailment_opportunistic_target_soc = None
         controller._predictive_deficit_target_soc = None
         controller._curtailment_opportunity_limited = False
-        controller._predictive_charge_suspended_for_demand = False
+        self._reset_predictive_demand_runtime()
         controller.previous_power = 0
         controller.previous_error = 0
         controller.first_execution = True
@@ -3951,7 +3930,7 @@ class PricingManager:
                 self._controller._dp_arbitrage_ceiling = None
                 self._controller._dp_evening_reevaluated_date = None
                 self._controller._dp_last_eval_soc = None
-                self._controller._predictive_charge_suspended_for_demand = False
+                self._reset_predictive_demand_runtime()
                 self.clear_curtailment_runtime("new_day")
 
         # Reaching the opportunistic target outside the control handler (for
@@ -4081,19 +4060,10 @@ class PricingManager:
                         self._controller._grid_charging_initialized = False
                         self._controller._predictive_charge_target_soc = None
 
-                if getattr(
-                    self._controller,
-                    "_predictive_charge_suspended_for_demand",
-                    False,
-                ):
-                    if not self._predictive_demand_handoff_recovered():
-                        self._controller.grid_charging_active = False
-                        _LOGGER.debug(
-                            "Dynamic pricing: predictive charging remains suspended "
-                            "until grid headroom recovers"
-                        )
-                        return
-                    self._resume_predictive_after_demand_handoff()
+                # Demand protection remains inside the predictive controller.
+                # It owns the slot while it sends idle, waits for fresh meter
+                # samples and, only if needed, shaves the measured excess.  Do
+                # not hand the same stale charge-inclusive sample to normal PD.
 
                 opportunity_limited = self._prepare_curtailment_opportunistic_charge(
                     getattr(self._controller, "_curtailment_plan", None)
@@ -4128,7 +4098,7 @@ class PricingManager:
             getattr(self._controller, "_predictive_charge_suspended_for_demand", False)
             and not getattr(self._controller, "_current_price_slot_active", False)
         ):
-            self._controller._predictive_charge_suspended_for_demand = False
+            self._reset_predictive_demand_runtime()
 
         # Phase 5: Override active — resume normal PD control
         if self._controller.predictive_charging_overridden:
@@ -4144,7 +4114,7 @@ class PricingManager:
                 self._controller.grid_charging_active = False
                 self._controller._grid_charging_initialized = False
                 self._controller._current_price_slot_active = False
-                self._controller._predictive_charge_suspended_for_demand = False
+                self._reset_predictive_demand_runtime()
                 self._controller.first_execution = True
 
         # Not in a cheap slot — fall through to normal PD control (no return here)
@@ -4169,6 +4139,8 @@ class PricingManager:
         if current_price is None:
             _LOGGER.debug("Real-time price: price sensor %s unavailable", self._controller.price_sensor)
             if self._controller._realtime_price_charging:
+                self._record_predictive_shortfall("realtime_price")
+                self._reset_predictive_demand_runtime()
                 self._controller._realtime_price_charging = False
                 self._controller.grid_charging_active = False
                 self._controller._grid_charging_initialized = False
@@ -4195,6 +4167,8 @@ class PricingManager:
         # Override active — stop any active charging and do not start new
         if self._controller.predictive_charging_overridden:
             if self._controller._realtime_price_charging or self._controller.grid_charging_active:
+                self._record_predictive_shortfall("realtime_price")
+                self._reset_predictive_demand_runtime()
                 self._controller._realtime_price_charging = False
                 self._controller.grid_charging_active = False
                 self._controller._grid_charging_initialized = False
@@ -4240,6 +4214,8 @@ class PricingManager:
                     )
 
         elif not price_is_cheap and self._controller._realtime_price_charging:
+            self._record_predictive_shortfall("realtime_price")
+            self._reset_predictive_demand_runtime()
             self._controller._realtime_price_charging = False
             self._controller.grid_charging_active = False
             self._controller._grid_charging_initialized = False
@@ -4253,6 +4229,8 @@ class PricingManager:
         if self._controller.grid_charging_active:
             if not self._controller._is_operation_allowed(is_charging=True):
                 # Time slot ended while charging was active — stop immediately
+                self._record_predictive_shortfall("realtime_price")
+                self._reset_predictive_demand_runtime()
                 self._controller._realtime_price_charging = False
                 self._controller.grid_charging_active = False
                 self._controller._grid_charging_initialized = False
@@ -4280,6 +4258,7 @@ class PricingManager:
             if self._controller.predictive_charging_overridden:
                 _LOGGER.debug("Predictive charging overridden by user - continuing normal operation")
                 if self._controller.grid_charging_active:
+                    self._reset_predictive_demand_runtime()
                     self._controller.grid_charging_active = False
                     self._controller._grid_charging_initialized = False
                     self._controller.first_execution = True
@@ -4436,6 +4415,17 @@ class PricingManager:
                 or self._controller._grid_charging_initialized
             ):
                 _LOGGER.info("Exiting predictive grid charging slot - returning to normal mode")
+                missing = self._record_predictive_shortfall("time_slot")
+                if missing > 0.01:
+                    # Rebuild from actual SOC so later configured windows can
+                    # absorb the missed quota; an infeasible plan retains its
+                    # explicit chronological shortfall in diagnostics.
+                    replanned = await self._current_horizon_grid_charging_decision()
+                    replanned = self._apply_time_slot_chronological_plan(
+                        replanned, now=datetime.now()
+                    )
+                    self._controller._last_decision_data = replanned
+                self._reset_predictive_demand_runtime()
                 self._controller.grid_charging_active = False
                 self._controller.last_evaluation_soc = None
                 self._controller._grid_charging_initialized = False

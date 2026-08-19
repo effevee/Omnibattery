@@ -160,6 +160,8 @@ class ConsumptionTracker:
         self._daily_grid_last_power_kw: Optional[float] = None
         self._last_valid_home_power_kw: Optional[float] = None
         self._last_valid_home_power_monotonic: Optional[float] = None
+        self._last_valid_raw_home_power_kw: Optional[float] = None
+        self._last_valid_raw_home_power_monotonic: Optional[float] = None
         self._grid_at_min_soc_last_save_mono: float = 0.0
         self._accumulator_last_save_monotonic: float = 0.0
         self._solar_noon_cache: Optional[tuple[date, float]] = None
@@ -638,8 +640,8 @@ class ConsumptionTracker:
         self._daily_solar_last_time = now
         self._daily_solar_last_power_kw = power_kw
 
-    def _derive_home_power_kw(self) -> Optional[float]:
-        """Derive instantaneous home consumption (kW) from grid + battery AC + solar.
+    def _derive_home_power_kw_unclamped(self) -> Optional[float]:
+        """Derive the signed physical home balance in kW.
 
         Mirrors the aggregate Home Consumption power sensor (home = grid +
         sum(ac_power) + external_solar) so the daily energy total integrates
@@ -666,39 +668,39 @@ class ConsumptionTracker:
             solar_kw = self._read_power_kw(ctrl.solar_production_sensor)
             if solar_kw is not None:
                 total_kw += solar_kw
+        return total_kw
+
+    def _derive_home_power_kw(self) -> Optional[float]:
+        """Return the physical home balance with its legacy non-negative API."""
+        total_kw = self._derive_home_power_kw_unclamped()
+        if total_kw is None:
+            return None
+        # Callers validate a collapsed zero against the last coherent balance.
+        # Keep this public helper's long-standing non-negative contract for
+        # dashboard/profile consumers.
         return max(0.0, total_kw)
 
-    def get_adjusted_home_power_kw(self) -> Optional[float]:
-        """Return household demand adjusted for configured external loads.
-
-        This is the single input shared by the legacy daily accumulator and the
-        quarter-hour profile.  A short-lived last-valid hold prevents a
-        transiently collapsed grid/battery balance from becoming captured
-        household energy.
-        """
-        raw_power_kw = self._derive_home_power_kw()
-        if raw_power_kw is None:
+    def _validate_home_power_kw(
+        self,
+        *,
+        raw_power_kw: float,
+        candidate_power_kw: float,
+        last_value_attr: str,
+        last_time_attr: str,
+    ) -> Optional[float]:
+        """Hold a coherent balance briefly across independently sampled inputs."""
+        if not math.isfinite(raw_power_kw) or not math.isfinite(candidate_power_kw):
             return None
-        power_kw = raw_power_kw
-        external_loads = getattr(self._controller, "_external_loads", None)
-        if external_loads is not None:
-            try:
-                power_kw += float(external_loads.consumption_delta_kw())
-            except (AttributeError, TypeError, ValueError):
-                pass
-        if not math.isfinite(power_kw):
-            return None
-        power_kw = max(0.0, power_kw)
-
-        last_valid_kw = getattr(self, "_last_valid_home_power_kw", None)
-        last_valid_at = getattr(self, "_last_valid_home_power_monotonic", None)
+        candidate_power_kw = max(0.0, candidate_power_kw)
+        last_valid_kw = getattr(self, last_value_attr, None)
+        last_valid_at = getattr(self, last_time_attr, None)
         suspicious = home_balance_is_suspicious(
             raw_power_kw * 1000.0,
             battery_charging=has_battery_charging(
                 getattr(self._controller, "coordinators", ())
             ),
             last_valid_w=(last_valid_kw * 1000.0 if last_valid_kw is not None else None),
-        ) or power_kw <= 0.0
+        ) or candidate_power_kw <= 0.0
 
         now = monotonic()
         if suspicious:
@@ -716,9 +718,45 @@ class ConsumptionTracker:
                 return last_valid_kw
             return None
 
-        self._last_valid_home_power_kw = power_kw
-        self._last_valid_home_power_monotonic = now
-        return power_kw
+        setattr(self, last_value_attr, candidate_power_kw)
+        setattr(self, last_time_attr, now)
+        return candidate_power_kw
+
+    def get_validated_home_power_kw(self) -> Optional[float]:
+        """Return guarded physical demand without external-load adjustments."""
+        raw_power_kw = self._derive_home_power_kw_unclamped()
+        if raw_power_kw is None:
+            return None
+        return self._validate_home_power_kw(
+            raw_power_kw=raw_power_kw,
+            candidate_power_kw=raw_power_kw,
+            last_value_attr="_last_valid_raw_home_power_kw",
+            last_time_attr="_last_valid_raw_home_power_monotonic",
+        )
+
+    def get_adjusted_home_power_kw(self) -> Optional[float]:
+        """Return household demand adjusted for configured external loads.
+
+        This is the input shared by the legacy household-learning accumulator
+        and the quarter-hour profile. A short-lived last-valid hold prevents a
+        transiently collapsed grid/battery balance from becoming learned demand.
+        """
+        raw_power_kw = self._derive_home_power_kw_unclamped()
+        if raw_power_kw is None:
+            return None
+        power_kw = raw_power_kw
+        external_loads = getattr(self._controller, "_external_loads", None)
+        if external_loads is not None:
+            try:
+                power_kw += float(external_loads.consumption_delta_kw())
+            except (AttributeError, TypeError, ValueError):
+                pass
+        return self._validate_home_power_kw(
+            raw_power_kw=raw_power_kw,
+            candidate_power_kw=power_kw,
+            last_value_attr="_last_valid_home_power_kw",
+            last_time_attr="_last_valid_home_power_monotonic",
+        )
 
     async def accumulate_daily_home_energy(self) -> None:
         """Integrate home consumption power → exact daily kWh.
@@ -728,12 +766,16 @@ class ConsumptionTracker:
         ramping load curve is not systematically miscounted (left-Riemann bias).
         """
         ctrl = self._controller
-        power_kw = self._derive_home_power_kw()
+        # Integrate the physical grid+battery+solar balance shown by the Home
+        # Consumption entity. External-load adjustments belong to predictive
+        # demand learning and must not change this physical dashboard total.
+        # A transient negative balance breaks integration instead of adding a
+        # fabricated zero.
+        power_kw = self.get_validated_home_power_kw()
         if power_kw is None:
             self._daily_home_last_time = None
             self._daily_home_last_power_kw = None
             return
-        power_kw = max(0.0, power_kw)
         now = monotonic()
         if self._daily_home_last_time is not None and self._daily_home_last_power_kw is not None:
             dt_hours = (now - self._daily_home_last_time) / 3600.0

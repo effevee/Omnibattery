@@ -47,6 +47,76 @@ In systems with multiple batteries at different SOC levels the grid charge is di
 
 ---
 
+## Household demand during a charging slot
+
+A predictive slot remains responsible for the batteries until the slot ends or
+its target is reached. Normal PD does not take over just because household
+demand increases: doing so could interpret grid import that still includes the
+previous battery charge as real household demand and immediately reverse the
+battery into an unnecessary discharge.
+
+The import ceiling while predictive charging is active is:
+
+```
+ceiling = min(max_contracted_power, capacity_protection_limit when enabled)
+```
+
+Omnibattery reacts to increasing household demand in stages:
+
+1. **Reduce charging.** Available grid headroom is given to the house first, so
+   the battery charge command falls as household consumption rises.
+2. **Stop charging.** If demand reaches the ceiling, the battery is commanded to
+   `0 W`. This is an idle command, not a discharge and not a cancellation of the
+   predictive target.
+3. **Wait for settled telemetry.** The controller waits for the inverter's
+   response/readback latency and then requires two fresh grid publications after
+   automatic batteries are physically idle. This prevents the old
+   charge-inclusive meter value from causing a direction reversal.
+4. **Protect the import limit if necessary.** If settled import is still above
+   the ceiling, the battery discharges only the confirmed excess. With Capacity
+   Protection enabled this is Peak Shaving against its configured limit. Even
+   when it is disabled, import above `max_contracted_power` activates contracted-
+   power emergency protection.
+5. **Resume with hysteresis.** A protective discharge is stopped and allowed to
+   settle before charging can return. Predictive charging resumes only after two
+   fresh samples show at least `max(200 W, 2 × PD deadband)` of headroom.
+
+!!! important "Idle, Peak Shaving and normal PD are different"
+    During a cheap predictive slot, stopping grid charge does **not** enable a
+    normal economic discharge towards `pd_target_grid_power`. Peak Shaving or
+    contracted-power emergency control supplies only the excess above its safety
+    ceiling. Outside the predictive slot, normal PD resumes and follows the
+    configured grid target as usual.
+
+For example, with `max_contracted_power = 2,000 W`, Capacity Protection off and
+a settled physical household load of `2,800 W`, emergency protection requests
+approximately `800 W` of discharge. It aims to keep grid import near `2,000 W`,
+not `0 W`. A short inrush that disappears while telemetry settles produces no
+discharge.
+
+Safety discharge may bypass only economic price/curtailment blocks. Minimum
+SOC, unavailable or manually owned batteries, backup/RS485 restrictions,
+per-battery limits, system limits and phase protection remain authoritative.
+Excluded-device policy may affect ordinary Peak Shaving, but contracted-power
+emergency protection always uses the physical import seen by the grid meter.
+
+If the grid meter stops publishing, an existing protective command is not
+increased from the old reading. Once the reading exceeds the stale-data limit,
+the controller returns automatic batteries to idle and waits for fresh settled
+telemetry.
+
+The charge target and undelivered energy remain attached to the predictive
+plan while charging is suspended. Dynamic Pricing attempts to move a missed
+quota to eligible future slots; Time Slot mode rebuilds its remaining-window
+plan from live SOC; Real-Time Price records the shortfall because it has no
+future price calendar. If no feasible future capacity exists, the remaining
+kWh are exposed as a shortfall rather than silently discarded.
+
+See also [Capacity protection](../../features/peak-shaving.md) and
+[Main grid sensor](../main-sensor.md).
+
+---
+
 ## Guaranteed minimum SOC floor
 
 Predictive charging only grid-charges when the day nets to a deficit. On a sunny day the whole-day balance can be positive even though the battery is near empty at dawn — leaving the morning gap (before solar ramps up) covered from the grid at full price, or the battery drained.

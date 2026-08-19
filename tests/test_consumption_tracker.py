@@ -460,6 +460,54 @@ def test_adjusted_home_holds_last_valid_value_for_small_charge_balance():
     assert tracker.get_adjusted_home_power_kw() == pytest.approx(0.2)
 
 
+def test_validated_physical_home_is_independent_of_external_load_adjustment():
+    tracker = _make_home_tracker(
+        {"sensor.grid": _w(300)}, [_battunit(2500)]
+    )
+    tracker._controller._external_loads = SimpleNamespace(
+        consumption_delta_kw=lambda: -1.0
+    )
+
+    assert tracker.get_validated_home_power_kw() == pytest.approx(2.8)
+    assert tracker.get_adjusted_home_power_kw() == pytest.approx(1.8)
+
+
+@pytest.mark.asyncio
+async def test_daily_home_energy_integrates_physical_not_adjusted_power(monkeypatch):
+    tracker = _make_home_tracker(
+        {"sensor.grid": _w(300)}, [_battunit(2500)]
+    )
+    tracker._controller._external_loads = SimpleNamespace(
+        consumption_delta_kw=lambda: -1.0
+    )
+    tracker._controller._daily_home_energy_kwh = 0.0
+    tracker._daily_home_last_time = 100.0
+    tracker._daily_home_last_power_kw = 2.8
+
+    import custom_components.omnibattery.tracking.consumption_tracker as ct
+    monkeypatch.setattr(ct, "monotonic", lambda: 3700.0)
+
+    await tracker.accumulate_daily_home_energy()
+
+    assert tracker._controller._daily_home_energy_kwh == pytest.approx(2.8)
+
+
+def test_validated_physical_home_rejects_expired_negative_transition(monkeypatch):
+    tracker = _make_home_tracker(
+        {"sensor.grid": _w(2800)}, [_battunit(-2500)]
+    )
+    clock = {"now": 100.0}
+    import custom_components.omnibattery.tracking.consumption_tracker as ct
+    monkeypatch.setattr(ct, "monotonic", lambda: clock["now"])
+
+    assert tracker.get_validated_home_power_kw() == pytest.approx(0.3)
+    tracker._hass.states._mapping["sensor.grid"] = _w(1000)
+    assert tracker.get_validated_home_power_kw() == pytest.approx(0.3)
+
+    clock["now"] += ct.HOME_CONSUMPTION_HOLD_S + 1.0
+    assert tracker.get_validated_home_power_kw() is None
+
+
 def test_derive_home_skips_disconnected_stale_discharge():
     # Same battery dropped mid-discharge: ac_power frozen at 2500, but its load
     # has shifted onto the grid meter (now 2800 W). Counting the stale 2500 would
