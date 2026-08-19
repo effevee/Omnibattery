@@ -1,6 +1,7 @@
 """Zendure SolarFlow local HTTP driver.
 
-Implements BatteryDriver for Zendure SolarFlow devices (2400 AC+, 1600 AC+, etc.)
+Implements BatteryDriver for Zendure SolarFlow devices (4000 Mix AC+, 2400 AC+,
+1600 AC+, etc.)
 via the local REST API.
 
 One-time device prerequisite:
@@ -34,6 +35,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+from dataclasses import replace
 from typing import Any, Optional
 
 import aiohttp
@@ -60,6 +62,7 @@ ZENDURE_MODEL_SOLARFLOW_800_PRO = "solarflow_800_pro"
 ZENDURE_MODEL_1600AC_PLUS = "1600ac_plus"
 ZENDURE_MODEL_2400AC_PRO = "2400ac_pro"
 ZENDURE_MODEL_2400AC_PLUS = "2400ac_plus"
+ZENDURE_MODEL_4000MIX_AC_PLUS = "4000mix_ac_plus"
 
 # Grid-connected AC limits.  The SolarFlow 800, 800 Plus and 800 Pro all have
 # an 800 W grid output; their AC charging input is limited to 1000 W.  The
@@ -71,6 +74,9 @@ _MODEL_POWER_LIMITS: dict[str, tuple[int, int]] = {
     ZENDURE_MODEL_1600AC_PLUS: (1600, 1600),
     ZENDURE_MODEL_2400AC_PRO: (2400, 2400),
     ZENDURE_MODEL_2400AC_PLUS: (2400, 2400),
+    # The 4000 Mix AC+ battery/inverter supports 4 kW in both directions.
+    # Installation-specific grid limits remain separate system-level settings.
+    ZENDURE_MODEL_4000MIX_AC_PLUS: (4000, 4000),
 }
 
 # Keys absent on AC-coupled models (no DC-coupled MPPT, no dedicated
@@ -81,6 +87,7 @@ _SOLAR_MPPT_KEYS: frozenset[str] = frozenset({
 _AC_COUPLED_MODELS: frozenset[str] = frozenset({
     ZENDURE_MODEL_1600AC_PLUS,
     ZENDURE_MODEL_2400AC_PLUS,
+    ZENDURE_MODEL_4000MIX_AC_PLUS,
 })
 
 # Zendure API property name → logical coordinator key.
@@ -257,6 +264,19 @@ SWITCH_DEFINITIONS: list[dict] = [
 ]
 
 
+def _number_definitions_for_model(model: str) -> list[dict]:
+    """Return model-specific Zendure number limits without mutating globals."""
+    max_discharge_power = zendure_power_limits(model)[1]
+    return [
+        (
+            {**definition, "max": max_discharge_power}
+            if definition["key"] == "inverse_max_power"
+            else definition
+        )
+        for definition in NUMBER_DEFINITIONS
+    ]
+
+
 # ---------------------------------------------------------------------------
 # Driver
 # ---------------------------------------------------------------------------
@@ -290,6 +310,8 @@ class ZendureLocalDriver(BatteryDriver):
         self._sn: Optional[str] = None  # populated from first GET response
         self._product: Optional[str] = None  # device model from the report root
         self._model = model
+        self._max_charge_power_override = max_charge_power_w is not None
+        self._max_discharge_power_override = max_discharge_power_w is not None
 
         default_charge_power, default_discharge_power = zendure_power_limits(model)
         self._capabilities = DriverCapabilities(
@@ -314,15 +336,16 @@ class ZendureLocalDriver(BatteryDriver):
 
         _excluded = _SOLAR_MPPT_KEYS if model in _AC_COUPLED_MODELS else frozenset()
         _sensor_defs = [d for d in SENSOR_DEFINITIONS if d["key"] not in _excluded]
+        _number_defs = _number_definitions_for_model(model)
 
         self._definitions: dict[str, list[dict]] = {
             "sensor":        _sensor_defs,
-            "number":        NUMBER_DEFINITIONS,
+            "number":        _number_defs,
             "select":        SELECT_DEFINITIONS,
             "switch":        SWITCH_DEFINITIONS,
             "binary_sensor": [],
             "button":        [],
-            "all":           _sensor_defs + NUMBER_DEFINITIONS + SELECT_DEFINITIONS + SWITCH_DEFINITIONS,
+            "all":           _sensor_defs + _number_defs + SELECT_DEFINITIONS + SWITCH_DEFINITIONS,
         }
 
         # Single read group: one HTTP GET returns all properties, so there is
@@ -392,6 +415,11 @@ class ZendureLocalDriver(BatteryDriver):
     def serial(self) -> Optional[str]:
         return self._sn
 
+    @property
+    def model_key(self) -> str:
+        """Return the normalized model profile used by the driver."""
+        return self._model
+
     # --- connection lifecycle -----------------------------------------------
 
     @property
@@ -411,6 +439,7 @@ class ZendureLocalDriver(BatteryDriver):
 
         self._sn = data.get("sn")
         self._product = data.get("product")
+        self._update_model_from_product(self._product)
         self._connected = True
         _LOGGER.info("Connected to Zendure device at %s (sn=%s)", self._base_url, self._sn)
         return True
@@ -448,6 +477,7 @@ class ZendureLocalDriver(BatteryDriver):
             self._sn = data.get("sn")
         if self._product is None:
             self._product = data.get("product")
+        self._update_model_from_product(self._product)
 
         snapshot = self._snapshot_from_report(data)
 
@@ -530,6 +560,61 @@ class ZendureLocalDriver(BatteryDriver):
         out_pack = props.get("outputPackPower", 0)
         snapshot["battery_power"] = out_pack - pack_in
         return snapshot
+
+    def _update_model_from_product(self, product: str | None) -> None:
+        """Adopt an explicitly recognised product profile from the report.
+
+        Older entries may have been created before a product had a dedicated
+        profile and therefore start as ``2400ac_plus``.  The 4000 Mix AC+ is
+        already reachable through the same API, so promote that legacy entry
+        as soon as its product identifier is observed.  Explicit constructor
+        limits remain authoritative for tests and callers that deliberately
+        supplied an envelope.
+        """
+        if not product:
+            return
+        detected = detect_model(product)
+        if detected == self._model:
+            return
+        if detected != ZENDURE_MODEL_4000MIX_AC_PLUS:
+            return
+
+        self._model = detected
+        default_charge_power, default_discharge_power = zendure_power_limits(detected)
+        self._capabilities = replace(
+            self._capabilities,
+            max_charge_power_w=(
+                self._capabilities.max_charge_power_w
+                if self._max_charge_power_override
+                else default_charge_power
+            ),
+            max_discharge_power_w=(
+                self._capabilities.max_discharge_power_w
+                if self._max_discharge_power_override
+                else default_discharge_power
+            ),
+        )
+
+        # 2400 AC+ and 4000 Mix AC+ currently share the AC-coupled entity
+        # surface. Rebuild the definitions/read group so the promotion remains
+        # correct if an entry was instantiated with the old generic profile.
+        excluded = _SOLAR_MPPT_KEYS if detected in _AC_COUPLED_MODELS else frozenset()
+        sensor_defs = [d for d in SENSOR_DEFINITIONS if d["key"] not in excluded]
+        self._definitions["sensor"] = sensor_defs
+        number_defs = _number_definitions_for_model(detected)
+        self._definitions["number"] = number_defs
+        self._definitions["all"] = (
+            sensor_defs
+            + number_defs
+            + SELECT_DEFINITIONS
+            + SWITCH_DEFINITIONS
+        )
+        self._read_groups = [
+            ReadGroup(
+                scan_interval="high",
+                keys=tuple(d["key"] for d in self._definitions["all"]),
+            )
+        ]
 
     # --- control (write) ----------------------------------------------------
 
@@ -782,10 +867,12 @@ def detect_model(product: str | None) -> str:
     """Map a raw device product string to a ZENDURE_MODEL_* constant.
 
     Matching tolerates spacing, hyphens and Zendure's product model codes.  The
-    documented SolarFlow 800 variants have their own hardware power envelope;
+    documented SolarFlow variants have their own hardware power envelope;
     unknown products retain the historical 2400 AC Pro fallback.
     """
     normalized = re.sub(r"[^a-z0-9]", "", (product or "").lower())
+    if "4000mixac" in normalized or normalized.startswith("zda2502"):
+        return ZENDURE_MODEL_4000MIX_AC_PLUS
     if "800pro" in normalized:
         return ZENDURE_MODEL_SOLARFLOW_800_PRO
     if "800plus" in normalized or "800pls" in normalized:

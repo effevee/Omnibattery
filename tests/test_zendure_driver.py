@@ -20,6 +20,8 @@ from custom_components.omnibattery.drivers.zendure import (
     ZENDURE_MODEL_SOLARFLOW_800_PLUS,
     ZENDURE_MODEL_SOLARFLOW_800_PRO,
     ZENDURE_MODEL_1600AC_PLUS,
+    ZENDURE_MODEL_2400AC_PLUS,
+    ZENDURE_MODEL_4000MIX_AC_PLUS,
     detect_model,
 )
 
@@ -181,6 +183,48 @@ def test_solarflow_1600_ac_plus_excludes_dc_solar_entities():
         "192.168.1.100", model=ZENDURE_MODEL_1600AC_PLUS
     ).sensor_definitions}
     assert not keys & {"solar_power", "mppt1_power", "mppt2_power", "mppt3_power", "mppt4_power"}
+
+
+@pytest.mark.parametrize("product", [
+    "SolarFlow 4000 Mix AC+",
+    "solarFlow4000MixAC+",
+    "ZDA2502",
+])
+def test_detect_model_identifies_solarflow_4000_mix_ac_plus(product):
+    assert detect_model(product) == ZENDURE_MODEL_4000MIX_AC_PLUS
+
+
+def test_solarflow_4000_mix_ac_plus_uses_its_power_envelope():
+    driver = ZendureLocalDriver(
+        "192.168.1.100", model=ZENDURE_MODEL_4000MIX_AC_PLUS
+    )
+
+    assert driver.capabilities.max_charge_power_w == 4000
+    assert driver.capabilities.max_discharge_power_w == 4000
+    assert next(
+        d for d in driver.number_definitions if d["key"] == "inverse_max_power"
+    )["max"] == 4000
+
+
+def test_solarflow_4000_mix_ac_plus_excludes_dc_solar_entities():
+    keys = {d["key"] for d in ZendureLocalDriver(
+        "192.168.1.100", model=ZENDURE_MODEL_4000MIX_AC_PLUS
+    ).sensor_definitions}
+    assert not keys & {"solar_power", "mppt1_power", "mppt2_power", "mppt3_power", "mppt4_power"}
+
+
+async def test_legacy_zendure_profile_promotes_from_report_product():
+    report = {**_REPORT, "product": "solarFlow4000MixAC+"}
+    driver = ZendureLocalDriver(
+        "192.168.1.100",
+        model=ZENDURE_MODEL_2400AC_PLUS,
+        session=_session(get_data=report),
+    )
+
+    assert await driver.connect() is True
+    assert driver.model_key == ZENDURE_MODEL_4000MIX_AC_PLUS
+    assert driver.capabilities.max_charge_power_w == 4000
+    assert driver.capabilities.max_discharge_power_w == 4000
 
 
 # ---------------------------------------------------------------------------

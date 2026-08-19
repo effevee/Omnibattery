@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import asyncio
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, Mock, call
 
 from custom_components.omnibattery import _device_owns_initial_config
 from custom_components.omnibattery.infra.coordinator import (
@@ -123,12 +123,79 @@ def test_power_limits_expose_normalized_layers_and_legacy_aliases():
 
     assert coordinator.configured_max_charge_power == 2500
     assert coordinator.effective_max_charge_power == 2400
+
     assert coordinator.effective_max_discharge_power == 500
 
     coordinator.max_charge_power = 3000
 
     assert coordinator.configured_max_charge_power == 3000
     assert coordinator.effective_max_charge_power == 2400
+
+
+def test_zendure_model_promotion_updates_device_cap_and_persists_model():
+    coordinator = object.__new__(MarstekVenusDataUpdateCoordinator)
+    coordinator.brand = "zendure"
+    coordinator.zendure_model = "2400ac_plus"
+    coordinator.name = "SolarFlow"
+    coordinator._device_max_charge_power = 2400
+    coordinator._device_max_discharge_power = 2400
+    coordinator._configured_max_charge_power = 1200
+    coordinator._configured_max_discharge_power = 1200
+    coordinator._effective_max_charge_power = 1200
+    coordinator._effective_max_discharge_power = 1200
+    coordinator.driver = SimpleNamespace(
+        model_key="4000mix_ac_plus",
+        capabilities=SimpleNamespace(
+            max_charge_power_w=4000,
+            max_discharge_power_w=4000,
+        ),
+    )
+    coordinator.persist_battery_config = Mock()
+
+    coordinator._sync_detected_zendure_model()
+
+    assert coordinator.zendure_model == "4000mix_ac_plus"
+    assert coordinator.device_max_charge_power == 4000
+    assert coordinator.device_max_discharge_power == 4000
+    assert coordinator.effective_max_charge_power == 1200
+    assert coordinator.effective_max_discharge_power == 1200
+    assert coordinator.persist_battery_config.call_args_list == [
+        call("zendure_model", "4000mix_ac_plus"),
+        call("device_max_charge_power", 4000),
+        call("device_max_discharge_power", 4000),
+    ]
+
+
+def test_zendure_model_promotion_repairs_stale_saved_cap_after_restart():
+    coordinator = object.__new__(MarstekVenusDataUpdateCoordinator)
+    coordinator.brand = "zendure"
+    coordinator.zendure_model = "4000mix_ac_plus"
+    coordinator.name = "SolarFlow"
+    coordinator._device_max_charge_power = 2400
+    coordinator._device_max_discharge_power = 2400
+    coordinator._configured_max_charge_power = 4000
+    coordinator._configured_max_discharge_power = 4000
+    coordinator._effective_max_charge_power = 2400
+    coordinator._effective_max_discharge_power = 2400
+    coordinator.driver = SimpleNamespace(
+        model_key="4000mix_ac_plus",
+        capabilities=SimpleNamespace(
+            max_charge_power_w=4000,
+            max_discharge_power_w=4000,
+        ),
+    )
+    coordinator.persist_battery_config = Mock()
+
+    coordinator._sync_detected_zendure_model()
+
+    assert coordinator.device_max_charge_power == 4000
+    assert coordinator.device_max_discharge_power == 4000
+    assert coordinator.effective_max_charge_power == 4000
+    assert coordinator.effective_max_discharge_power == 4000
+    assert coordinator.persist_battery_config.call_args_list == [
+        call("device_max_charge_power", 4000),
+        call("device_max_discharge_power", 4000),
+    ]
 
 
 async def test_reconnect_skips_rs485_for_driver_without_capability():
