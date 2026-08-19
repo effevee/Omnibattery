@@ -3,7 +3,7 @@
 **Omnibattery** es una integración personalizada para Home Assistant que monitoriza y controla baterías solares enchufables de varias marcas. Actualmente es compatible con:
 
 - **Marstek** Venus E/C (v2/v3), Venus A y Venus D mediante Modbus TCP, Modbus RTU o un puente LilyGo RS485/ESPHome.
-- **Zendure** SolarFlow 4000 Mix AC+, 2400 AC+, 2400 AC Pro, 1600 AC+, 800 Pro, 800 Plus y 800 mediante HTTP local.
+- **Zendure** SolarFlow 4000 Mix Pro, 4000 Mix AC+, 2400 AC+, 2400 AC Pro, 1600 AC+, 800 Pro, 800 Plus y 800 mediante HTTP local.
 - **Anker SOLIX** Solarbank Max AC y Solarbank 4 E5000 Pro mediante Modbus TCP.
 - **Sessy** Home Battery mediante la API local de su dongle (se buscan testers).
 - **Hoymiles** MS-A2 mediante la integración MQTT configurada en Home Assistant.

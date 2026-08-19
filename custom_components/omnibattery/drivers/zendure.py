@@ -1,7 +1,7 @@
 """Zendure SolarFlow local HTTP driver.
 
-Implements BatteryDriver for Zendure SolarFlow devices (4000 Mix AC+, 2400 AC+,
-1600 AC+, etc.)
+Implements BatteryDriver for Zendure SolarFlow devices (4000 Mix Pro, 4000 Mix
+AC+, 2400 AC+, 1600 AC+, etc.)
 via the local REST API.
 
 One-time device prerequisite:
@@ -63,6 +63,7 @@ ZENDURE_MODEL_1600AC_PLUS = "1600ac_plus"
 ZENDURE_MODEL_2400AC_PRO = "2400ac_pro"
 ZENDURE_MODEL_2400AC_PLUS = "2400ac_plus"
 ZENDURE_MODEL_4000MIX_AC_PLUS = "4000mix_ac_plus"
+ZENDURE_MODEL_4000MIX_PRO = "4000mix_pro"
 
 # Grid-connected AC limits.  The SolarFlow 800, 800 Plus and 800 Pro all have
 # an 800 W grid output; their AC charging input is limited to 1000 W.  The
@@ -77,6 +78,8 @@ _MODEL_POWER_LIMITS: dict[str, tuple[int, int]] = {
     # The 4000 Mix AC+ battery/inverter supports 4 kW in both directions.
     # Installation-specific grid limits remain separate system-level settings.
     ZENDURE_MODEL_4000MIX_AC_PLUS: (4000, 4000),
+    # The 4000 Mix Pro has the same bidirectional AC envelope as the AC+ model.
+    ZENDURE_MODEL_4000MIX_PRO: (4000, 4000),
 }
 
 # Keys absent on AC-coupled models (no DC-coupled MPPT, no dedicated
@@ -89,6 +92,7 @@ _AC_COUPLED_MODELS: frozenset[str] = frozenset({
     ZENDURE_MODEL_2400AC_PLUS,
     ZENDURE_MODEL_4000MIX_AC_PLUS,
 })
+_MPPT_MODELS: frozenset[str] = frozenset({ZENDURE_MODEL_4000MIX_PRO})
 
 # Zendure API property name → logical coordinator key.
 _PROP_TO_KEY: dict[str, str] = {
@@ -324,7 +328,7 @@ class ZendureLocalDriver(BatteryDriver):
             max_discharge_power_w=(
                 default_discharge_power if max_discharge_power_w is None else max_discharge_power_w
             ),
-            has_mppt_pv=False,           # no DC-coupled MPPT; solar is AC-side
+            has_mppt_pv=model in _MPPT_MODELS,
             has_alarm_registers=True,    # faultLevel + is_error
             has_rs485_control=False,
             has_energy_counters=False,   # no kWh / capacity in the report; synthesised
@@ -565,18 +569,21 @@ class ZendureLocalDriver(BatteryDriver):
         """Adopt an explicitly recognised product profile from the report.
 
         Older entries may have been created before a product had a dedicated
-        profile and therefore start as ``2400ac_plus``.  The 4000 Mix AC+ is
-        already reachable through the same API, so promote that legacy entry
-        as soon as its product identifier is observed.  Explicit constructor
-        limits remain authoritative for tests and callers that deliberately
-        supplied an envelope.
+        profile and therefore start as ``2400ac_plus``. The 4000 Mix models are
+        already reachable through the same API, so promote that legacy entry as
+        soon as its product identifier is observed. Explicit constructor limits
+        remain authoritative for tests and callers that deliberately supplied
+        an envelope.
         """
         if not product:
             return
         detected = detect_model(product)
         if detected == self._model:
             return
-        if detected != ZENDURE_MODEL_4000MIX_AC_PLUS:
+        if detected not in {
+            ZENDURE_MODEL_4000MIX_AC_PLUS,
+            ZENDURE_MODEL_4000MIX_PRO,
+        }:
             return
 
         self._model = detected
@@ -593,11 +600,12 @@ class ZendureLocalDriver(BatteryDriver):
                 if self._max_discharge_power_override
                 else default_discharge_power
             ),
+            has_mppt_pv=detected in _MPPT_MODELS,
         )
 
-        # 2400 AC+ and 4000 Mix AC+ currently share the AC-coupled entity
-        # surface. Rebuild the definitions/read group so the promotion remains
-        # correct if an entry was instantiated with the old generic profile.
+        # The AC+ profile omits DC MPPT entities; the Pro profile exposes them.
+        # Rebuild the definitions/read group so promotion remains correct if an
+        # entry was instantiated with the old generic profile.
         excluded = _SOLAR_MPPT_KEYS if detected in _AC_COUPLED_MODELS else frozenset()
         sensor_defs = [d for d in SENSOR_DEFINITIONS if d["key"] not in excluded]
         self._definitions["sensor"] = sensor_defs
@@ -871,6 +879,8 @@ def detect_model(product: str | None) -> str:
     unknown products retain the historical 2400 AC Pro fallback.
     """
     normalized = re.sub(r"[^a-z0-9]", "", (product or "").lower())
+    if "4000mixpro" in normalized or normalized.startswith("zda2501"):
+        return ZENDURE_MODEL_4000MIX_PRO
     if "4000mixac" in normalized or normalized.startswith("zda2502"):
         return ZENDURE_MODEL_4000MIX_AC_PLUS
     if "800pro" in normalized:
