@@ -14,6 +14,7 @@
 
 ### Fixed
 
+- **DHCP MAC tracking could follow a bridge or powerline adapter instead of the battery** (PR#295): a matching MAC is no longer enough to adopt a new lease. Before changing the stored endpoint, the integration probes the candidate with the battery's driver and stored credentials, including authenticated Sessy support, safely closes and restores the active connection around the probe, and leaves the existing address untouched when the candidate is silent. Thanks to @wilsto
 - **Predictive charging could trigger an economic discharge after stopping for a demand spike** (#299): active predictive slots now retain control ownership, command idle, wait for fresh settled telemetry, and only then use Peak Shaving for the measured excess over the configured limit. Peak Shaving and contracted-power emergency protection bypass price-only discharge blocks but retain battery, SOC and ownership safety limits; recovery requires hysteresis instead of a single near-limit reading.
 - **Daily Home Consumption energy could include a false 0 W sample during a battery/grid telemetry transition**: the physical accumulator now validates its own grid+battery+solar balance instead of clamping a transient negative value to zero, without applying predictive external-load adjustments to the dashboard total.
 - **Predictive charging could start and stop repeatedly with three-phase protection enabled**: phase-safety replay now preserves predictive's negative charge sign in `previous_power`, preventing active charging from being misread as discharge and clamped to `0 W`.
