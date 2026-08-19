@@ -46,6 +46,7 @@ def test_capabilities():
     assert caps.has_force_mode is False
     assert caps.has_rs485_control is False
     assert caps.has_mppt_pv is False
+    assert caps.has_solar_telemetry is True
     assert caps.has_energy_counters is True
     assert caps.has_daily_energy_counters is False
     assert caps.max_charge_power_w == 3500
@@ -68,6 +69,12 @@ def test_label_for_product_code_maps_official_skus():
     assert _label_for_product_code("DNMS") == "Solarbank XE AC"
     assert _label_for_product_code(None) == "Solarbank Max AC"
     assert _label_for_product_code("ZZZZ") == "Solarbank Max AC"
+
+
+def test_label_for_product_code_extracts_sku_from_serial_number():
+    from custom_components.omnibattery.drivers.anker import _label_for_product_code
+
+    assert _label_for_product_code("AK7DN7M0G22") == "Solarbank 4 E5000 Pro"
 
 
 def test_power_caps_are_read_only_sensors():
@@ -111,6 +118,25 @@ def test_shared_sensor_aliases_are_exposed():
     )
 
 
+def test_official_aggregate_pv_fields_are_exposed():
+    from custom_components.omnibattery.drivers import anker as anker_mod
+
+    fields = {field["key"]: field for field in anker_mod._FIELD_SPECS}
+    sensors = {definition["key"]: definition for definition in anker_mod.SENSOR_DEFINITIONS}
+
+    assert fields["pv_power"] == {
+        "key": "pv_power",
+        "address": 10002,
+        "register_type": "input",
+        "data_type": "int32",
+        "count": 2,
+    }
+    assert fields["third_party_pv_power"]["address"] == 10004
+    assert fields["pv_total_generation"]["address"] == 10018
+    assert sensors["solar_power"]["unit"] == "W"
+    assert sensors["pv_total_generation"]["scale"] == 0.1
+
+
 def test_encode_int32_roundtrip():
     for value in (0, 500, -800, 3500, -3500):
         words = encode_int32(value)
@@ -144,6 +170,32 @@ async def test_connect_maps_max_ac_product_code():
     assert drv.model_label == "Solarbank Max AC"
 
 
+@pytest.mark.asyncio
+async def test_connect_falls_back_to_serial_product_code():
+    client = _fake_client()
+
+    def _ascii_registers(value: str, count: int) -> list[int]:
+        raw = value.encode("ascii").ljust(count * 2, b"\x00")[: count * 2]
+        return [
+            int.from_bytes(raw[offset:offset + 2], "big")
+            for offset in range(0, len(raw), 2)
+        ]
+
+    async def _input_block(start, count):
+        if start == 32768:
+            return _ascii_registers("GENERIC", count)
+        if start == 10100:
+            return _ascii_registers("AK7DN7M0G22", count)
+        return None
+
+    client.async_read_input_block = AsyncMock(side_effect=_input_block)
+    drv = _driver(client=client)
+
+    assert await drv.connect() is True
+    assert drv.model_label == "Solarbank 4 E5000 Pro"
+    client.async_read_input_block.assert_any_await(10100, 12)
+
+
 # ----------------------------------------------------------------------
 # telemetry — FC03/FC04
 # ----------------------------------------------------------------------
@@ -172,6 +224,30 @@ async def test_read_telemetry_uses_fc04_for_input_and_inverts_battery_power():
     assert snap["battery_soc"] == 47
     assert snap["battery_power"] == -612  # inverted to Omnibattery convention
     assert snap["ac_power"] == 612  # shared AC convention: +discharge
+
+
+@pytest.mark.asyncio
+async def test_read_telemetry_sums_official_aggregate_pv_registers():
+    client = _fake_client()
+    # Official range 10000–10050: pv_power at 10002, third-party PV at 10004,
+    # and lifetime PV generation at 10018.
+    buf = [0] * 51
+    pv_words = encode_int32(1200)
+    third_party_words = encode_int32(300)
+    buf[2], buf[3] = pv_words
+    buf[4], buf[5] = third_party_words
+    buf[19] = 1234
+    client.async_read_input_block = AsyncMock(return_value=buf)
+
+    snap = await _driver(client=client).read_telemetry(
+        ["solar_power", "pv_total_generation"]
+    )
+
+    client.async_read_input_block.assert_awaited_once_with(10000, 51)
+    assert snap["pv_power"] == 1200
+    assert snap["third_party_pv_power"] == 300
+    assert snap["solar_power"] == 1500
+    assert snap["pv_total_generation"] == 1234
 
 
 @pytest.mark.asyncio

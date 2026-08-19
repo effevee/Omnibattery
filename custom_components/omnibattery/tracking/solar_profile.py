@@ -519,29 +519,45 @@ class SolarProfileTracker:
     def telemetry_source(self) -> str:
         external = bool(getattr(self._controller, "solar_production_sensor", None))
         mppt = False
+        aggregate = False
         for coordinator in getattr(self._controller, "coordinators", ()) or ():
-            try:
-                mppt = mppt or bool(coordinator.capabilities.has_mppt_pv)
-            except AttributeError:
-                mppt = mppt or bool(getattr(coordinator, "has_mppt_pv", False))
+            capabilities = getattr(coordinator, "capabilities", None)
+            mppt = mppt or bool(
+                getattr(capabilities, "has_mppt_pv", False)
+                or getattr(coordinator, "has_mppt_pv", False)
+            )
+            aggregate = aggregate or bool(
+                getattr(capabilities, "has_solar_telemetry", False)
+                or getattr(coordinator, "has_solar_telemetry", False)
+            )
         if external and mppt:
             return "external_plus_mppt"
+        if external and aggregate:
+            return "external_plus_aggregate"
         if external:
             return "external"
         if mppt:
             return "mppt"
+        if aggregate:
+            return "aggregate"
         return "none"
 
     def configuration_fingerprint(self) -> str:
         data = getattr(self._config_entry, "data", {}) or {}
         mppt_sources = []
+        aggregate_sources = []
         for coordinator in getattr(self._controller, "coordinators", ()) or ():
-            try:
-                if not coordinator.capabilities.has_mppt_pv:
-                    continue
-            except AttributeError:
-                if not getattr(coordinator, "has_mppt_pv", False):
-                    continue
+            capabilities = getattr(coordinator, "capabilities", None)
+            has_mppt = bool(
+                getattr(capabilities, "has_mppt_pv", False)
+                or getattr(coordinator, "has_mppt_pv", False)
+            )
+            has_aggregate = bool(
+                getattr(capabilities, "has_solar_telemetry", False)
+                or getattr(coordinator, "has_solar_telemetry", False)
+            )
+            if not has_mppt and not has_aggregate:
+                continue
             channels = tuple(
                 key
                 for key in ("mppt1_power", "mppt2_power", "mppt3_power", "mppt4_power")
@@ -556,18 +572,35 @@ class SolarProfileTracker:
                 capacity = None
             if capacity is not None and (not math.isfinite(capacity) or capacity <= 0.0):
                 capacity = None
-            mppt_sources.append({
+            source = {
                 "id": getattr(coordinator, "device_key", None) or getattr(coordinator, "name", None) or str(coordinator),
                 "model": getattr(coordinator, "battery_version", None),
                 "channels": channels,
                 "capacity_kwh": capacity,
-            })
+            }
+            if has_mppt:
+                mppt_sources.append(source)
+            elif has_aggregate:
+                aggregate_sources.append({
+                    "id": source["id"],
+                    "model": source["model"],
+                    "key": "solar_power",
+                    "capacity_kwh": source["capacity_kwh"],
+                })
         payload = {
             "capture_version": SOLAR_PROFILE_CAPTURE_VERSION,
             "external_sensor": data.get("solar_production_sensor") or getattr(self._controller, "solar_production_sensor", None),
             "timezone": getattr(getattr(self._hass, "config", None), "time_zone", None),
             "mppt": sorted(mppt_sources, key=lambda item: json.dumps(item, sort_keys=True, default=str)),
         }
+        # Keep the fingerprint byte-for-byte compatible for existing external/
+        # MPPT-only profiles. The extra payload is only needed once an aggregate
+        # PV source (such as Anker) is actually configured.
+        if aggregate_sources:
+            payload["aggregate_pv"] = sorted(
+                aggregate_sources,
+                key=lambda item: json.dumps(item, sort_keys=True, default=str),
+            )
         encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
         return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
 

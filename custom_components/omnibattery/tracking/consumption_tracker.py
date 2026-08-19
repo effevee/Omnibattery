@@ -485,13 +485,14 @@ class ConsumptionTracker:
         return None
 
     def _read_total_solar_power_kw(self) -> Optional[float]:
-        """Total instantaneous solar production (kW): external sensor + Venus PV.
+        """Total instantaneous solar production (kW): external sensor + battery PV.
 
         Sums the configured external solar_production_sensor (e.g. an APS/ECU
-        feed) and the DC-coupled PV on every Venus vA/vD unit (its MPPT inputs),
-        so a battery with panels on its own MPPT ports is counted even when no
-        external sensor is configured. Returns None only when no source has a
-        usable reading.
+        feed) and the DC-coupled PV reported by every battery. Venus vA/vD
+        contributes its MPPT inputs; Anker contributes its official aggregate
+        PV value. A battery with panels on its own inputs is counted even when
+        no external sensor is configured. Returns None only when no source has
+        a usable reading.
         """
         ctrl = self._controller
         total_kw = 0.0
@@ -502,15 +503,23 @@ class ConsumptionTracker:
                 total_kw += max(0.0, ext_kw)
                 have_reading = True
         for coordinator in ctrl.coordinators:
-            # Skip disconnected units: their MPPT readings go stale (merged dict,
+            # Skip disconnected units: their PV readings go stale (merged dict,
             # never expired) and would inflate the integrated daily solar total.
-            if not coordinator.capabilities.has_mppt_pv:
+            capabilities = getattr(coordinator, "capabilities", None)
+            has_mppt = bool(getattr(capabilities, "has_mppt_pv", False))
+            has_aggregate = bool(getattr(capabilities, "has_solar_telemetry", False))
+            if not (has_mppt or has_aggregate):
                 continue
             if not coordinator.is_available or not coordinator.data:
                 continue
             mppt_w = 0.0
             seen = False
-            for key in ("mppt1_power", "mppt2_power", "mppt3_power", "mppt4_power"):
+            pv_keys = (
+                ("mppt1_power", "mppt2_power", "mppt3_power", "mppt4_power")
+                if has_mppt
+                else ("solar_power",)
+            )
+            for key in pv_keys:
                 value = coordinator.data.get(key)
                 try:
                     parsed = float(value)
@@ -529,12 +538,11 @@ class ConsumptionTracker:
         ctrl = self._controller
         solar_coordinators = []
         for coordinator in getattr(ctrl, "coordinators", ()) or ():
-            try:
-                has_mppt = bool(coordinator.capabilities.has_mppt_pv)
-            except AttributeError:
-                has_mppt = bool(getattr(coordinator, "has_mppt_pv", False))
+            capabilities = getattr(coordinator, "capabilities", None)
+            has_mppt = bool(getattr(capabilities, "has_mppt_pv", False))
+            has_aggregate = bool(getattr(capabilities, "has_solar_telemetry", False))
             if (
-                has_mppt
+                (has_mppt or has_aggregate)
                 and getattr(coordinator, "is_available", False)
                 and getattr(coordinator, "data", None)
             ):
@@ -600,7 +608,7 @@ class ConsumptionTracker:
     async def accumulate_daily_solar_energy(self) -> None:
         """Integrate total solar production power → exact daily kWh.
 
-        Total = external solar sensor + Venus DC-coupled PV (MPPT on vA/vD).
+        Total = external solar sensor + battery-reported DC-coupled PV.
         Trapezoidal rule: averages the previous and current sample so a ramping
         production curve is not systematically miscounted (left-Riemann bias).
         """

@@ -1565,6 +1565,9 @@
       "total_discharging_energy": {
         "name": "Total Discharging Energy"
       },
+      "pv_total_generation": {
+        "name": "PV Total Generation"
+      },
       "total_daily_charging_energy": {
         "name": "Total Daily Charging Energy"
       },

@@ -100,10 +100,10 @@ AGGREGATE_SENSOR_DEFINITIONS = [
 ]
 
 
-# Signed net cell power across all batteries (+charge / -discharge), added only
-# for systems with DC-coupled PV (vA/vD). Mirrors the dashboard's per-battery
-# cell-power formula so the SOC card's Charge/Discharge blocks can link to a value
-# that matches what they display, instead of the AC-only system_charge_power (#347).
+# Signed net cell power across all batteries (+charge / -discharge), added for
+# systems with DC-coupled PV. Mirrors the dashboard's per-battery cell-power
+# formula so the SOC card's Charge/Discharge blocks can link to a value that
+# matches what they display, instead of the AC-only system_charge_power (#347).
 SYSTEM_BATTERY_CELL_POWER_DEFINITION = {
     "key": "system_battery_cell_power",
     "name": "System Battery Cell Power",
@@ -361,7 +361,9 @@ class MarstekVenusAggregateSensor(RestoreEntity, SensorEntity):
 
         Mirrors the dashboard's per-battery cell-power formula exactly, so the SOC
         card's Charge/Discharge blocks link to a value that matches what they show:
-        ``-ac_power - ac_offgrid_power + sum(MPPT)`` (offgrid only in Backup Mode).
+        ``-ac_power - ac_offgrid_power + DC PV`` (offgrid only in Backup Mode).
+        DC PV is the sum of MPPT channels when available, or the driver's
+        aggregate ``solar_power`` value for devices such as Anker Solarbank 4.
         ac_power is preferred over the
         unreliable battery_power register; drivers without ac_power (no MPPT, so this
         sensor isn't created for them) fall back to their signed battery_power.
@@ -375,11 +377,21 @@ class MarstekVenusAggregateSensor(RestoreEntity, SensorEntity):
             data = coordinator.data
             ac = data.get("ac_power")
             if ac is not None:
-                mppt = 0.0
-                for mk in ("mppt1_power", "mppt2_power", "mppt3_power", "mppt4_power"):
-                    value = data.get(mk)
-                    if value is not None:
-                        mppt += value
+                mppt_values = [
+                    data.get(mk)
+                    for mk in ("mppt1_power", "mppt2_power", "mppt3_power", "mppt4_power")
+                    if data.get(mk) is not None
+                ]
+                if mppt_values:
+                    mppt = sum(mppt_values)
+                elif getattr(
+                    getattr(coordinator, "capabilities", None),
+                    "has_solar_telemetry",
+                    False,
+                ):
+                    mppt = data.get("solar_power") or 0.0
+                else:
+                    mppt = 0.0
                 # Off-grid/backup output only draws from the cells in Backup Mode
                 # (inverter_state == 4, grid down). With the grid present it's fed
                 # by passthrough, so counting it would inflate discharge / eat charge.

@@ -106,7 +106,8 @@ async def async_setup_entry(
                 for spec in pack_specs:
                     entities.append(ZendurePackSensor(coordinator, pack_index, spec))
         # DC-coupled PV total + solar-corrected battery power exist only on
-        # Venus D/A (units with MPPT registers).
+        # units that expose DC-coupled PV telemetry. Anker exposes the official
+        # aggregate PV value directly; Venus D/A exposes individual MPPT inputs.
         if coordinator.capabilities.has_mppt_pv:
             for definition in SOLAR_POWER_SENSOR_DEFINITIONS:
                 entities.append(MarstekVenusSolarPowerSensor(coordinator, definition))
@@ -158,16 +159,25 @@ async def async_setup_entry(
 
     # Exact daily energy totals from the real power sensors (panel "Energía hoy").
     # Each is added only when its source sensor is configured.
-    # Daily solar = external solar sensor + Venus DC-coupled PV (MPPT on vA/vD),
-    # so it is added when either source exists (decoupled from external config so
-    # removing that sensor no longer makes the entity unavailable).
-    has_mppt_pv = any(c.capabilities.has_mppt_pv for c in coordinators)
-    if controller and (getattr(controller, "solar_production_sensor", None) or has_mppt_pv):
+    # Daily solar = external solar sensor + battery-reported DC-coupled PV
+    # (individual MPPT channels or an official aggregate value).
+    has_solar_telemetry = any(
+        bool(
+            getattr(getattr(c, "capabilities", None), "has_mppt_pv", False)
+            or getattr(
+                getattr(c, "capabilities", None), "has_solar_telemetry", False
+            )
+        )
+        for c in coordinators
+    )
+    if controller and (
+        getattr(controller, "solar_production_sensor", None) or has_solar_telemetry
+    ):
         entities.append(DailySolarEnergySensor(controller))
-    # Live total solar power (external sensor + Venus MPPT). Only useful when a
-    # battery actually has DC-coupled PV (vA/vD); without MPPT it would just mirror
-    # the external sensor, so gate on has_mppt_pv to avoid redundant noise.
-    if controller and has_mppt_pv:
+    # Live total solar power (external sensor + battery-reported DC PV). Only
+    # useful when a battery actually has DC-coupled PV; without it the sensor
+    # would just mirror the external sensor.
+    if controller and has_solar_telemetry:
         entities.append(SystemSolarPowerSensor(controller))
     # Signed system battery power (+charge / -discharge). Always present so the
     # flow-diagram battery node and SOC card blocks can link to a single signed

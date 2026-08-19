@@ -159,6 +159,26 @@ def test_direct_power_reader_sums_external_pv_and_mppt_only():
     assert tracker._read_total_solar_power_kw() == pytest.approx(2.5)
 
 
+def test_direct_power_reader_accepts_aggregate_battery_pv():
+    tracker = ConsumptionTracker.__new__(ConsumptionTracker)
+    tracker._controller = SimpleNamespace(
+        solar_production_sensor=None,
+        coordinators=[
+            SimpleNamespace(
+                capabilities=SimpleNamespace(
+                    has_mppt_pv=False,
+                    has_solar_telemetry=True,
+                ),
+                is_available=True,
+                data={"solar_power": 900},
+            )
+        ],
+    )
+    tracker._hass = SimpleNamespace(states=SimpleNamespace(get=lambda _entity_id: None))
+
+    assert tracker._read_total_solar_power_kw() == pytest.approx(0.9)
+
+
 def test_sustained_peak_shift_starts_a_new_generation():
     profile = _profile()
     profile.request_save = lambda: None

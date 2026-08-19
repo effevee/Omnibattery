@@ -1556,6 +1556,9 @@
       "total_discharging_energy": {
         "name": "Energía Total de Descarga"
       },
+      "pv_total_generation": {
+        "name": "Generación FV Total"
+      },
       "total_daily_charging_energy": {
         "name": "Energía de Carga Diaria"
       },

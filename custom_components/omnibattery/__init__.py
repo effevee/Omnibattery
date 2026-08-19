@@ -367,14 +367,17 @@ async def _async_register_frontend_panel(hass: HomeAssistant, entry: ConfigEntry
                 panel_config["solar_forecast_remaining_entity"] = data[
                     CONF_SOLAR_FORECAST_REMAINING_SENSOR
                 ]
-            # Solar node click target. When any battery has DC-coupled PV (vA/vD)
-            # the node shows external + MPPT, so link the live total-solar sensor
-            # (sensor.marstek_venus_system_solar_power, gated on MPPT in sensor.py)
-            # which sums both — otherwise clicking would open only the external
-            # inverter and mismatch the displayed total (#391). Non-MPPT systems
-            # never get that sensor, so they keep the external-only link (or none).
+            # Solar node click target. When any battery has battery-reported
+            # DC-coupled PV (Venus MPPT or Anker aggregate), the node shows
+            # external + battery PV, so link the live total-solar sensor
+            # (sensor.marstek_venus_system_solar_power, gated on PV telemetry in
+            # sensor.py). Non-PV systems keep the external-only link (or none).
             versions = {b.get(CONF_BATTERY_VERSION) for b in data.get("batteries", [])}
-            if versions & {"vA", "vD"}:
+            brands = {
+                str(b.get("brand", "")).strip().lower()
+                for b in data.get("batteries", [])
+            }
+            if versions & {"vA", "vD"} or "anker" in brands:
                 solar_eid = ent_reg.async_get_entity_id(
                     "sensor", DOMAIN, "marstek_venus_system_solar_power"
                 )

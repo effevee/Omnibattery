@@ -1556,6 +1556,9 @@
       "total_discharging_energy": {
         "name": "Totale Ontlaadenergie"
       },
+      "pv_total_generation": {
+        "name": "Totale PV-opwekking"
+      },
       "total_daily_charging_energy": {
         "name": "Dagelijkse Laadenergie"
       },

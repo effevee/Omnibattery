@@ -1568,6 +1568,9 @@
       "total_discharging_energy": {
         "name": "Énergie de Décharge Totale"
       },
+      "pv_total_generation": {
+        "name": "Production photovoltaïque totale"
+      },
       "total_daily_charging_energy": {
         "name": "Énergie de Charge Journalière"
       },

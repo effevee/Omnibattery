@@ -345,6 +345,17 @@ def _vunit(version, mppt_total, available=True):
     )
 
 
+def _aggregate_pv_unit(solar_power, available=True):
+    return SimpleNamespace(
+        capabilities=SimpleNamespace(
+            has_mppt_pv=False,
+            has_solar_telemetry=True,
+        ),
+        data={"solar_power": solar_power},
+        is_available=available,
+    )
+
+
 def test_total_solar_external_only():
     tracker = _make_solar_tracker({"sensor.aps": _w(1500)}, "sensor.aps", [])
     assert tracker._read_total_solar_power_kw() == pytest.approx(1.5)
@@ -354,6 +365,19 @@ def test_total_solar_mppt_only_no_external():
     # No external sensor configured, panels on the Venus MPPT inputs.
     tracker = _make_solar_tracker({}, None, [_vunit("vA", 800)])
     assert tracker._read_total_solar_power_kw() == pytest.approx(0.8)
+
+
+def test_total_solar_aggregate_pv_only_no_external():
+    # Anker Solarbank 4 reports aggregate PV rather than individual MPPT keys.
+    tracker = _make_solar_tracker({}, None, [_aggregate_pv_unit(1500)])
+    assert tracker._read_total_solar_power_kw() == pytest.approx(1.5)
+
+
+def test_total_solar_external_plus_aggregate_pv():
+    tracker = _make_solar_tracker(
+        {"sensor.aps": _w(1500)}, "sensor.aps", [_aggregate_pv_unit(800)]
+    )
+    assert tracker._read_total_solar_power_kw() == pytest.approx(2.3)
 
 
 def test_total_solar_external_plus_mppt():

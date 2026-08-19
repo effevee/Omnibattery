@@ -1556,6 +1556,9 @@
       "total_discharging_energy": {
         "name": "Gesamte Entladeenergie"
       },
+      "pv_total_generation": {
+        "name": "Gesamte PV-Erzeugung"
+      },
       "total_daily_charging_energy": {
         "name": "Tägliche Ladeenergie"
       },

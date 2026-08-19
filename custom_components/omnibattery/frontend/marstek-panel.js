@@ -464,7 +464,7 @@ const K = {
   acPower: "ac_power", // AC-side power. HA sign: - charge / + discharge (W)
   batteryPower: "battery_power", // synthesised cell power (Zendure). + charge / - discharge (W)
   batteryCellPower: "battery_cell_power", // Venus A/D net cell power. + charge / - discharge (W)
-  solarPower: "solar_power", // Venus A/D total MPPT power (W)
+  solarPower: "solar_power", // aggregate DC PV power (W)
   acOffgridPower: "ac_offgrid_power", // off-grid/backup AC output. HA sign: + discharge (W)
   storedEnergy: "stored_energy", // kWh
   batteryTotalEnergy: "battery_total_energy", // capacity kWh
@@ -1542,15 +1542,22 @@ class MarstekVenusPanel extends HTMLElement {
       // Off-grid/backup AC output port (+ discharge). Battery can also discharge
       // through it to backup loads that the grid meter never sees.
       const acoW = this._watts(get(K.acOffgridPower));
-      // DC-coupled PV on Venus D/A: sum this unit's own MPPT inputs (W, >=0).
+      // DC-coupled PV: sum this unit's own MPPT inputs (W, >=0) when exposed.
       let mpptW = null;
       for (const mk of MPPT_KEYS) {
         const s = this._watts(get(mk));
         if (s != null) mpptW = (mpptW || 0) + s;
       }
+      // Some batteries (Anker Solarbank 4) publish only the aggregate DC PV
+      // value. It uses the same canonical translation key as the Venus total,
+      // so it can fill the per-battery model without inventing MPPT channels.
+      if (mpptW == null) {
+        const aggregateSolarW = this._watts(get(K.solarPower));
+        if (aggregateSolarW != null) mpptW = Math.max(0, aggregateSolarW);
+      }
       // Derive cell power from both AC ports (- charge / + discharge), negated to
-      // the panel's + charge / - discharge convention. On Venus D/A the DC PV
-      // charges the cells without crossing the AC port, so add this unit's MPPT to
+      // the panel's + charge / - discharge convention. On DC-coupled-PV units the
+      // PV charges the cells without crossing the AC port, so add this unit's DC PV to
       // recover the true cell power. ac_power is used instead of the battery_power
       // sensor, whose reported value is unreliable.
       // Zendure exposes no ac_power; fall back to its synthesised battery_power
@@ -1635,7 +1642,7 @@ class MarstekVenusPanel extends HTMLElement {
     const battery = battW != null ? battW / 1000 : 0;
 
     // solar: solar_entity is already the complete production figure — the
-    // system_solar_power aggregate (external + Σ MPPT) on Venus D/A, or the
+    // system_solar_power aggregate (external + battery-reported DC PV), or the
     // external-only sensor on non-MPPT systems. So use it directly; ΣMPPT is only
     // a fallback for before that aggregate sensor is readable, NOT an addition,
     // otherwise the DC-coupled share is double-counted on vA/vD (#407).
