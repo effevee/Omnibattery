@@ -896,8 +896,20 @@ def _parse_step_b_battery_limits(step_b: dict | None) -> dict[str, dict]:
     return out
 
 
-def _finalize_slot(step_a: dict, step_b: dict | None) -> dict:
-    """Merge step A and optional step B into the persisted slot shape."""
+def _finalize_slot(
+    step_a: dict, step_b: dict | None, existing: dict | None = None
+) -> dict:
+    """Merge step A and optional step B into the persisted slot shape.
+
+    ``existing`` is the stored slot occupying this position, when there is one.
+    Every stored key the form does not emit — today that is ``enabled``, written
+    by the per-slot enable switch — is carried over from it, so re-saving the
+    flow does not reset it to its default.
+
+    The carry-over only happens when the form still describes the same schedule.
+    Editing a slot into a different window replaces it, and a replacement must
+    not inherit a disabled state that has no form field to reveal it.
+    """
     soc_on = bool(step_a.get("soc_override_enabled", False))
     power_on = bool(step_a.get("power_override_enabled", False))
     parsed = _parse_step_b_battery_limits(step_b) if (soc_on or power_on) else {}
@@ -917,11 +929,10 @@ def _finalize_slot(step_a: dict, step_b: dict | None) -> dict:
                 entry["max_discharge_power_w"] = limits["max_discharge_power_w"]
         if entry:
             battery_limits[b_key] = entry
-    return {
+    slot = {
         "start_time": step_a["start_time"],
         "end_time": step_a["end_time"],
         "days": step_a["days"],
-        "enabled": True,
         "battery_scope": step_a.get("battery_scope", SLOT_BATTERY_SCOPE_ALL),
         "allow_charge": bool(step_a.get("allow_charge", False)),
         "allow_discharge": bool(step_a.get("allow_discharge", True)),
@@ -930,6 +941,13 @@ def _finalize_slot(step_a: dict, step_b: dict | None) -> dict:
         "battery_limits": battery_limits,
         "mode": step_a.get("mode", DEFAULT_SLOT_MODE),
     }
+    identity = ("start_time", "end_time", "days", "battery_scope")
+    replaces_same_slot = bool(existing) and all(
+        existing.get(key) == slot[key] for key in identity
+    )
+    merged = {**existing, **slot} if replaces_same_slot else dict(slot)
+    merged.setdefault("enabled", True)
+    return merged
 
 
 
@@ -3953,7 +3971,11 @@ class OptionsFlowHandler(OptionsFlow):
         """Persist the pending slot and advance the flow."""
         if self._pending_slot_step_a is None:
             return await self.async_step_add_time_slot()
-        slot = _finalize_slot(self._pending_slot_step_a, step_b)
+        slot = _finalize_slot(
+            self._pending_slot_step_a,
+            step_b,
+            self._options_slot_defaults(len(self.time_slots)),
+        )
         self.time_slots.append(slot)
         self._pending_slot_step_a = None
         if len(self.time_slots) < MAX_TIME_SLOTS:
@@ -4053,6 +4075,18 @@ class OptionsFlowHandler(OptionsFlow):
                 "cover_home_when_active": user_input.get("cover_home_when_active", False),
                 "ev_charger_no_telemetry": ev_no_telemetry,
             }
+            # The Enabled switch and the Exclusion % slider write straight into
+            # the stored record and have no field on this form. Lay the form
+            # result over the stored device so those keys survive a re-save.
+            # Only do that while the form still describes the same device:
+            # replacing the device at this position must not inherit a disabled
+            # state the user cannot see here, let alone change.
+            stored = self.config_entry.data.get("excluded_devices", [])
+            index = len(self.excluded_devices)
+            previous = stored[index] if index < len(stored) else {}
+            previous_id = previous.get("power_sensor") or previous.get("activity_sensor")
+            if previous_id and previous_id == (power_sensor or activity_sensor):
+                excluded_device = {**previous, **excluded_device}
             self.excluded_devices.append(excluded_device)
 
             # Check if user wants to add more devices (max 4)
