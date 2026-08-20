@@ -270,6 +270,32 @@ def test_refresh_blocks_starts_recalibration_at_top_voltage_on_low_soc():
     assert ctrl._normal_balance_recal_override[c] is True
 
 
+def test_refresh_blocks_queues_measurement_when_bms_cuts_below_pause_voltage():
+    c = _Coord(
+        data={
+            "max_cell_voltage": 3.58,
+            "min_cell_voltage": 3.54,
+            "battery_soc": 99,
+            "battery_power": 0,
+            "inverter_state": 1,
+        },
+        commanded_charge_power=200,
+    )
+    ctrl = _controller(
+        [c],
+        _weekly_charge_mgr=SimpleNamespace(
+            is_bms_cutoff_confirmed=lambda _coordinator: True,
+        ),
+    )
+
+    _mgr(ctrl).refresh_blocks()
+
+    assert (
+        ctrl._normal_balance_bms_cutoff_measurement[c]
+        == MaxSocChargeManager._BMS_CUTOFF_MEASUREMENT_PENDING
+    )
+
+
 def test_venus_ad_latches_bms_owned_charge_past_voltage_relaxation():
     c = _Coord(
         battery_version="vA",
@@ -600,6 +626,38 @@ async def test_handle_measurement_records_delta_after_wait():
     assert ctrl._normal_balance_phases[c] == "MEASURED"
     assert len(monitor.calls) == 1
     assert monitor.calls[0][4] == "top_charge_3_55v"
+
+
+async def test_handle_measurement_records_bms_cutoff_delta_below_pause_voltage():
+    c = _Coord(
+        data={"max_cell_voltage": 3.58, "min_cell_voltage": 3.54,
+              "battery_soc": 99}
+    )
+
+    class _Monitor:
+        def __init__(self):
+            self.calls = []
+
+        async def async_record_top_balance_measurement(
+            self, coordinator, vmax, vmin, soc, phase
+        ):
+            self.calls.append((coordinator.name, vmax, vmin, soc, phase))
+
+    monitor = _Monitor()
+    ctrl = _controller(
+        [c],
+        _set_battery_power=lambda *a, **k: _noop(),
+        _balance_monitor=monitor,
+    )
+    ctrl._normal_balance_bms_cutoff_measurement[c] = "pending"
+    ctrl._normal_balance_phases[c] = "WAIT_MEASURE"
+    ctrl._normal_balance_measure_started[c] = dt_util.utcnow() - timedelta(seconds=61)
+
+    await _mgr(ctrl).handle_measurement()
+
+    assert ctrl._normal_balance_bms_cutoff_measurement[c] == "done"
+    assert ctrl._normal_balance_last_delta_v[c] == 0.04
+    assert monitor.calls[0][4] == "top_charge_bms_cutoff"
 
 
 async def test_handle_measurement_skips_during_soc_recalibration():

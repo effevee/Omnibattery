@@ -650,17 +650,35 @@ class WeeklyFullChargeManager:
         ctrl._weekly_charge_status["batteries"] = completion_batteries
 
         # Preserve the post-cutoff measurement request while clearing the
-        # debounce counters used by the weekly completion detector.
+        # debounce counters used by the weekly completion detector. A Venus E
+        # pack may be cut by its BMS below 3.60 V, so this is not exclusive to
+        # the coupled Venus A/D path.
         measurement_state = getattr(
             ctrl, "_normal_balance_bms_cutoff_measurement", None
         )
         if measurement_state is not None:
             for coordinator in ctrl.coordinators:
+                data = coordinator.data or {}
+                try:
+                    vmax = float(data.get("max_cell_voltage"))
+                except (TypeError, ValueError):
+                    vmax = None
+                taper_latched = getattr(
+                    ctrl, "_normal_balance_voltage_tapered", {}
+                ).get(coordinator, False)
+                in_taper_zone = (
+                    vmax is not None
+                    and vmax >= NORMAL_BALANCE_TAPER_CELL_VOLTAGE
+                )
                 if (
-                    getattr(coordinator, "battery_version", None)
-                    in NORMAL_BALANCE_BMS_CUTOFF_VERSIONS
-                    and self._bms_cutoff_counts.get(coordinator.name, 0)
+                    self._bms_cutoff_counts.get(coordinator.name, 0)
                     >= _BMS_CUTOFF_REQUIRED_CYCLES
+                    and (
+                        getattr(coordinator, "battery_version", None)
+                        in NORMAL_BALANCE_BMS_CUTOFF_VERSIONS
+                        or in_taper_zone
+                        or taper_latched
+                    )
                 ):
                     measurement_state[coordinator] = "pending"
         self._bms_cutoff_counts.clear()
@@ -688,8 +706,9 @@ class WeeklyFullChargeManager:
                 measurement_state is not None
                 and measurement_state.get(coordinator) == "pending"
             ):
-                # Venus A/D get their 60 s measurement after the confirmed BMS
-                # cutoff; do not replace it with the immediate fallback sample.
+                # A BMS cutoff measurement gets its 60 s rest window in the
+                # normal measurement handler; do not replace it with the
+                # immediate completion snapshot.
                 continue
             if coordinator in measured:
                 continue

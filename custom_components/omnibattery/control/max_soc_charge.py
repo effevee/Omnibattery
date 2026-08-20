@@ -15,6 +15,8 @@ drive active cell balancing. It manages the final stretch of a normal max-SOC
 - Coupled Venus A/D packs use the same one-shot retry after their first provisional
   BMS refusal, because a pack handover can look identical to a final cutoff.
 - Passive cell-delta measurement at the top, reported to the balance monitor.
+  A confirmed BMS cutoff in the taper zone is also a valid trigger when the
+  battery stops below the integration's 3.60 V pause point.
 
 The latched state (the ``_normal_balance_*`` dicts) stays on the controller
 because weekly_full_charge.py and the main control loop read and mutate it;
@@ -633,6 +635,44 @@ class MaxSocChargeManager:
                     bms_cutoff_state.pop(coordinator, None)
                 continue
 
+            # Venus E/v2/v3 packs can reach their own BMS cutoff below the
+            # integration pause point (for example at 3.58 V). The shared
+            # detector is debounced and only counts a commanded refusal, so a
+            # confirmed cutoff in the taper zone is a valid alternative
+            # measurement trigger. Do not intercept the high-voltage SOC
+            # recalibration retry: a cutoff above 3.60 V still gets its
+            # existing one-shot 200 W retry first.
+            measurement_state = getattr(
+                c, "_normal_balance_bms_cutoff_measurement", None
+            )
+            if measurement_state is None:
+                measurement_state = {}
+                c._normal_balance_bms_cutoff_measurement = measurement_state
+            measurement_status = measurement_state.get(coordinator)
+            if (
+                measurement_status == self._BMS_CUTOFF_MEASUREMENT_DONE
+                and not in_zone
+            ):
+                # The next top-charge session may take another measurement.
+                measurement_state.pop(coordinator, None)
+                measurement_status = None
+            taper_latched = getattr(
+                c, "_normal_balance_voltage_tapered", {}
+            ).get(coordinator, False)
+            if (
+                self._bms_cutoff_confirmed(coordinator)
+                and measurement_status not in {
+                    self._BMS_CUTOFF_MEASUREMENT_PENDING,
+                    self._BMS_CUTOFF_MEASUREMENT_DONE,
+                }
+                and vmax_f is not None
+                and vmax_f < NORMAL_BALANCE_PAUSE_CELL_VOLTAGE
+                and (in_zone or taper_latched)
+                and not c._normal_balance_recal_retry_pending.get(coordinator, False)
+                and not c._normal_balance_recal_retry_active.get(coordinator, False)
+            ):
+                measurement_state[coordinator] = self._BMS_CUTOFF_MEASUREMENT_PENDING
+
             weekly_active = (
                 hasattr(c, "_weekly_charge_mgr")
                 and c._weekly_full_charge_unlocked()
@@ -750,26 +790,26 @@ class MaxSocChargeManager:
         weekly_active = (
             hasattr(c, "_weekly_charge_mgr") and c._weekly_full_charge_unlocked()
         )
+        measurement_states = getattr(
+            c, "_normal_balance_bms_cutoff_measurement", {}
+        )
 
         for coordinator in c.coordinators:
             if coordinator.data is None or not self._taper_applies(coordinator):
                 continue
-            post_bms_measurement = False
-            if self._uses_bms_cutoff_at_top(coordinator):
-                measurement_state = getattr(
-                    c, "_normal_balance_bms_cutoff_measurement", {}
-                ).get(coordinator)
-                if measurement_state == self._BMS_CUTOFF_MEASUREMENT_PENDING:
-                    # After the BMS cutoff, wait without charging and take one
-                    # 60 s top-balance measurement. This does not impose the
-                    # pre-cutoff 3.60 V integration stop.
-                    post_bms_measurement = True
-                else:
-                    # Before BMS cutoff, coupled Venus A/D packs must continue
-                    # through the top-cell reading without an integration hold.
-                    c._normal_balance_phases.pop(coordinator, None)
-                    c._normal_balance_measure_started.pop(coordinator, None)
-                    continue
+            post_bms_measurement = (
+                measurement_states.get(coordinator)
+                == self._BMS_CUTOFF_MEASUREMENT_PENDING
+            )
+            if (
+                self._uses_bms_cutoff_at_top(coordinator)
+                and not post_bms_measurement
+            ):
+                # Before BMS cutoff, coupled Venus A/D packs must continue
+                # through the top-cell reading without an integration hold.
+                c._normal_balance_phases.pop(coordinator, None)
+                c._normal_balance_measure_started.pop(coordinator, None)
+                continue
             if weekly_active and not post_bms_measurement:
                 # Let the weekly taper charge to the BMS cutoff; don't hold/measure.
                 c._normal_balance_phases.pop(coordinator, None)
@@ -823,15 +863,14 @@ class MaxSocChargeManager:
                     c._normal_balance_last_delta_v[coordinator] = delta_v
                     phase = "MEASURED"
                     c._normal_balance_phases[coordinator] = phase
-                    measurement_state = getattr(
-                        c, "_normal_balance_bms_cutoff_measurement", {}
-                    )
                     is_post_bms_measurement = (
-                        measurement_state.get(coordinator)
+                        measurement_states.get(coordinator)
                         == self._BMS_CUTOFF_MEASUREMENT_PENDING
                     )
                     if is_post_bms_measurement:
-                        measurement_state[coordinator] = self._BMS_CUTOFF_MEASUREMENT_DONE
+                        measurement_states[coordinator] = (
+                            self._BMS_CUTOFF_MEASUREMENT_DONE
+                        )
                     if c._balance_monitor is not None:
                         await c._balance_monitor.async_record_top_balance_measurement(
                             coordinator,

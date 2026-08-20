@@ -202,3 +202,50 @@ def test_venus_ad_first_cutoff_does_not_complete_until_retry_is_refused():
         weekly.tick_bms_cutoff()
     assert weekly.is_battery_full(coord) is True
     assert coord not in ctrl._normal_balance_bms_cutoff_retry_active
+
+
+async def test_weekly_completion_queues_post_cutoff_measurement_below_pause_voltage():
+    """A weekly v2 cutoff at 3.58 V gets the same settled measurement as vA/vD."""
+    coord = _Coord(
+        "bat",
+        soc=98,
+        power=0,
+        commanded=0,
+        vmax=3.58,
+        battery_version="v2",
+    )
+    coord.enable_charge_hysteresis = False
+    ctrl = SimpleNamespace(
+        coordinators=[coord],
+        _normal_balance_bms_cutoff_measurement={},
+        _normal_balance_voltage_tapered={coord: True},
+        _normal_balance_last_delta_v={},
+        _balance_monitor=None,
+        _weekly_charge_status={},
+        weekly_full_charge_complete=False,
+        _weekly_charge_saved_max_soc={},
+        _weekly_charge_needs_restore=False,
+    )
+    weekly = WeeklyFullChargeManager.__new__(WeeklyFullChargeManager)
+    weekly._controller = ctrl
+    weekly._bms_cutoff_counts = {
+        "bat": _BMS_CUTOFF_REQUIRED_CYCLES,
+    }
+    weekly._cutoff_applied_names = set()
+
+    async def _restore(_reason):
+        return True
+
+    async def _save_state():
+        return None
+
+    weekly._restore_hardware_cutoffs = _restore
+    weekly.save_state = _save_state
+
+    await weekly._complete_weekly_charge("all_batteries_full")
+
+    assert (
+        ctrl._normal_balance_bms_cutoff_measurement[coord]
+        == MaxSocChargeManager._BMS_CUTOFF_MEASUREMENT_PENDING
+    )
+    assert ctrl._normal_balance_last_delta_v == {}
