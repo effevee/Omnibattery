@@ -259,3 +259,34 @@ async def test_options_flow_keeps_runtime_fields_when_only_activity_sensor_is_ad
     assert flow.excluded_devices[0]["activity_sensor"] == "binary_sensor.ev_charging"
     assert flow.excluded_devices[0]["enabled"] is False
     assert flow.excluded_devices[0]["exclusion_pct"] == 60
+
+
+async def test_options_flow_keeps_runtime_fields_when_power_sensor_is_added():
+    """Adding telemetry does not replace an activity-identified device."""
+    entry = SimpleNamespace(
+        entry_id="power-entry",
+        data={
+            "excluded_devices": [
+                {
+                    "power_sensor": None,
+                    "activity_sensor": "binary_sensor.ev_charging",
+                    "ev_charger_no_telemetry": True,
+                    "enabled": False,
+                    "exclusion_pct": 60,
+                }
+            ]
+        },
+    )
+    flow = _options_flow(entry)
+
+    await flow.async_step_add_excluded_device(
+        {
+            "power_sensor": "sensor.wallbox_power",
+            "activity_sensor": "binary_sensor.ev_charging",
+        }
+    )
+
+    assert flow.excluded_devices[0]["power_sensor"] == "sensor.wallbox_power"
+    assert flow.excluded_devices[0]["activity_sensor"] == "binary_sensor.ev_charging"
+    assert flow.excluded_devices[0]["enabled"] is False
+    assert flow.excluded_devices[0]["exclusion_pct"] == 60

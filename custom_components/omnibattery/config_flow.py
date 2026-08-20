@@ -4084,8 +4084,11 @@ class OptionsFlowHandler(OptionsFlow):
             stored = self.config_entry.data.get("excluded_devices", [])
             index = len(self.excluded_devices)
             previous = stored[index] if index < len(stored) else {}
-            previous_id = previous.get("power_sensor") or previous.get("activity_sensor")
-            if previous_id and previous_id == (power_sensor or activity_sensor):
+            identity_field = (
+                "power_sensor" if previous.get("power_sensor") else "activity_sensor"
+            )
+            previous_id = previous.get(identity_field)
+            if previous_id and previous_id == excluded_device.get(identity_field):
                 excluded_device = {**previous, **excluded_device}
             self.excluded_devices.append(excluded_device)
 
