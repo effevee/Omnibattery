@@ -205,3 +205,57 @@ async def test_options_flow_keeps_fields_that_have_no_form_field():
 
     assert flow.excluded_devices[0]["enabled"] is False
     assert flow.excluded_devices[0]["exclusion_pct"] == 60
+
+
+async def test_options_flow_does_not_hand_runtime_fields_to_a_replacement():
+    """Swapping the device at a position must not inherit its disabled state."""
+    entry = SimpleNamespace(
+        entry_id="replacement-entry",
+        data={
+            "excluded_devices": [
+                {
+                    "power_sensor": "sensor.wallbox_power",
+                    "enabled": False,
+                    "exclusion_pct": 60,
+                }
+            ]
+        },
+    )
+    flow = _options_flow(entry)
+
+    await flow.async_step_add_excluded_device(
+        {"power_sensor": "sensor.heat_pump_power"}
+    )
+
+    assert flow.excluded_devices[0]["power_sensor"] == "sensor.heat_pump_power"
+    assert flow.excluded_devices[0].get("enabled", True) is True
+    assert "exclusion_pct" not in flow.excluded_devices[0]
+
+
+async def test_options_flow_keeps_runtime_fields_when_only_activity_sensor_is_added():
+    """The device is unchanged, so its Enabled state must survive the edit."""
+    entry = SimpleNamespace(
+        entry_id="activity-entry",
+        data={
+            "excluded_devices": [
+                {
+                    "power_sensor": "sensor.wallbox_power",
+                    "enabled": False,
+                    "exclusion_pct": 60,
+                }
+            ]
+        },
+    )
+    flow = _options_flow(entry)
+
+    await flow.async_step_add_excluded_device(
+        {
+            "power_sensor": "sensor.wallbox_power",
+            "activity_sensor": "binary_sensor.ev_charging",
+            "dynamic_power_control": True,
+        }
+    )
+
+    assert flow.excluded_devices[0]["activity_sensor"] == "binary_sensor.ev_charging"
+    assert flow.excluded_devices[0]["enabled"] is False
+    assert flow.excluded_devices[0]["exclusion_pct"] == 60

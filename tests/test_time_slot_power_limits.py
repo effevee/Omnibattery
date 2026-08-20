@@ -91,7 +91,7 @@ def test_finalize_slot_keeps_disabled_state_of_the_slot_it_replaces():
         "battery_scope": SLOT_BATTERY_SCOPE_ALL,
     }
 
-    slot = _finalize_slot(step_a, None, {"enabled": False})
+    slot = _finalize_slot(step_a, None, {**step_a, "enabled": False})
 
     assert slot["enabled"] is False
 
@@ -105,3 +105,22 @@ def test_finalize_slot_defaults_to_enabled_for_a_brand_new_slot():
     }
 
     assert _finalize_slot(step_a, None)["enabled"] is True
+
+
+def test_finalize_slot_does_not_hand_disabled_state_to_a_different_window():
+    """Editing a slot into another window replaces it, so it starts enabled."""
+    step_a = {
+        "start_time": "11:00",
+        "end_time": "15:00",
+        "days": ["mon"],
+        "battery_scope": SLOT_BATTERY_SCOPE_ALL,
+    }
+    stored = {
+        "start_time": "23:00",
+        "end_time": "07:00",
+        "days": ["mon"],
+        "battery_scope": SLOT_BATTERY_SCOPE_ALL,
+        "enabled": False,
+    }
+
+    assert _finalize_slot(step_a, None, stored)["enabled"] is True

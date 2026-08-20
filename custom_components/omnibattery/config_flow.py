@@ -898,10 +898,14 @@ def _finalize_slot(
 ) -> dict:
     """Merge step A and optional step B into the persisted slot shape.
 
-    ``existing`` is the stored slot this one replaces, when there is one. Keys
-    written at runtime rather than through the form (the per-slot enable
-    switch) are carried over from it, so re-saving the flow does not reset
-    them to their defaults.
+    ``existing`` is the stored slot occupying this position, when there is one.
+    Every stored key the form does not emit — today that is ``enabled``, written
+    by the per-slot enable switch — is carried over from it, so re-saving the
+    flow does not reset it to its default.
+
+    The carry-over only happens when the form still describes the same schedule.
+    Editing a slot into a different window replaces it, and a replacement must
+    not inherit a disabled state that has no form field to reveal it.
     """
     soc_on = bool(step_a.get("soc_override_enabled", False))
     power_on = bool(step_a.get("power_override_enabled", False))
@@ -934,7 +938,11 @@ def _finalize_slot(
         "battery_limits": battery_limits,
         "mode": step_a.get("mode", DEFAULT_SLOT_MODE),
     }
-    merged = {**(existing or {}), **slot}
+    identity = ("start_time", "end_time", "days", "battery_scope")
+    replaces_same_slot = bool(existing) and all(
+        existing.get(key) == slot[key] for key in identity
+    )
+    merged = {**existing, **slot} if replaces_same_slot else dict(slot)
     merged.setdefault("enabled", True)
     return merged
 
@@ -3950,10 +3958,15 @@ class OptionsFlowHandler(OptionsFlow):
             # The Enabled switch and the Exclusion % slider write straight into
             # the stored record and have no field on this form. Lay the form
             # result over the stored device so those keys survive a re-save.
+            # Only do that while the form still describes the same device:
+            # replacing the device at this position must not inherit a disabled
+            # state the user cannot see here, let alone change.
             stored = self.config_entry.data.get("excluded_devices", [])
             index = len(self.excluded_devices)
-            if index < len(stored):
-                excluded_device = {**stored[index], **excluded_device}
+            previous = stored[index] if index < len(stored) else {}
+            previous_id = previous.get("power_sensor") or previous.get("activity_sensor")
+            if previous_id and previous_id == (power_sensor or activity_sensor):
+                excluded_device = {**previous, **excluded_device}
             self.excluded_devices.append(excluded_device)
 
             # Check if user wants to add more devices (max 4)
