@@ -6,7 +6,8 @@ PR3). Following the ``MaxSocChargeManager`` template, the manager owns the logic
 but the runtime *state* stays on the controller by reference
 (``_dynamic_pricing_schedule``, ``_dp_*``, ``_realtime_price_charging``,
 ``_price_based_discharge_blocked``, ``_current_price_slot_active``,
-``_price_data_status``, ``_last_decision_data``) because ``sensor.py`` /
+``_price_data_status``, ``_last_decision_data``,
+``_last_chronological_diagnostics``) because ``sensor.py`` /
 ``binary_sensor.py`` read it and the PD section of the control loop consumes the
 discharge block. The manager reaches all controller state and collaborators via
 ``self._controller``; price math goes straight to the pure ``calculations``
@@ -110,6 +111,39 @@ _PRICE_LIST_ATTRS = {
     PRICE_INTEGRATION_EPEX: ("data",),
     PRICE_INTEGRATION_ENTSOE: ("prices_today", "prices_tomorrow"),
 }
+
+# These values describe the forecast/timeline simulation itself.  They are
+# deliberately kept separate from the current balance decision because the
+# latter is replaced by pre-slot and evening re-evaluations that do not run
+# the chronological planner.
+_CHRONOLOGICAL_DIAGNOSTIC_KEYS = (
+    "chronological_source",
+    "solar_timeline_source",
+    "solar_forecast_original_source",
+    "solar_forecast_conversion",
+    "solar_remaining_raw_kwh",
+    "solar_safety_margin_kwh",
+    "solar_remaining_effective_kwh",
+    "solar_timeline_effective_kwh",
+    "solar_timeline_energy_error_kwh",
+    "solar_timeline_fallback_reason",
+    "solar_profile_mature",
+    "solar_profile_days",
+    "solar_profile_coverage_ratio",
+    "solar_profile_generation",
+    "solar_shadow_selected_source",
+    "curtailment_timeline_mismatch",
+    "earliest_projected_depletion",
+    "minimum_projected_energy_kwh",
+    "minimum_projected_soc",
+    "deadline_required_kwh",
+    "flexible_required_kwh",
+    "deadline_shortfall_kwh",
+    "total_shortfall_kwh",
+    "energy_deadlines",
+    "chronological_plan_reason",
+    "guaranteed_floor_deadline",
+)
 
 
 class DynamicPricingEvaluationHorizon(Enum):
@@ -2028,6 +2062,31 @@ class PricingManager:
             conversion=decision_data.get("solar_forecast_conversion", "none"),
         )
 
+    def _store_chronological_diagnostics(
+        self, decision_data: dict[str, Any]
+    ) -> None:
+        """Retain the latest successful timeline simulation independently.
+
+        ``_last_decision_data`` is intentionally mutable runtime state and is
+        replaced by several cheaper balance checks.  Keep only the fields
+        produced by the chronological planner so those checks cannot turn a
+        valid forecast diagnostic into ``unknown`` in the status entity.
+        """
+        snapshot = {
+            key: decision_data[key]
+            for key in _CHRONOLOGICAL_DIAGNOSTIC_KEYS
+            if key in decision_data
+        }
+        if "energy_deadlines" in snapshot and isinstance(
+            snapshot["energy_deadlines"], list
+        ):
+            snapshot["energy_deadlines"] = [
+                dict(item) if isinstance(item, dict) else item
+                for item in snapshot["energy_deadlines"]
+            ]
+        if snapshot:
+            self._controller._last_chronological_diagnostics = snapshot
+
     def _build_chronological_plan(
         self,
         *,
@@ -2035,8 +2094,15 @@ class PricingManager:
         slots: list[PriceSlot],
         decision_data: dict[str, Any],
         price_ceiling: float | None,
+        diagnostic_only: bool = False,
     ) -> ChronologicalPlan | None:
-        """Adapt live controller forecasts to the pure chronological planner."""
+        """Adapt live controller forecasts to the pure chronological planner.
+
+        A diagnostic-only build simulates the same horizon without claiming
+        that an executable chronological charge calendar is active.  This is
+        useful when the balance is already sufficient: the projection is still
+        valuable even though no grid charge will be scheduled.
+        """
         tracker = getattr(self._controller, "_consumption_tracker", None)
         profile = getattr(tracker, "consumption_profile", None)
         if profile is None:
@@ -2178,7 +2244,8 @@ class PricingManager:
             deadlines = build_energy_deadlines(intervals, usable)
             required = max(0.0, float(decision_data.get("planned_grid_charge_kwh", 0.0) or 0.0))
             if (
-                getattr(self._controller, "_predictive_min_soc_floor_enabled", False)
+                not diagnostic_only
+                and getattr(self._controller, "_predictive_min_soc_floor_enabled", False)
                 and solar_start_dt is not None
                 and solar_start_dt > now
             ):
@@ -2260,7 +2327,7 @@ class PricingManager:
                 max_price_threshold=price_ceiling,
             )
             decision_data.update({
-                "chronological_planning_active": True,
+                "chronological_planning_active": not diagnostic_only,
                 "chronological_source": forecast.source,
                 "solar_timeline_source": solar_source,
                 "solar_forecast_original_source": solar_input.original_source,
@@ -2309,6 +2376,7 @@ class PricingManager:
                     for item in plan.deadlines
                 ],
             })
+            self._store_chronological_diagnostics(decision_data)
             return plan
         except (AttributeError, IndexError, TypeError, ValueError) as exc:
             _LOGGER.warning("Dynamic pricing: chronological planning fallback: %s", exc)
@@ -2457,6 +2525,11 @@ class PricingManager:
         now = datetime.now()
         today = now.date()
 
+        # A new full-day evaluation starts a fresh diagnostic snapshot.  Later
+        # balance-only re-evaluations intentionally leave it intact.
+        if horizon is DynamicPricingEvaluationHorizon.DAILY:
+            self._controller._last_chronological_diagnostics = None
+
         _LOGGER.info(
             "Dynamic pricing: running %s-horizon evaluation at %s",
             horizon.value,
@@ -2514,6 +2587,16 @@ class PricingManager:
             self._controller._dp_daily_avg_price = sum(s.price for s in slots) / len(slots)
             _LOGGER.debug("Dynamic pricing: daily average price %.4f from %d slots", self._controller._dp_daily_avg_price, len(slots))
         if not slots:
+            # Price data is not required to calculate the projected solar and
+            # depletion diagnostics.  Preserve those diagnostics even when the
+            # evaluation has no executable calendar to build.
+            self._build_chronological_plan(
+                now=now,
+                slots=[],
+                decision_data=decision_data,
+                price_ceiling=None,
+                diagnostic_only=True,
+            )
             self._build_curtailment_plan([], [], now=now)
             opportunity_pending = bool(
                 self._negative_price_feature_enabled()
@@ -2587,9 +2670,10 @@ class PricingManager:
         opportunity_selected = bool(negative_price_selected)
 
         chronological_plan = None
-        if deficit_charging_needed or getattr(
+        floor_enabled = getattr(
             self._controller, "_predictive_min_soc_floor_enabled", False
-        ):
+        )
+        if deficit_charging_needed or floor_enabled:
             chronological_plan = self._build_chronological_plan(
                 now=eval_now,
                 slots=slots,
@@ -2619,6 +2703,17 @@ class PricingManager:
                     self._controller.max_contracted_power,
                     self._controller.max_charge_capacity,
                 )
+        else:
+            # A sufficient balance still deserves a forecast/timeline
+            # projection.  Keep it diagnostic-only so the final schedule keeps
+            # its existing no-charge semantics.
+            self._build_chronological_plan(
+                now=eval_now,
+                slots=slots,
+                decision_data=decision_data,
+                price_ceiling=ceiling,
+                diagnostic_only=True,
+            )
         if chronological_plan is not None:
             deficit_selected = [allocation.slot for allocation in chronological_plan.allocations]
         elif deficit_charging_needed or not opportunity_selected:

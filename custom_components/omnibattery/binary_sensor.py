@@ -504,9 +504,36 @@ class PredictiveChargingStatusSensor(BinarySensorEntity):
                 (d.isoformat(), c) for d, c in self.controller._daily_consumption_history
             ]
 
-        # Add last decision data if available (for diagnostics)
-        if hasattr(self.controller, '_last_decision_data') and self.controller._last_decision_data:
-            decision = self.controller._last_decision_data
+        # Add last decision data if available (for diagnostics).  Timeline
+        # fields also have an independent snapshot because pre-slot/evening
+        # balance checks replace _last_decision_data without rebuilding them.
+        decision = getattr(self.controller, "_last_decision_data", None)
+        if not isinstance(decision, dict):
+            decision = {}
+        chronological_diagnostics = getattr(
+            self.controller, "_last_chronological_diagnostics", None
+        )
+        if not isinstance(chronological_diagnostics, dict):
+            chronological_diagnostics = {}
+
+        def _chronological_value(key, default=None):
+            if key in decision:
+                return decision[key]
+            return chronological_diagnostics.get(key, default)
+
+        if decision or chronological_diagnostics:
+            if "chronological_planning_active" in decision:
+                chronological_active = bool(
+                    decision.get("chronological_planning_active")
+                )
+            else:
+                chronological_active = bool(
+                    getattr(
+                        getattr(self.controller, "_dynamic_pricing_schedule", None),
+                        "chronological_planning_active",
+                        False,
+                    )
+                )
             attrs.update({
                 "stored_energy_kwh": decision.get("stored_energy_kwh"),
                 "usable_energy_kwh": decision.get("usable_energy_kwh"),
@@ -524,39 +551,81 @@ class PredictiveChargingStatusSensor(BinarySensorEntity):
                 "energy_deficit_kwh": decision.get("energy_deficit_kwh"),
                 "planned_grid_charge_kwh": decision.get("planned_grid_charge_kwh"),
                 "solar_forecast_kwh": decision.get("solar_forecast_kwh"),
-                "solar_forecast_original_source": decision.get("solar_forecast_original_source"),
-                "solar_forecast_conversion": decision.get("solar_forecast_conversion"),
-                "solar_remaining_raw_kwh": decision.get("solar_remaining_raw_kwh"),
-                "solar_safety_margin_kwh": decision.get("solar_safety_margin_kwh"),
-                "solar_remaining_effective_kwh": decision.get("solar_remaining_effective_kwh"),
+                "solar_forecast_original_source": _chronological_value(
+                    "solar_forecast_original_source"
+                ),
+                "solar_forecast_conversion": _chronological_value(
+                    "solar_forecast_conversion"
+                ),
+                "solar_remaining_raw_kwh": _chronological_value(
+                    "solar_remaining_raw_kwh"
+                ),
+                "solar_safety_margin_kwh": _chronological_value(
+                    "solar_safety_margin_kwh"
+                ),
+                "solar_remaining_effective_kwh": _chronological_value(
+                    "solar_remaining_effective_kwh"
+                ),
                 "solar_surplus_kwh": decision.get("solar_surplus_kwh"),
                 "decision_reason": decision.get("reason"),
-                "chronological_planning_active": bool(decision.get("chronological_planning_active", False)),
-                "chronological_source": decision.get("chronological_source"),
-                "solar_timeline_source": decision.get("solar_timeline_source"),
-                "solar_timeline_effective_kwh": decision.get("solar_timeline_effective_kwh"),
-                "solar_timeline_fallback_reason": decision.get("solar_timeline_fallback_reason"),
-                "solar_timeline_energy_error_kwh": decision.get("solar_timeline_energy_error_kwh"),
-                "solar_profile_mature": decision.get("solar_profile_mature"),
-                "solar_profile_days": decision.get("solar_profile_days"),
-                "solar_profile_coverage_ratio": decision.get("solar_profile_coverage_ratio"),
-                "solar_profile_generation": decision.get("solar_profile_generation"),
-                "curtailment_timeline_mismatch": decision.get("curtailment_timeline_mismatch", False),
-                "earliest_projected_depletion": decision.get("earliest_projected_depletion"),
-                "minimum_projected_energy_kwh": decision.get("minimum_projected_energy_kwh"),
-                "minimum_projected_soc": decision.get("minimum_projected_soc"),
-                "deadline_required_kwh": decision.get("deadline_required_kwh", 0.0),
-                "flexible_required_kwh": decision.get("flexible_required_kwh", 0.0),
-                "deadline_shortfall_kwh": decision.get("deadline_shortfall_kwh", 0.0),
-                "total_shortfall_kwh": decision.get("total_shortfall_kwh", 0.0),
-                "energy_deadlines": decision.get("energy_deadlines", []),
-                "chronological_plan_reason": decision.get("chronological_plan_reason"),
-                "guaranteed_floor_deadline": decision.get("guaranteed_floor_deadline"),
+                "chronological_planning_active": chronological_active,
+                "chronological_source": _chronological_value("chronological_source"),
+                "solar_timeline_source": _chronological_value(
+                    "solar_timeline_source"
+                ),
+                "solar_timeline_effective_kwh": _chronological_value(
+                    "solar_timeline_effective_kwh"
+                ),
+                "solar_timeline_fallback_reason": _chronological_value(
+                    "solar_timeline_fallback_reason"
+                ),
+                "solar_timeline_energy_error_kwh": _chronological_value(
+                    "solar_timeline_energy_error_kwh"
+                ),
+                "solar_profile_mature": _chronological_value("solar_profile_mature"),
+                "solar_profile_days": _chronological_value("solar_profile_days"),
+                "solar_profile_coverage_ratio": _chronological_value(
+                    "solar_profile_coverage_ratio"
+                ),
+                "solar_profile_generation": _chronological_value(
+                    "solar_profile_generation"
+                ),
+                "curtailment_timeline_mismatch": _chronological_value(
+                    "curtailment_timeline_mismatch", False
+                ),
+                "earliest_projected_depletion": _chronological_value(
+                    "earliest_projected_depletion"
+                ),
+                "minimum_projected_energy_kwh": _chronological_value(
+                    "minimum_projected_energy_kwh"
+                ),
+                "minimum_projected_soc": _chronological_value(
+                    "minimum_projected_soc"
+                ),
+                "deadline_required_kwh": _chronological_value(
+                    "deadline_required_kwh", 0.0
+                ),
+                "flexible_required_kwh": _chronological_value(
+                    "flexible_required_kwh", 0.0
+                ),
+                "deadline_shortfall_kwh": _chronological_value(
+                    "deadline_shortfall_kwh", 0.0
+                ),
+                "total_shortfall_kwh": _chronological_value(
+                    "total_shortfall_kwh", 0.0
+                ),
+                "energy_deadlines": _chronological_value("energy_deadlines", []),
+                "chronological_plan_reason": _chronological_value(
+                    "chronological_plan_reason"
+                ),
+                "guaranteed_floor_deadline": _chronological_value(
+                    "guaranteed_floor_deadline"
+                ),
             })
             # This was a rollout-only diagnostic. Keep exposing it for an
             # explicit legacy shadow evaluation, but do not publish an
             # ``unknown`` attribute in the normal automatic mode.
-            shadow_source = decision.get("solar_shadow_selected_source")
+            shadow_source = _chronological_value("solar_shadow_selected_source")
             if shadow_source is not None:
                 attrs["solar_shadow_selected_source"] = shadow_source
 

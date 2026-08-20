@@ -736,6 +736,9 @@ class ChargeDischargeController:
         self._predictive_protection_command_w = 0.0
         self._predictive_protection_reason = None
         self._last_decision_data = None  # Store last decision for diagnostics
+        # Chronological forecast diagnostics survive later balance-only
+        # re-evaluations, which replace _last_decision_data wholesale.
+        self._last_chronological_diagnostics = None
         self._slot_entry_time = None  # When we first entered the time slot (for 5-min delay)
         self._predictive_charge_target_soc: Optional[dict] = None  # Per-battery grid-only SOC targets {coordinator: target_%}
         self._active_time_slot_quota_kwh: Optional[float] = None

@@ -62,6 +62,17 @@ def test_predictive_attributes_omit_redundant_fields():
             "consumption_accumulator_ready": True,
             "consumption_accumulator_source": "daily_home_energy",
         },
+        _last_chronological_diagnostics={
+            "chronological_source": "profile",
+            "solar_timeline_source": "learned",
+            "solar_timeline_effective_kwh": 3.2,
+            "solar_profile_mature": True,
+            "solar_profile_days": 12,
+            "solar_profile_coverage_ratio": 0.84,
+            "minimum_projected_energy_kwh": 1.7,
+            "minimum_projected_soc": 28.5,
+            "chronological_plan_reason": "ok",
+        },
         _predictive_charge_target_soc=None,
         _pricing_mgr=None,
         charging_time_slots=[],
@@ -84,6 +95,11 @@ def test_predictive_attributes_omit_redundant_fields():
     assert attrs["daily_consumption_history"] == [("2026-08-16", 7.5)]
     assert attrs["planned_grid_charge_kwh"] == 1.5
     assert attrs["consumption_accumulator_source"] == "daily_home_energy"
+    assert attrs["chronological_planning_active"] is False
+    assert attrs["chronological_source"] == "profile"
+    assert attrs["solar_timeline_source"] == "learned"
+    assert attrs["solar_profile_days"] == 12
+    assert attrs["minimum_projected_soc"] == 28.5
     assert "solar_shadow_selected_source" not in attrs
 
     redundant = {

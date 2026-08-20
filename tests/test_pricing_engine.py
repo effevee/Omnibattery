@@ -220,6 +220,13 @@ def test_daily_dynamic_pricing_uses_persisted_remaining_sensor_when_cache_is_emp
         status="no_risk", reason="none"
     )
     manager._send_dynamic_pricing_notification = no_op
+    diagnostic_builds = []
+
+    def build_diagnostics(**kwargs):
+        diagnostic_builds.append(kwargs)
+        return None
+
+    manager._build_chronological_plan = build_diagnostics
 
     asyncio.run(
         manager._evaluate_dynamic_pricing(
@@ -228,6 +235,59 @@ def test_daily_dynamic_pricing_uses_persisted_remaining_sensor_when_cache_is_emp
     )
 
     assert calls == ["remaining"]
+    assert len(diagnostic_builds) == 1
+    assert diagnostic_builds[0]["diagnostic_only"] is True
+    assert diagnostic_builds[0]["slots"] == []
+
+
+def test_dynamic_pricing_builds_diagnostics_when_balance_needs_no_charge():
+    async def no_charge_decision():
+        return {
+            "should_charge": False,
+            "avg_soc": 80.0,
+            "energy_deficit_kwh": 0.0,
+            "avg_consumption_kwh": 0.0,
+        }
+
+    async def no_op(*_args, **_kwargs):
+        return None
+
+    start = datetime.now() + timedelta(hours=1)
+    slots = [PriceSlot(start=start, end=start + timedelta(hours=1), price=0.1)]
+    ctrl = _controller(
+        config_entry=SimpleNamespace(data={}, options={}),
+        predictive_charging_enabled=True,
+        predictive_charging_mode=PREDICTIVE_MODE_DYNAMIC_PRICING,
+        max_contracted_power=7000,
+        max_charge_capacity=1200,
+        _should_activate_grid_charging=no_charge_decision,
+        _dp_eval_retry_count=0,
+    )
+    manager = _mgr(ctrl)
+    manager._maybe_refresh_service_prices = no_op
+    manager._parse_price_data = lambda horizon_end=None: slots
+    manager._build_curtailment_plan = lambda *_args, **_kwargs: CurtailmentPlan(
+        status="no_risk", reason="none"
+    )
+    manager._send_dynamic_pricing_notification = no_op
+    diagnostic_builds = []
+
+    def build_diagnostics(**kwargs):
+        diagnostic_builds.append(kwargs)
+        kwargs["decision_data"]["chronological_planning_active"] = False
+        return None
+
+    manager._build_chronological_plan = build_diagnostics
+
+    asyncio.run(
+        manager._evaluate_dynamic_pricing(
+            horizon=DynamicPricingEvaluationHorizon.DAILY,
+        )
+    )
+
+    assert len(diagnostic_builds) == 1
+    assert diagnostic_builds[0]["diagnostic_only"] is True
+    assert diagnostic_builds[0]["slots"] == slots
 
 
 # ----------------------------------------------------------------------
