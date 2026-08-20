@@ -90,10 +90,11 @@ async def async_setup_entry(
         # be turned on from the dashboard even if configured off at setup).
         entities.append(WeeklyFullChargeEnableSwitch(hass, entry, controller))
 
-    # Add price-based discharge control switch, scoped to the active predictive
-    # pricing mode (dynamic pricing or real-time price). The pricing engine reads
-    # the controller flag live each cycle.
-    if controller and entry.data.get(CONF_ENABLE_PREDICTIVE_CHARGING):
+    # Keep mode-specific predictive controls registered while the master switch
+    # is off. The dashboard hides them behind that switch, and the pricing engine
+    # reads their flags live. Removing/recreating them would require a full entry
+    # reload for every predictive toggle.
+    if controller and CONF_ENABLE_PREDICTIVE_CHARGING in entry.data:
         mode = entry.data.get(CONF_PREDICTIVE_CHARGING_MODE)
         if mode == PREDICTIVE_MODE_DYNAMIC_PRICING:
             entities.append(PriceDischargeControlSwitch(hass, entry, controller, "dp"))
@@ -526,7 +527,6 @@ class PredictiveChargingSwitch(SwitchEntity):
 
     async def async_turn_on(self, **kwargs) -> None:
         """Enable predictive charging (set enabled, clear override)."""
-        was_enabled = self.controller.predictive_charging_enabled
         self.controller.predictive_charging_enabled = True
         self.controller.predictive_charging_overridden = False
         new_data = dict(self.entry.data)
@@ -539,18 +539,25 @@ class PredictiveChargingSwitch(SwitchEntity):
             {"notification_id": f"{NOTIFICATION_ID_PREFIX}predictive_charging_override"},
         )
         _LOGGER.info("Predictive charging enabled")
-        await self._apply_enabled_change(was_enabled, now_enabled=True)
+        self.async_write_ha_state()
+        self.controller.schedule_control_cycle()
+        if self.controller.predictive_charging_mode == PREDICTIVE_MODE_DYNAMIC_PRICING:
+            self.hass.async_create_task(
+                self._async_rebuild_dynamic_schedule(),
+                "Rebuild dynamic pricing after predictive charging enable",
+            )
 
     async def async_turn_off(self, **kwargs) -> None:
         """Disable predictive charging (clear enabled, set override)."""
-        was_enabled = self.controller.predictive_charging_enabled
+        was_grid_charging_active = self.controller.grid_charging_active
         self.controller.predictive_charging_enabled = False
         self.controller.predictive_charging_overridden = True
+        self.controller._clear_predictive_runtime("user_disabled")
         new_data = dict(self.entry.data)
         new_data[CONF_ENABLE_PREDICTIVE_CHARGING] = False
         new_data[CONF_PREDICTIVE_CHARGING_OVERRIDDEN] = True
         self.hass.config_entries.async_update_entry(self.entry, data=new_data)
-        if self.controller.grid_charging_active:
+        if was_grid_charging_active:
             message = "Predictive grid charging has been paused. Turn the switch back on to resume."
         else:
             message = "Predictive charging is now disabled. It will not activate when the time slot becomes active."
@@ -564,30 +571,22 @@ class PredictiveChargingSwitch(SwitchEntity):
             },
         )
         _LOGGER.info("Predictive charging disabled (overridden)")
-        await self._apply_enabled_change(was_enabled, now_enabled=False)
+        self.async_write_ha_state()
+        self.controller.schedule_control_cycle()
 
-    async def _apply_enabled_change(self, was_enabled: bool, *, now_enabled: bool) -> None:
-        """Finish a toggle. When the ``enabled`` value flips, reload the entry so
-        the setup-time gating re-evaluates: the daily consumption-capture and
-        dynamic-pricing schedules and the predictive status sensor are all armed
-        (or torn down) only in ``async_setup_entry`` against this value, and the
-        entry-update listener does not reload. The reload must be deferred until
-        this entity-service handler returns: awaiting it here makes platform unload
-        wait for the handler that is itself waiting for platform unload. When only
-        the runtime override moved (a legacy paused entry resuming with ``enabled``
-        already True), a plain state write suffices and avoids a needless reload."""
-        if was_enabled != now_enabled:
-            # Publish the requested state before the entity is removed by reload,
-            # then let Home Assistant tear down the platform outside this service
-            # call. Awaiting async_reload() inline can deadlock entity-platform
-            # unload and leave a websocket client accumulating state messages.
-            self.async_write_ha_state()
-            self.hass.async_create_task(
-                self.hass.config_entries.async_reload(self.entry.entry_id),
-                f"Reload {DOMAIN} after predictive charging toggle",
+    async def _async_rebuild_dynamic_schedule(self) -> None:
+        """Rebuild the remaining calendar after a live master-switch enable."""
+        try:
+            await self.controller._pricing_mgr._evaluate_dynamic_pricing(
+                horizon=DynamicPricingEvaluationHorizon.REMAINING,
+                extended_horizon=True,
             )
-        else:
-            self.async_write_ha_state()
+        except Exception as err:  # keep the runtime toggle fail-safe
+            _LOGGER.warning(
+                "Dynamic pricing evaluation failed after predictive enable: %s",
+                err,
+            )
+            self.controller._clear_predictive_runtime("evaluation_error")
 
     @property
     def device_info(self):

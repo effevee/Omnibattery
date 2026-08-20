@@ -236,7 +236,10 @@ class PricingManager:
         # Give coordinators time to finish their first Modbus poll cycle
         await asyncio.sleep(15)
 
-        if not self._controller.predictive_charging_enabled:
+        if (
+            not self._controller.predictive_charging_enabled
+            or getattr(self._controller, "predictive_charging_overridden", False)
+        ):
             return  # Unloaded during sleep
 
         coordinators_with_data = [

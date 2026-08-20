@@ -15,6 +15,7 @@ from homeassistant.helpers.restore_state import RestoreEntity
 from .const import (
     DOMAIN,
     CONF_CAPACITY_PROTECTION_ENABLED,
+    CONF_ENABLE_PREDICTIVE_CHARGING,
     PREDICTIVE_MODE_DYNAMIC_PRICING,
 )
 from .infra.coordinator import MarstekVenusDataUpdateCoordinator
@@ -43,8 +44,9 @@ async def async_setup_entry(
         if coordinator.enable_charge_hysteresis:
             entities.append(ChargeHysteresisActiveSensor(coordinator))
 
-    # Add predictive charging status sensor (system-level)
-    if controller and controller.predictive_charging_enabled:
+    # Keep predictive diagnostics registered while the master switch is off so
+    # enabling it live never requires a platform reload.
+    if controller and CONF_ENABLE_PREDICTIVE_CHARGING in entry.data:
         entities.append(PredictiveChargingStatusSensor(hass, entry, controller))
         if controller.predictive_charging_mode == PREDICTIVE_MODE_DYNAMIC_PRICING:
             entities.append(CurtailmentStatusSensor(hass, entry, controller))

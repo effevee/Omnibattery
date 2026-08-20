@@ -3983,6 +3983,29 @@ class ChargeDischargeController:
             self._capacity_protection_active = False
             status.update({"active": False, "action": "idle"})
 
+    def _clear_predictive_runtime(self, reason: str) -> None:
+        """Release all live predictive ownership without unloading the entry.
+
+        The master switch is a runtime control. Disabling it must leave the
+        controller in the same safe state that an entry unload used to provide,
+        while retaining the registered entities and timers needed for a later
+        live enable.
+        """
+        self._pricing_mgr.clear_curtailment_runtime(reason)
+        self._pricing_mgr.clear_negative_price_runtime(reason)
+        self._reset_predictive_demand_runtime()
+        self.grid_charging_active = False
+        self._grid_charging_initialized = False
+        self._current_price_slot_active = False
+        self._realtime_price_charging = False
+        self._active_dynamic_slot_purpose = None
+        self._active_dynamic_price_slot = None
+        self._predictive_charge_target_soc = None
+        self._predictive_deficit_target_soc = None
+        self._curtailment_opportunistic_target_soc = None
+        self._curtailment_opportunity_limited = False
+        self.first_execution = True
+
     def _set_predictive_protection_status(self, active: bool, action: str, **details) -> None:
         """Publish a non-stale diagnostic status for predictive protection."""
         self._capacity_protection_active = active
@@ -7338,8 +7361,8 @@ async def _restore_consumption_history(hass: HomeAssistant, entry: ConfigEntry, 
     from datetime import date
     from homeassistant.util import dt as dt_util
     
-    if not controller.predictive_charging_enabled:
-        return  # Not using predictive charging, no history needed
+    if CONF_ENABLE_PREDICTIVE_CHARGING not in entry.data:
+        return  # Predictive charging was never configured; no history needed
     
     # Try to get the predictive charging binary sensor entity
     entity_id = f"binary_sensor.predictive_charging_active"
@@ -8410,10 +8433,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Schedule daily consumption capture at 23:55 local time every day
     # This captures the day's battery discharge energy before the sensor resets at midnight local
     # Also needed for weekly full charge delay (to estimate remaining consumption)
-    needs_consumption_capture = (
-        controller.predictive_charging_enabled
-        or controller.charge_delay_enabled
-    )
+    predictive_configured = CONF_ENABLE_PREDICTIVE_CHARGING in entry.data
+    needs_consumption_capture = predictive_configured or controller.charge_delay_enabled
     if needs_consumption_capture:
         entry.async_on_unload(
             async_track_time_change(
@@ -8457,13 +8478,21 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     # Dynamic pricing: schedule daily evaluation at 00:05 and run startup catch-up
     if (
-        controller.predictive_charging_enabled
+        predictive_configured
         and controller.predictive_charging_mode == PREDICTIVE_MODE_DYNAMIC_PRICING
     ):
         async def _daily_pricing_evaluation(_now):
             # The scheduled 00:05 run is the sole full-day forecast.  Every
             # later rebuild must use the live remainder to avoid counting
             # already-consumed energy again.
+            if (
+                not controller.predictive_charging_enabled
+                or controller.predictive_charging_overridden
+            ):
+                _LOGGER.debug(
+                    "Dynamic pricing: daily evaluation skipped while predictive charging is disabled"
+                )
+                return
             await controller._pricing_mgr._evaluate_dynamic_pricing(
                 horizon=DynamicPricingEvaluationHorizon.DAILY,
             )
@@ -8474,8 +8503,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             )
         )
         _LOGGER.info("Dynamic pricing: daily evaluation scheduled at 00:05 local time")
-        hass.async_create_task(controller._startup_dynamic_pricing_evaluation())
-        _LOGGER.info("Dynamic pricing: startup evaluation task scheduled")
+        if (
+            controller.predictive_charging_enabled
+            and not controller.predictive_charging_overridden
+        ):
+            hass.async_create_task(controller._startup_dynamic_pricing_evaluation())
+            _LOGGER.info("Dynamic pricing: startup evaluation task scheduled")
 
     return True
 
