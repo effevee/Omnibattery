@@ -395,11 +395,11 @@ def adjust_remaining_fallback_energy(
 ) -> tuple[float, float]:
     """Condition a shaped daily fallback on today's observed consumption.
 
-    The curve remains the primary forecast.  After the first three hours, a
-    progressively stronger part of the deviation from the curve is carried
-    into the remaining horizon.  The correction reaches full strength at noon
-    and is capped to 30% of the baseline remainder so a one-off appliance spike
-    cannot dominate the rest of the day.
+    The curve remains the primary forecast.  After the first three hours, its
+    remaining energy is progressively reconciled with the unconsumed part of
+    the daily estimate.  The correction reaches full strength at noon and is
+    capped to 30% of the baseline remainder so a one-off appliance spike cannot
+    erase the household demand still expected later in the day.
 
     Return ``(adjusted_energy, applied_correction)`` for diagnostics.
     """
@@ -421,8 +421,8 @@ def adjust_remaining_fallback_energy(
             ),
         ),
     )
-    expected_elapsed = max(0.0, daily - baseline)
-    raw_correction = (consumed - expected_elapsed) * confidence
+    remaining_daily_budget = max(0.0, daily - consumed)
+    raw_correction = (remaining_daily_budget - baseline) * confidence
     limit = baseline * FALLBACK_LIVE_ADJUSTMENT_LIMIT
     correction = max(-limit, min(limit, raw_correction))
     return max(0.0, baseline + correction), correction

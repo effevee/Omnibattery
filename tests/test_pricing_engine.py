@@ -568,11 +568,11 @@ def test_remaining_fallback_is_conditioned_on_today_consumption():
     decision = asyncio.run(manager._evaluate_remaining_grid_charging(now=now))
 
     assert calls == [{
-        "consumption_override_kwh": pytest.approx(13.0),
+        "consumption_override_kwh": pytest.approx(7.0),
         "solar_forecast_override_kwh": 0.0,
     }]
     assert decision["consumption_scope"] == "remaining_fallback"
-    assert decision["consumption_fallback_correction_kwh"] == pytest.approx(3.0)
+    assert decision["consumption_fallback_correction_kwh"] == pytest.approx(-3.0)
 
 
 def test_manual_button_uses_remaining_horizon_at_midday():

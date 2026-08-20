@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- **Temporary remaining-consumption curve could amplify an already high daily total**: live adjustment now reconciles the shaped fallback with the unconsumed daily budget instead of projecting the elapsed excess a second time into the remaining horizon. The existing gradual confidence and 30% bound remain in place, preventing both late-day overcharging and a one-off load spike from erasing plausible future demand.
 - **Home Consumption could become `unknown` after a transient telemetry mismatch**: positive balances are no longer rejected solely because they fell below half of the previous reading, and the display sensor holds its last coherent value during an invalid negative/near-zero balance. Daily energy tracking remains strict and excluded-load control ignores held display values.
 - **Predictive-charging timeline diagnostics could become unknown after a no-charge evaluation**: Dynamic Pricing now builds and preserves solar-timeline, solar-profile and projected-depletion diagnostics even when the balance decides that no grid charging is needed, so later balance-only reevaluations cannot erase them from the predictive-charging sensor.
 - **Top-charge Cell Delta could remain stale when the BMS cut below 3.60 V**: a confirmed BMS cutoff in the taper zone now starts the same 60-second settled measurement used at the top-voltage point, including during weekly full charge, so packs that stop at 3.58 V still publish a formal reading.

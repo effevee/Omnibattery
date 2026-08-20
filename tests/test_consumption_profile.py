@@ -371,13 +371,26 @@ def test_legacy_fallback_uses_household_shape_without_changing_daily_total():
 def test_live_fallback_adjustment_tracks_today_without_following_spikes():
     adjusted, correction = adjust_remaining_fallback_energy(10.0, 20.0, 15.0, 12.0)
 
-    assert correction == pytest.approx(3.0)
-    assert adjusted == pytest.approx(13.0)
+    assert correction == pytest.approx(-3.0)
+    assert adjusted == pytest.approx(7.0)
 
     adjusted, correction = adjust_remaining_fallback_energy(10.0, 20.0, 5.0, 12.0)
 
-    assert correction == pytest.approx(-3.0)
-    assert adjusted == pytest.approx(7.0)
+    assert correction == pytest.approx(3.0)
+    assert adjusted == pytest.approx(13.0)
+
+
+def test_live_fallback_reconciles_reported_notification_with_daily_budget():
+    """A high consumed total must reduce, not inflate, the shaped remainder."""
+    adjusted, correction = adjust_remaining_fallback_energy(
+        10.381074740110245,
+        31.435714285714287,
+        25.35003983403174,
+        17.8375,
+    )
+
+    assert correction == pytest.approx(-3.1143224220330747)
+    assert adjusted == pytest.approx(7.266752318077171)
 
 
 def test_live_fallback_adjustment_waits_for_enough_observation():

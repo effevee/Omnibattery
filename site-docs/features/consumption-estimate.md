@@ -137,6 +137,11 @@ of the requested intervals, at least 80% coverage of the requested range and a
 sample no older than seven days. An immature profile automatically falls back to
 the legacy daily average or the current-rate estimate, depending on the caller.
 
+For the temporary daily curve, remaining consumption is gradually reconciled
+with the part of the daily budget not yet consumed. The correction reaches full
+strength at noon and is capped at 30% of the remaining curve so a one-off spike
+cannot erase household demand that can still be expected later in the day.
+
 Recorder backfill runs in the background after startup and uses one query per
 configured source. Raw profile data is isolated in
 `omnibattery.<entry_id>.consumption_profile`; changing the source, load

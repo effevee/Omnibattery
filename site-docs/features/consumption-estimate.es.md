@@ -138,6 +138,11 @@ para el 75 % de los intervalos solicitados, un 80 % de cobertura del rango y una
 muestra de menos de siete días. Si no es maduro, se usa automáticamente la media
 diaria heredada o la estimación por potencia actual, según el consumidor.
 
+En la curva diaria provisional, el consumo restante se aproxima gradualmente
+al presupuesto diario todavía no consumido. La corrección alcanza toda su
+fuerza al mediodía y se limita al 30 % de la curva restante para que un pico
+puntual no elimine la demanda doméstica que aún cabe esperar durante el día.
+
 Tras arrancar, el backfill del Recorder se ejecuta en segundo plano con una
 consulta por cada fuente configurada. Los datos crudos están aislados en
 `omnibattery.<entry_id>.consumption_profile`; cambiar la fuente, los ajustes de
