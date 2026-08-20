@@ -5,13 +5,13 @@ Covers System Charge/Discharge Power (Zendure coordinators only synthesise
 System Battery Cell Power (signed, mirroring the dashboard formula
 ``-ac_power - ac_offgrid_power + sum(MPPT)``).
 """
-from datetime import timedelta
-
 from homeassistant.util import dt as dt_util
 
 from custom_components.omnibattery.sensors.aggregate_sensors import (
-    HOME_CONSUMPTION_HOLD_S,
     MarstekVenusAggregateSensor,
+)
+from custom_components.omnibattery.tracking.consumption_tracker import (
+    HOME_CONSUMPTION_HOLD_S,
 )
 from tests.conftest import FakeCoordinator
 
@@ -152,19 +152,32 @@ def test_home_consumption_holds_last_valid_value_for_small_positive_transient():
     }
 
 
-def test_home_consumption_does_not_hold_stale_value_forever():
+def test_home_consumption_holds_last_valid_value_after_long_gap():
     zendure = FakeCoordinator(data={"battery_power": 400})
     sensor = _home_sensor([zendure], grid=1000, solar=0)
     assert sensor._calculate_home_consumption() == 600
 
     sensor.hass._states["sensor.grid"] = _FakeState(100)
-    sensor._last_valid_home_consumption_at = (
-        dt_util.utcnow() - timedelta(seconds=HOME_CONSUMPTION_HOLD_S + 1)
-    )
-    assert sensor._calculate_home_consumption() is None
+    sensor._last_valid_home_consumption_at = dt_util.utcnow()
+    assert sensor._calculate_home_consumption() == 600
     assert sensor.extra_state_attributes == {
         "raw_balance_w": -300,
-        "balance_quality": "invalid_balance",
+        "balance_quality": "held_last_valid",
+    }
+
+
+def test_home_consumption_accepts_positive_balance_below_previous_half():
+    # A real load reduction must remain numeric. The old relative 50% guard
+    # incorrectly rejected this 292 W balance while the battery was charging.
+    zendure = FakeCoordinator(data={"battery_power": 400})
+    sensor = _home_sensor([zendure], grid=1000, solar=0)
+    assert sensor._calculate_home_consumption() == 600
+
+    sensor.hass._states["sensor.grid"] = _FakeState(692)
+    assert sensor._calculate_home_consumption() == 292
+    assert sensor.extra_state_attributes == {
+        "raw_balance_w": 292,
+        "balance_quality": "calculated",
     }
 
 

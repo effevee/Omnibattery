@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- **Home Consumption could become `unknown` after a transient telemetry mismatch**: positive balances are no longer rejected solely because they fell below half of the previous reading, and the display sensor holds its last coherent value during an invalid negative/near-zero balance. Daily energy tracking remains strict and excluded-load control ignores held display values.
 - **Predictive-charging timeline diagnostics could become unknown after a no-charge evaluation**: Dynamic Pricing now builds and preserves solar-timeline, solar-profile and projected-depletion diagnostics even when the balance decides that no grid charging is needed, so later balance-only reevaluations cannot erase them from the predictive-charging sensor.
 
 ## [1.4.0b2] - 2026-08-18

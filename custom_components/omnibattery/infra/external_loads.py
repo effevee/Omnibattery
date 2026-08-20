@@ -359,14 +359,16 @@ class ExternalLoads:
         # device is only what's left AFTER the genuine home load, not the raw PV.
         # base_load = home_consumption − Σ(in-home excluded devices); the surplus
         # is a shared budget so multiple surplus devices don't each claim it all.
-        # None = Home Consumption unavailable → conservative full exclusion below.
+        # None = Home Consumption unavailable or held after an invalid balance
+        # → conservative full exclusion below. The display sensor may retain a
+        # numeric last value, but control must not act on that stale estimate.
         # solar_remaining tracks the FULL PV left (before the home reservation) so a
         # device with cover_home_when_active can be offset by raw PV (pre-#415 rule),
         # letting the battery cover the home deficit instead of sitting idle (#42).
         surplus_remaining: float | None = None
         solar_remaining = self._read_sensor_w(solar_sensor_id) if solar_sensor_id else 0.0
         if solar_sensor_id:
-            home_w = self._read_sensor_w_opt(
+            home_w = self._read_home_consumption_w_opt(
                 getattr(self._controller, "home_consumption_sensor", None)
             )
             if home_w is not None:
@@ -477,6 +479,35 @@ class ExternalLoads:
             return None
         state = self._hass.states.get(entity_id)
         if state is None or state.state in ("unknown", "unavailable"):
+            return None
+        try:
+            raw = float(state.state)
+        except (ValueError, TypeError):
+            return None
+        unit = state.attributes.get("unit_of_measurement", "W")
+        return raw if unit == "W" else raw * 1000.0
+
+    def _read_home_consumption_w_opt(self, entity_id: str | None) -> float | None:
+        """Read Home Consumption only when its balance is currently coherent.
+
+        The display entity intentionally holds its last valid value across a
+        transient balance mismatch. Excluded-load control must not interpret
+        that held value as live telemetry, so it falls back to its conservative
+        unavailable path until ``balance_quality`` returns to ``calculated``.
+        Entities without this diagnostic attribute remain supported.
+        """
+        if not entity_id:
+            return None
+        state = self._hass.states.get(entity_id)
+        if state is None or state.state in ("unknown", "unavailable"):
+            return None
+        quality = state.attributes.get("balance_quality")
+        if quality is not None and quality != "calculated":
+            _LOGGER.debug(
+                "Home Consumption %s is %s; ignoring held value for load control",
+                entity_id,
+                quality,
+            )
             return None
         try:
             raw = float(state.state)

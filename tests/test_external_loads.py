@@ -33,9 +33,11 @@ class _FakeStates:
         return self._mapping.get(entity_id)
 
 
-def _state(value, unit="W"):
+def _state(value, unit="W", **extra_attributes):
     """A minimal stand-in for a Home Assistant State object."""
-    return SimpleNamespace(state=str(value), attributes={"unit_of_measurement": unit})
+    attributes = {"unit_of_measurement": unit}
+    attributes.update(extra_attributes)
+    return SimpleNamespace(state=str(value), attributes=attributes)
 
 
 def _controller(excluded_devices, states=None, previous_power=0.0,
@@ -221,6 +223,19 @@ def test_adjustment_pv_priority_home_consumption_unavailable_full_exclusion():
     )
     assert loads.calculate_adjustment() == pytest.approx(1000.0)
     assert loads._controller._solar_surplus_discharge_blocked is False
+
+
+def test_adjustment_pv_priority_held_home_consumption_uses_conservative_fallback():
+    # The display sensor may retain its last value, but load control must not
+    # use it while the balance is marked held_last_valid.
+    loads = _controller(
+        [_device(included_in_consumption=True, allow_solar_surplus=True)],
+        {"sensor.dev": _state(1000), "sensor.solar": _state(3000),
+         "sensor.home": _state(2000, balance_quality="held_last_valid")},
+        solar_production_sensor="sensor.solar",
+        home_consumption_sensor="sensor.home",
+    )
+    assert loads.calculate_adjustment() == pytest.approx(1000.0)
 
 
 def test_adjustment_pv_priority_kw_units():

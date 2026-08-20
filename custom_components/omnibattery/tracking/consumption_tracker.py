@@ -36,14 +36,14 @@ _LOGGER = logging.getLogger(__name__)
 
 CONSUMPTION_HISTORY_SCOPE = "full_day_home"
 
-# Grid, solar and battery telemetry are published independently.  During a
+# Grid, solar and battery telemetry are published independently. During a
 # battery charge, a short-lived mismatch can make the derived household
 # balance negative or implausibly small even though the house is still using
-# power.  Keep the same short hold window as the Home Consumption entity and
-# stop publishing the value when the mismatch persists.
+# power. The display sensor keeps its last coherent value during that mismatch;
+# the tracker below remains strict so invalid samples are not integrated into
+# daily energy totals.
 HOME_CONSUMPTION_HOLD_S = 15.0
 HOME_CONSUMPTION_MIN_BALANCE_W = 20.0
-HOME_CONSUMPTION_MIN_VALID_RATIO = 0.5
 
 
 def coordinator_ac_power_w(coordinator: Any) -> float | None:
@@ -88,23 +88,18 @@ def home_balance_is_suspicious(
 ) -> bool:
     """Identify an impossible or transiently collapsed home-power balance.
 
-    A positive low load can be legitimate when no battery is charging.  While
-    charging, however, a balance below both a small absolute floor and half of
-    the previous valid value is characteristic of independently sampled
-    telemetry cancelling the house load.
+    A positive low load can be legitimate when no battery is charging. While
+    charging, only a balance below the small absolute floor is considered
+    suspicious. A relative-to-previous-value threshold is intentionally avoided:
+    real household demand can change by more than half between samples, and
+    rejecting that change turns a valid positive reading into ``unknown``.
     """
     if not math.isfinite(balance_w) or balance_w <= 0.0:
         return True
     if not battery_charging:
         return False
 
-    threshold_w = HOME_CONSUMPTION_MIN_BALANCE_W
-    if last_valid_w is not None and math.isfinite(last_valid_w) and last_valid_w > 0.0:
-        threshold_w = max(
-            threshold_w,
-            last_valid_w * HOME_CONSUMPTION_MIN_VALID_RATIO,
-        )
-    return balance_w < threshold_w
+    return balance_w < HOME_CONSUMPTION_MIN_BALANCE_W
 
 
 class ConsumptionTracker:

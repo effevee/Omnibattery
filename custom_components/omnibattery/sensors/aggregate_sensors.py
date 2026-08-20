@@ -17,7 +17,6 @@ from ..const import DOMAIN, ALARM_BIT_DESCRIPTIONS, FAULT_BIT_DESCRIPTIONS, DEBU
 from ..infra.coordinator import MarstekVenusDataUpdateCoordinator
 from ..infra.entity_naming import system_entity_id
 from ..tracking.consumption_tracker import (
-    HOME_CONSUMPTION_HOLD_S,
     has_battery_charging,
     home_balance_is_suspicious,
 )
@@ -653,12 +652,12 @@ class MarstekVenusAggregateSensor(RestoreEntity, SensorEntity):
         raw_balance = round(total, self.definition.get("precision", 0))
         self._home_consumption_raw_balance = raw_balance
 
-        # A negative or implausibly small household load is physically
-        # impossible for the configured installation. It is normally caused
-        # here by independently polled grid/solar/battery values being sampled
-        # at different instants while the batteries are charging. Keep the last
-        # coherent estimate briefly, then publish unknown instead of a false
-        # low or zero value.
+        # A negative or implausibly small household load is normally caused by
+        # independently polled grid/solar/battery values being sampled at
+        # different instants while the batteries are charging. Keep the last
+        # coherent estimate as a numeric display value instead of turning a
+        # transient mismatch into 0 W or unknown. The consumption tracker has
+        # its own strict validation and will not integrate this held value.
         if home_balance_is_suspicious(
             total,
             battery_charging=has_battery_charging(self.coordinators),
@@ -668,7 +667,7 @@ class MarstekVenusAggregateSensor(RestoreEntity, SensorEntity):
             last_at = self._last_valid_home_consumption_at
             if last_value is not None and last_at is not None:
                 held_s = (dt_util.utcnow() - last_at).total_seconds()
-                if 0 <= held_s <= HOME_CONSUMPTION_HOLD_S:
+                if held_s >= 0:
                     self._home_consumption_quality = "held_last_valid"
                     _LOGGER.debug(
                         "Holding last valid home consumption %.0f W for %.1f s "
