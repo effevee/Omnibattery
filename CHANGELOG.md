@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.4.0b3] - 2026-08-20
+
+### Fixed
+
+- **Predictive-charging timeline diagnostics could become unknown after a no-charge evaluation**: Dynamic Pricing now builds and preserves solar-timeline, solar-profile and projected-depletion diagnostics even when the balance decides that no grid charging is needed, so later balance-only reevaluations cannot erase them from the predictive-charging sensor.
+
 ## [1.4.0b2] - 2026-08-18
 
 ### Added
