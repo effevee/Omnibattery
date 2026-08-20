@@ -5,8 +5,8 @@ The switch is the dashboard enable toggle for predictive grid charging. It must:
     currently enabled (otherwise the sliders show with no toggle),
   * move the ``enabled`` and ``overridden`` flags together so every consumer
     stays consistent regardless of which flag it reads, and
-  * reload the entry when the ``enabled`` value flips, so the setup-time gating
-    (consumption-capture / dynamic-pricing schedules, status sensor) re-arms.
+  * defer the entry reload when the ``enabled`` value flips, so setup-time gating
+    re-arms without making platform unload wait on its own entity-service call.
 
 Exercised without the full Home Assistant runtime: entities are built on stub
 hass/entry/controller objects and ``async_write_ha_state`` is neutralised.
@@ -35,6 +35,7 @@ def _make_switch(*, enabled, overridden, entry_data=None):
     )
     entry = SimpleNamespace(entry_id="test-entry", data=dict(entry_data or {}))
     reloads: list[str] = []
+    scheduled: list[asyncio.Task] = []
 
     async def _async_call(*_a, **_k):
         return None
@@ -45,16 +46,29 @@ def _make_switch(*, enabled, overridden, entry_data=None):
     def _update_entry(target, *, data):
         target.data = data
 
+    def _async_create_task(coro, _name=None):
+        task = asyncio.create_task(coro)
+        scheduled.append(task)
+        return task
+
     hass = SimpleNamespace(
         config_entries=SimpleNamespace(
             async_update_entry=_update_entry,
             async_reload=_async_reload,
         ),
         services=SimpleNamespace(async_call=_async_call),
+        async_create_task=_async_create_task,
     )
     sw = PredictiveChargingSwitch(hass, entry, controller)
     sw.async_write_ha_state = lambda: None  # not registered with HA
-    return sw, controller, entry, reloads
+    return sw, controller, entry, reloads, scheduled
+
+
+async def _run_toggle(toggle, reloads, scheduled):
+    """Run a toggle and verify reload cannot start inside its service handler."""
+    await toggle()
+    assert reloads == []
+    await asyncio.gather(*scheduled)
 
 
 def test_is_on_requires_enabled_and_not_overridden():
@@ -67,8 +81,10 @@ def test_is_on_requires_enabled_and_not_overridden():
 
 
 def test_turn_on_from_disabled_enables_and_reloads():
-    sw, controller, entry, reloads = _make_switch(enabled=False, overridden=True)
-    asyncio.run(sw.async_turn_on())
+    sw, controller, entry, reloads, scheduled = _make_switch(
+        enabled=False, overridden=True
+    )
+    asyncio.run(_run_toggle(sw.async_turn_on, reloads, scheduled))
     assert controller.predictive_charging_enabled is True
     assert controller.predictive_charging_overridden is False
     assert entry.data[CONF_ENABLE_PREDICTIVE_CHARGING] is True
@@ -79,8 +95,10 @@ def test_turn_on_from_disabled_enables_and_reloads():
 
 
 def test_turn_off_from_enabled_disables_and_reloads():
-    sw, controller, entry, reloads = _make_switch(enabled=True, overridden=False)
-    asyncio.run(sw.async_turn_off())
+    sw, controller, entry, reloads, scheduled = _make_switch(
+        enabled=True, overridden=False
+    )
+    asyncio.run(_run_toggle(sw.async_turn_off, reloads, scheduled))
     assert controller.predictive_charging_enabled is False
     assert controller.predictive_charging_overridden is True
     assert entry.data[CONF_ENABLE_PREDICTIVE_CHARGING] is False
@@ -92,17 +110,20 @@ def test_resume_from_legacy_pause_does_not_reload():
     # Legacy paused entry: enabled stayed True, only overridden was set. Turning
     # the switch back on clears the override without flipping enabled, so no
     # reload is needed (the schedules were already armed at setup).
-    sw, controller, entry, reloads = _make_switch(enabled=True, overridden=True)
+    sw, controller, entry, reloads, scheduled = _make_switch(
+        enabled=True, overridden=True
+    )
     asyncio.run(sw.async_turn_on())
     assert controller.predictive_charging_overridden is False
     assert reloads == []
+    assert scheduled == []
 
 
 def test_toggle_preserves_other_entry_data():
-    sw, _controller, entry, _reloads = _make_switch(
+    sw, _controller, entry, _reloads, scheduled = _make_switch(
         enabled=True, overridden=False, entry_data={"unrelated": 42}
     )
-    asyncio.run(sw.async_turn_off())
+    asyncio.run(_run_toggle(sw.async_turn_off, _reloads, scheduled))
     assert entry.data["unrelated"] == 42
 
 

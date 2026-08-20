@@ -571,12 +571,21 @@ class PredictiveChargingSwitch(SwitchEntity):
         the setup-time gating re-evaluates: the daily consumption-capture and
         dynamic-pricing schedules and the predictive status sensor are all armed
         (or torn down) only in ``async_setup_entry`` against this value, and the
-        entry-update listener does not reload. This mirrors the options flow,
-        which reloads on the same change. When only the runtime override moved
-        (a legacy paused entry resuming with ``enabled`` already True), a plain
-        state write suffices and avoids a needless reload."""
+        entry-update listener does not reload. The reload must be deferred until
+        this entity-service handler returns: awaiting it here makes platform unload
+        wait for the handler that is itself waiting for platform unload. When only
+        the runtime override moved (a legacy paused entry resuming with ``enabled``
+        already True), a plain state write suffices and avoids a needless reload."""
         if was_enabled != now_enabled:
-            await self.hass.config_entries.async_reload(self.entry.entry_id)
+            # Publish the requested state before the entity is removed by reload,
+            # then let Home Assistant tear down the platform outside this service
+            # call. Awaiting async_reload() inline can deadlock entity-platform
+            # unload and leave a websocket client accumulating state messages.
+            self.async_write_ha_state()
+            self.hass.async_create_task(
+                self.hass.config_entries.async_reload(self.entry.entry_id),
+                f"Reload {DOMAIN} after predictive charging toggle",
+            )
         else:
             self.async_write_ha_state()
 

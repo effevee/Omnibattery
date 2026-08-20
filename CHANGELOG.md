@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- **Disabling Predictive Charging could stall the integration and overflow a dashboard websocket**: the toggle no longer awaits its own config-entry reload from inside the entity service that the reload must unload. The requested state is published first and the reload is deferred until the service handler returns, avoiding the unload deadlock and its resulting flood of pending state messages.
 - **Consumption profile sensors used an invalid `measurement` state class for the `energy` device class**: the expected home consumption forecast now has no state class because it is recalculated, while the live daily capture uses `total_increasing` for its monotonic accumulation and local-midnight reset.
 - **Repeated warnings while the grid sensor was temporarily unavailable**: `unknown` and `unavailable` are now treated as expected transient Home Assistant states and logged only once per episode at debug level. Missing sensors and genuinely malformed values still produce one warning per episode, while automatic control remains safely paused until a numeric reading returns.
 - **Temporary remaining-consumption curve could amplify an already high daily total**: live adjustment now reconciles the shaped fallback with the unconsumed daily budget instead of projecting the elapsed excess a second time into the remaining horizon. The existing gradual confidence and 30% bound remain in place, preventing both late-day overcharging and a one-off load spike from erasing plausible future demand.
