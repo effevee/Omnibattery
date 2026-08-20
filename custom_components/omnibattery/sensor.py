@@ -1083,13 +1083,17 @@ class NonResponsiveBatteriesSensor(SensorEntity):
 
 
 class ConsumptionProfileSensor(SensorEntity):
-    """Expected household consumption for the current local day."""
+    """Expected household consumption for the current local day.
+
+    This is a forecast rather than an accumulated meter, so it deliberately
+    has no state class.  The value may be recalculated as the profile changes.
+    """
 
     _attr_has_entity_name = True
     _attr_translation_key = "expected_home_consumption_profile"
     _attr_unique_id = f"{SYSTEM_UNIQUE_ID_PREFIX}expected_home_consumption_profile"
     _attr_device_class = SensorDeviceClass.ENERGY
-    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_state_class = None
     _attr_native_unit_of_measurement = "kWh"
     _attr_suggested_display_precision = 2
     _attr_icon = "mdi:chart-bell-curve-cumulative"
@@ -1174,13 +1178,16 @@ class ConsumptionProfileSensor(SensorEntity):
 
 
 class ConsumptionProfileCaptureSensor(SensorEntity):
-    """Live raw energy captured for the current profile day."""
+    """Live raw energy captured for the current profile day.
+
+    The value is a daily accumulated total and resets at the next local day.
+    """
 
     _attr_has_entity_name = True
     _attr_translation_key = "consumption_profile_capture"
     _attr_unique_id = f"{SYSTEM_UNIQUE_ID_PREFIX}consumption_profile_capture"
     _attr_device_class = SensorDeviceClass.ENERGY
-    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_state_class = SensorStateClass.TOTAL_INCREASING
     _attr_native_unit_of_measurement = "kWh"
     _attr_suggested_display_precision = 3
     _attr_icon = "mdi:chart-timeline-variant-shimmer"
