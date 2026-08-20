@@ -583,6 +583,7 @@ class ChargeDischargeController:
         self._control_sample_is_new = True      # result of the current control-loop sample
         self._stale_cycles = 0                  # consecutive cycles without a sensor publication
         self._max_sensor_stale_s = MAX_SENSOR_STALE_S
+        self._consumption_sensor_issue = None   # invalid/missing state already logged this episode
         self._control_lock = asyncio.Lock()     # serialize control cycle across timer + sensor-event triggers
         self._grid_at_min_soc_last_ts = None     # last accumulation timestamp for grid-at-min-soc kWh integration
         self._slow_sensor_issue_created = False  # slow-sensor repair currently raised
@@ -2855,6 +2856,28 @@ class ChargeDischargeController:
             value = -value
         return value
 
+    def _log_consumption_sensor_issue(self, state) -> None:
+        """Log a grid-meter problem once until the sensor becomes valid again."""
+        sensor_state = None if state is None else state.state
+        if getattr(self, "_consumption_sensor_issue", None) == self.consumption_sensor:
+            return
+        self._consumption_sensor_issue = self.consumption_sensor
+
+        if state is None:
+            _LOGGER.warning("Consumption sensor %s not found", self.consumption_sensor)
+        elif sensor_state in ("unknown", "unavailable"):
+            _LOGGER.debug(
+                "Consumption sensor %s is %s; pausing automatic control",
+                self.consumption_sensor,
+                sensor_state,
+            )
+        else:
+            _LOGGER.warning(
+                "Could not parse consumption sensor %s state: %s",
+                self.consumption_sensor,
+                sensor_state,
+            )
+
     def _balance_monitor_overrides_delay(self) -> bool:
         """Return True when the weekly full charge should bypass the solar charge delay today."""
         return self._weekly_full_charge_skip_delay and self._weekly_charge_mgr.is_active()
@@ -4141,8 +4164,9 @@ class ChargeDischargeController:
         consumption_state = self.hass.states.get(self.consumption_sensor)
         sensor_raw = self._apply_meter_transform(consumption_state)
         if sensor_raw is None:
-            _LOGGER.warning("Consumption sensor unavailable or invalid during predictive charging")
+            self._log_consumption_sensor_issue(consumption_state)
             return
+        self._consumption_sensor_issue = None
 
         # Cadence-independent time bases (this loop runs event-driven too). The stored
         # timestamp is shared with the main loop; exactly one of the two runs per cycle.
@@ -6612,13 +6636,11 @@ class ChargeDischargeController:
         consumption_state = self.hass.states.get(self.consumption_sensor)
         sensor_raw = self._apply_meter_transform(consumption_state)
         if sensor_raw is None:
-            if consumption_state is None:
-                _LOGGER.warning(f"Consumption sensor {self.consumption_sensor} not found.")
-            else:
-                _LOGGER.warning(f"Could not parse consumption sensor state: {consumption_state.state}")
+            self._log_consumption_sensor_issue(consumption_state)
             if self._phase_safety_pending:
                 await self._apply_phase_safety_review()
             return
+        self._consumption_sensor_issue = None
 
         # Detect real sensor publications, even when the numeric value is unchanged.
         sensor_report_time, sensor_elapsed_s, is_stale = (

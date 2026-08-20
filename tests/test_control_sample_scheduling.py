@@ -7,6 +7,7 @@ Home Assistant event loop or a battery connection.
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
@@ -208,6 +209,50 @@ def test_repeated_publication_does_not_reapply_pd_but_real_change_runs_once():
     asyncio.run(controller._run_control_cycle(now=first_report + timedelta(seconds=10)))
     assert len(pd_calls) == 2
     assert controller.previous_power == previous_power
+
+
+def test_unavailable_consumption_sensor_does_not_spam_warnings(caplog):
+    reported_at = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    state_holder = {"state": _state("unavailable", reported_at)}
+    controller = _main_controller(state_holder, [])
+    controller.meter_inverted = False
+    controller._apply_meter_transform = (
+        ChargeDischargeController._apply_meter_transform.__get__(
+            controller, ChargeDischargeController
+        )
+    )
+    controller._log_consumption_sensor_issue = (
+        ChargeDischargeController._log_consumption_sensor_issue.__get__(
+            controller, ChargeDischargeController
+        )
+    )
+    caplog.set_level(logging.DEBUG, logger="custom_components.omnibattery")
+
+    asyncio.run(controller._run_control_cycle(now=reported_at))
+    asyncio.run(controller._run_control_cycle(now=reported_at + timedelta(seconds=2)))
+
+    matching = [
+        record
+        for record in caplog.records
+        if "Consumption sensor sensor.grid_power" in record.getMessage()
+    ]
+    assert not [record for record in caplog.records if record.levelno >= logging.WARNING]
+    assert [record.levelno for record in matching] == [logging.DEBUG]
+    assert "is unavailable" in matching[0].getMessage()
+
+    # A numeric sample ends the episode, so a later outage is reported once again.
+    state_holder["state"] = _state(100, reported_at + timedelta(seconds=4))
+    asyncio.run(controller._run_control_cycle(now=reported_at + timedelta(seconds=4)))
+    state_holder["state"] = _state("unknown", reported_at + timedelta(seconds=6))
+    asyncio.run(controller._run_control_cycle(now=reported_at + timedelta(seconds=6)))
+
+    matching = [
+        record
+        for record in caplog.records
+        if "Consumption sensor sensor.grid_power" in record.getMessage()
+    ]
+    assert [record.levelno for record in matching] == [logging.DEBUG, logging.DEBUG]
+    assert "is unknown" in matching[1].getMessage()
 
 
 def test_manual_grid_charge_does_not_induce_automatic_discharge_when_idle():
