@@ -893,8 +893,16 @@ def _parse_step_b_battery_limits(step_b: dict | None) -> dict[str, dict]:
     return out
 
 
-def _finalize_slot(step_a: dict, step_b: dict | None) -> dict:
-    """Merge step A and optional step B into the persisted slot shape."""
+def _finalize_slot(
+    step_a: dict, step_b: dict | None, existing: dict | None = None
+) -> dict:
+    """Merge step A and optional step B into the persisted slot shape.
+
+    ``existing`` is the stored slot this one replaces, when there is one. Keys
+    written at runtime rather than through the form (the per-slot enable
+    switch) are carried over from it, so re-saving the flow does not reset
+    them to their defaults.
+    """
     soc_on = bool(step_a.get("soc_override_enabled", False))
     power_on = bool(step_a.get("power_override_enabled", False))
     parsed = _parse_step_b_battery_limits(step_b) if (soc_on or power_on) else {}
@@ -914,11 +922,10 @@ def _finalize_slot(step_a: dict, step_b: dict | None) -> dict:
                 entry["max_discharge_power_w"] = limits["max_discharge_power_w"]
         if entry:
             battery_limits[b_key] = entry
-    return {
+    slot = {
         "start_time": step_a["start_time"],
         "end_time": step_a["end_time"],
         "days": step_a["days"],
-        "enabled": True,
         "battery_scope": step_a.get("battery_scope", SLOT_BATTERY_SCOPE_ALL),
         "allow_charge": bool(step_a.get("allow_charge", False)),
         "allow_discharge": bool(step_a.get("allow_discharge", True)),
@@ -927,6 +934,9 @@ def _finalize_slot(step_a: dict, step_b: dict | None) -> dict:
         "battery_limits": battery_limits,
         "mode": step_a.get("mode", DEFAULT_SLOT_MODE),
     }
+    merged = {**(existing or {}), **slot}
+    merged.setdefault("enabled", True)
+    return merged
 
 
 
@@ -3833,7 +3843,11 @@ class OptionsFlowHandler(OptionsFlow):
         """Persist the pending slot and advance the flow."""
         if self._pending_slot_step_a is None:
             return await self.async_step_add_time_slot()
-        slot = _finalize_slot(self._pending_slot_step_a, step_b)
+        slot = _finalize_slot(
+            self._pending_slot_step_a,
+            step_b,
+            self._options_slot_defaults(len(self.time_slots)),
+        )
         self.time_slots.append(slot)
         self._pending_slot_step_a = None
         if len(self.time_slots) < MAX_TIME_SLOTS:
@@ -3933,6 +3947,13 @@ class OptionsFlowHandler(OptionsFlow):
                 "cover_home_when_active": user_input.get("cover_home_when_active", False),
                 "ev_charger_no_telemetry": ev_no_telemetry,
             }
+            # The Enabled switch and the Exclusion % slider write straight into
+            # the stored record and have no field on this form. Lay the form
+            # result over the stored device so those keys survive a re-save.
+            stored = self.config_entry.data.get("excluded_devices", [])
+            index = len(self.excluded_devices)
+            if index < len(stored):
+                excluded_device = {**stored[index], **excluded_device}
             self.excluded_devices.append(excluded_device)
 
             # Check if user wants to add more devices (max 4)

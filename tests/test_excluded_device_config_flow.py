@@ -181,3 +181,27 @@ async def test_no_telemetry_device_requires_an_activity_or_legacy_sensor():
 
     assert result["errors"] == {"activity_sensor": "missing_activity_sensor"}
     assert flow.excluded_devices == []
+
+
+async def test_options_flow_keeps_fields_that_have_no_form_field():
+    """Re-saving must not reset the Enabled switch or the Exclusion % slider."""
+    entry = SimpleNamespace(
+        entry_id="runtime-entry",
+        data={
+            "excluded_devices": [
+                {
+                    "power_sensor": "sensor.wallbox_power",
+                    "enabled": False,
+                    "exclusion_pct": 60,
+                }
+            ]
+        },
+    )
+    flow = _options_flow(entry)
+
+    await flow.async_step_add_excluded_device(
+        {"power_sensor": "sensor.wallbox_power"}
+    )
+
+    assert flow.excluded_devices[0]["enabled"] is False
+    assert flow.excluded_devices[0]["exclusion_pct"] == 60

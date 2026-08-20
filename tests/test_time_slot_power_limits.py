@@ -1,6 +1,9 @@
 """Regression tests for time-slot power override selector limits."""
 
-from custom_components.omnibattery.config_flow import _build_slot_step_b_schema
+from custom_components.omnibattery.config_flow import (
+    _build_slot_step_b_schema,
+    _finalize_slot,
+)
 from custom_components.omnibattery.const import SLOT_BATTERY_SCOPE_ALL
 
 
@@ -77,3 +80,28 @@ def test_time_slot_power_override_keeps_marstek_version_envelope():
         "battery_1__max_charge_power_w": 2500,
         "battery_1__max_discharge_power_w": 2500,
     }
+
+
+def test_finalize_slot_keeps_disabled_state_of_the_slot_it_replaces():
+    """The per-slot enable switch has no form field, so it must be carried over."""
+    step_a = {
+        "start_time": "23:00",
+        "end_time": "07:00",
+        "days": ["mon"],
+        "battery_scope": SLOT_BATTERY_SCOPE_ALL,
+    }
+
+    slot = _finalize_slot(step_a, None, {"enabled": False})
+
+    assert slot["enabled"] is False
+
+
+def test_finalize_slot_defaults_to_enabled_for_a_brand_new_slot():
+    step_a = {
+        "start_time": "23:00",
+        "end_time": "07:00",
+        "days": ["mon"],
+        "battery_scope": SLOT_BATTERY_SCOPE_ALL,
+    }
+
+    assert _finalize_slot(step_a, None)["enabled"] is True
