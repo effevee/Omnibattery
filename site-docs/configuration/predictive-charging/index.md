@@ -61,32 +61,37 @@ The import ceiling while predictive charging is active is:
 ceiling = min(max_contracted_power, capacity_protection_limit when enabled)
 ```
 
-Omnibattery reacts to increasing household demand in stages:
+Omnibattery reacts to increasing household demand in stages. The ceiling is the
+predictive PD's regulation target, not an immediate idle command:
 
 1. **Reduce charging.** Available grid headroom is given to the house first, so
    the battery charge command falls as household consumption rises.
-2. **Stop charging.** If demand reaches the ceiling, the battery is commanded to
-   `0 W`. This is an idle command, not a discharge and not a cancellation of the
-   predictive target.
-3. **Wait for settled telemetry.** The controller waits for the inverter's
-   response/readback latency and then requires two fresh grid publications after
-   automatic batteries are physically idle. This prevents the old
-   charge-inclusive meter value from causing a direction reversal.
-4. **Protect the import limit if necessary.** If settled import is still above
-   the ceiling, the battery discharges only the confirmed excess. With Capacity
-   Protection enabled this is Peak Shaving against its configured limit. Even
-   when it is disabled, import above `max_contracted_power` activates contracted-
-   power emergency protection.
-5. **Resume with hysteresis.** A protective discharge is stopped and allowed to
-   settle before charging can return. Predictive charging resumes only after two
-   fresh samples show at least `max(200 W, 2 × PD deadband)` of headroom.
+2. **Keep a positive charge.** If the PD calculation would mathematically cross
+   into discharge, the output is clamped to the battery's smallest effective
+   charge and the incremental PD state is preserved. A normal target overshoot
+   never commands `0 W`.
+3. **Confirm a real emergency.** Only a substantial physical excess over the
+   hard limit, confirmed by three consecutive fresh publications, enters demand
+   protection. An isolated spike or ordinary target overshoot keeps modulating
+   positive charge.
+4. **Protect the import limit if the emergency persists.** The battery then
+   waits for inverter response/readback latency and, if settled import remains
+   above the limit, discharges only the confirmed excess. With Capacity
+   Protection enabled this is Peak Shaving against its configured limit.
+5. **Resume from available headroom.** After two fresh samples show at least
+   `max(200 W, 2 × PD deadband)` of headroom, predictive charging resumes from a
+   power calculated from that margin rather than from the battery maximum.
 
-!!! important "Idle, Peak Shaving and normal PD are different"
-    During a cheap predictive slot, stopping grid charge does **not** enable a
-    normal economic discharge towards `pd_target_grid_power`. Peak Shaving or
-    contracted-power emergency control supplies only the excess above its safety
-    ceiling. Outside the predictive slot, normal PD resumes and follows the
-    configured grid target as usual.
+`0 W` is reserved for explicit blockers, BMS, unavailable batteries, critical
+telemetry, the end of a slot, reached SOC, phase protection, or a confirmed
+safety emergency.
+
+!!! important "Positive charge, Peak Shaving and normal PD are different"
+    During a cheap predictive slot, an ordinary overshoot is corrected by
+    modulating positive charge; it does **not** enable a normal economic
+    discharge towards `pd_target_grid_power`. Peak Shaving or contracted-power
+    emergency control acts only after a safety excess is confirmed. Outside the
+    predictive slot, normal PD resumes and follows the configured grid target.
 
 For example, with `max_contracted_power = 2,000 W`, Capacity Protection off and
 a settled physical household load of `2,800 W`, emergency protection requests

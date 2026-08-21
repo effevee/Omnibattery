@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.4.0b4] - 2026-08-21
+
+### Fixed
+
+- **Predictive charging could oscillate between maximum power and 0 W**: ordinary grid-import overshoots now modulate a positive battery-charge power instead of suspending predictive control, while confirmed demand protection still requires three fresh samples before using the 0 W safety stop. Recovery resumes from measured grid headroom rather than restarting at the battery's maximum charge power.
+
 ## [1.4.0b3] - 2026-08-20
 
 ### Fixed

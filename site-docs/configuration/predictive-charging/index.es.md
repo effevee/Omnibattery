@@ -61,33 +61,38 @@ El techo de importación durante la carga predictiva es:
 techo = min(max_contracted_power, capacity_protection_limit si está activado)
 ```
 
-Omnibattery responde por etapas cuando aumenta el consumo del hogar:
+Omnibattery responde por etapas cuando aumenta el consumo del hogar. El techo es
+el objetivo de regulación del PD predictivo, no una orden inmediata de reposo:
 
 1. **Reduce la carga.** El margen disponible de red se entrega primero al hogar,
    por lo que la potencia de carga de la batería disminuye al aumentar el consumo.
-2. **Detiene la carga.** Si la demanda alcanza el techo, ordena `0 W` a la
-   batería. Es una orden de reposo, no una descarga ni la cancelación del objetivo
-   predictivo.
-3. **Espera telemetría estabilizada.** El controlador espera la latencia de
-   respuesta/lectura del inversor y exige después dos publicaciones nuevas del
-   contador con las baterías automáticas físicamente en reposo. Así no utiliza
-   como demanda una lectura antigua que todavía contenía la carga.
-4. **Protege el límite si todavía es necesario.** Si la importación estabilizada
-   continúa por encima del techo, la batería descarga únicamente el exceso
-   confirmado. Con Protección de Capacidad activa se aplica Peak Shaving contra
-   su límite configurado. Aunque esté desactivada, superar `max_contracted_power`
-   activa la protección de emergencia por potencia contratada.
-5. **Reanuda con histéresis.** Primero se detiene la descarga protectora y se
-   espera de nuevo a que se estabilice. La carga predictiva solo vuelve después
-   de que dos muestras nuevas confirmen un margen de al menos
-   `max(200 W, 2 × banda muerta del PD)`.
+2. **Mantiene una carga positiva.** Si el PD calcula una reducción que cruzaría
+   matemáticamente a descarga, la salida se limita a la mínima carga efectiva de
+   la batería y conserva el estado incremental del PD. No se ordena `0 W` por un
+   simple sobrepaso del objetivo.
+3. **Confirma una emergencia real.** Solo un exceso físico importante sobre el
+   límite duro, confirmado por tres publicaciones nuevas consecutivas, activa la
+   protección de demanda. Un pico aislado o un sobrepaso ordinario continúa
+   modulando la carga.
+4. **Protege el límite si la emergencia persiste.** La batería pasa entonces por
+   la latencia de respuesta/lectura del inversor, vuelve a reposo y, si la
+   importación estabilizada continúa por encima del límite, descarga únicamente
+   el exceso confirmado. Con Protección de Capacidad activa se aplica Peak
+   Shaving contra su límite configurado.
+5. **Reanuda desde el margen disponible.** Tras dos publicaciones nuevas que
+   confirmen un margen de al menos `max(200 W, 2 × banda muerta del PD)`, la carga
+   vuelve desde una potencia calculada por el margen, no desde la máxima batería.
 
-!!! important "Reposo, Peak Shaving y PD normal son acciones distintas"
-    Durante una franja predictiva barata, detener la carga de red **no** habilita
-    una descarga económica normal hacia `pd_target_grid_power`. Peak Shaving o
-    la emergencia por potencia contratada suministran únicamente el exceso sobre
-    el techo de seguridad. Fuera de la franja predictiva vuelve el PD normal y
-    persigue el objetivo de red configurado.
+`0 W` queda reservado para bloqueos explícitos, BMS, baterías no disponibles,
+telemetría crítica, fin de franja, SOC alcanzado, protección de fase o una
+emergencia de seguridad confirmada.
+
+!!! important "Carga positiva, Peak Shaving y PD normal son acciones distintas"
+    Durante una franja predictiva barata, un sobrepaso ordinario se corrige
+    modulando la carga positiva; no habilita una descarga económica normal hacia
+    `pd_target_grid_power`. Peak Shaving o la emergencia por potencia contratada
+    solo actúan tras confirmar un exceso de seguridad. Fuera de la franja
+    predictiva vuelve el PD normal y persigue el objetivo de red configurado.
 
 Por ejemplo, con `max_contracted_power = 2 000 W`, Protección de Capacidad
 desactivada y una carga física estabilizada de `2 800 W`, la protección de

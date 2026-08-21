@@ -218,6 +218,14 @@ from .pricing import (
     notifications,
 )
 from .pricing.engine import DynamicPricingEvaluationHorizon, PricingManager
+
+
+# Predictive charging treats the configured/import ceiling as a regulation
+# target.  A much larger, persistent physical overload is still a safety event,
+# but it must be confirmed from fresh meter publications before the slot is
+# forced through the idle/protection state machine.
+_PREDICTIVE_HARD_LIMIT_CONFIRMATIONS = 3
+_PREDICTIVE_HARD_LIMIT_MIN_MARGIN_W = 200.0
 from .solar_forecast import (
     SolarForecastInput,
     get_configured_solar_forecast_sensor,
@@ -736,6 +744,8 @@ class ChargeDischargeController:
         self._predictive_demand_transition_monotonic = 0.0
         self._predictive_protection_command_w = 0.0
         self._predictive_protection_reason = None
+        self._predictive_hard_limit_samples = 0
+        self._predictive_resume_charge_power = None
         self._last_decision_data = None  # Store last decision for diagnostics
         # Chronological forecast diagnostics survive later balance-only
         # re-evaluations, which replace _last_decision_data wholesale.
@@ -3893,7 +3903,8 @@ class ChargeDischargeController:
         return combined
 
     async def _suspend_predictive_grid_charging_for_demand(
-        self, *, grid_power: float, target_power: float
+        self, *, grid_power: float, target_power: float,
+        reason: str = "demand_protection",
     ) -> None:
         """Stop predictive charging before considering any protective discharge.
 
@@ -3912,6 +3923,8 @@ class ChargeDischargeController:
             self._predictive_demand_transition_monotonic = time.monotonic()
         self._predictive_protection_command_w = 0.0
         self._predictive_protection_reason = None
+        self._predictive_hard_limit_samples = 0
+        self._predictive_resume_charge_power = None
         # Keep the predictive mode owning this slot.  grid_charging_active is
         # historical naming; it means predictive slot active, not necessarily a
         # physical charge command.
@@ -3931,8 +3944,9 @@ class ChargeDischargeController:
 
         if not already_suspended:
             _LOGGER.info(
-                "Predictive: demand %.1fW exceeds charge target %.1fW; "
-                "stopping predictive charge and waiting for meter settling",
+                "Predictive: %s (grid %.1fW, target %.1fW); stopping predictive "
+                "charge and waiting for meter settling",
+                reason,
                 grid_power,
                 target_power,
             )
@@ -3950,6 +3964,113 @@ class ChargeDischargeController:
         if self.capacity_protection_enabled and self.capacity_protection_limit > 0:
             ceiling = min(ceiling, float(self.capacity_protection_limit))
         return ceiling
+
+    def _predictive_min_charge_power(
+        self, available_batteries: list, max_battery_charge: float
+    ) -> float:
+        """Return the smallest positive predictive charge command.
+
+        Predictive control has an inverted internal sign convention (negative
+        means charging), while device writes use positive charge watts.  The
+        floor combines the user's existing PD minimum with the driver's
+        reliable operating floor.  Drivers without a declared floor still get
+        a small non-zero command so a normal PD zero crossing cannot turn a
+        predictive slot into an idle command.
+        """
+        try:
+            configured_floor = max(
+                0.0, float(getattr(self, "min_charge_power", 0.0) or 0.0)
+            )
+        except (TypeError, ValueError):
+            configured_floor = 0.0
+
+        hardware_floor = 0.0
+        for coordinator in available_batteries:
+            capabilities = getattr(coordinator, "capabilities", None)
+            try:
+                hardware_floor = max(
+                    hardware_floor,
+                    float(getattr(capabilities, "min_charge_power_w", 0) or 0),
+                )
+            except (TypeError, ValueError):
+                continue
+
+        # 100 W is the existing relay-cooldown hold and the minimum operating
+        # floor reported by the Anker driver. It is only a fallback for drivers
+        # that do not publish a hardware floor; the available battery capacity
+        # remains the final cap.
+        floor = max(configured_floor, hardware_floor, float(RELAY_COOLDOWN_HOLD_POWER))
+        return min(max(0.0, float(max_battery_charge)), floor)
+
+    def _predictive_hard_limit_confirmed(
+        self,
+        *,
+        sensor_filtered: float,
+        target_power: float,
+        has_new_control_sample: bool,
+        sensor_within_stale_tolerance: bool,
+    ) -> bool:
+        """Confirm a real sustained import/peak emergency.
+
+        ``target_power`` is a regulation target, so crossing it is not enough
+        to stop predictive charging.  The hard path only counts fresh samples
+        where the estimated physical household load exceeds the relevant hard
+        ceiling by a substantial margin.  Battery AC power is removed when
+        available so the charge command itself is not mistaken for household
+        demand.  Missing battery telemetry remains fail-safe after the same
+        confirmation window: a persistent severe import is still protected.
+        """
+        if not has_new_control_sample or not sensor_within_stale_tolerance:
+            # Confirmation means consecutive fresh evidence. A stale/watchdog
+            # pass breaks the streak instead of carrying an old overload toward
+            # a hard stop.
+            self._predictive_hard_limit_samples = 0
+            return False
+
+        measured = self._measured_battery_power()
+        physical_base_load = (
+            sensor_filtered - measured if measured is not None else sensor_filtered
+        )
+        excluded_adjustment = float(
+            getattr(self, "_excluded_included_adjustment", 0.0) or 0.0
+        )
+        base_load = (
+            physical_base_load
+            if getattr(self, "capacity_protection_excluded_devices", False)
+            else physical_base_load - excluded_adjustment
+        )
+        trigger = max(float(self.deadband), 50.0)
+        hard_margin = max(3.0 * trigger, _PREDICTIVE_HARD_LIMIT_MIN_MARGIN_W)
+        emergency = physical_base_load > float(self.max_contracted_power) + hard_margin
+        peak = self.capacity_protection_enabled and base_load > target_power + hard_margin
+
+        if not (emergency or peak):
+            self._predictive_hard_limit_samples = 0
+            return False
+
+        self._predictive_hard_limit_samples = (
+            getattr(self, "_predictive_hard_limit_samples", 0) + 1
+        )
+        if self._predictive_hard_limit_samples < _PREDICTIVE_HARD_LIMIT_CONFIRMATIONS:
+            _LOGGER.debug(
+                "Predictive: hard-limit candidate %.1fW (target %.1fW, "
+                "sample %d/%d); continuing positive charge modulation",
+                physical_base_load,
+                target_power,
+                self._predictive_hard_limit_samples,
+                _PREDICTIVE_HARD_LIMIT_CONFIRMATIONS,
+            )
+            return False
+
+        _LOGGER.warning(
+            "Predictive: confirmed hard demand protection after %d fresh samples "
+            "(physical load %.1fW, target %.1fW, margin %.1fW)",
+            self._predictive_hard_limit_samples,
+            physical_base_load,
+            target_power,
+            hard_margin,
+        )
+        return True
 
     def _predictive_demand_settle_window_s(self) -> float:
         """Return the minimum wait before post-command telemetry is trusted."""
@@ -3976,6 +4097,8 @@ class ChargeDischargeController:
         self._predictive_demand_transition_monotonic = 0.0
         self._predictive_protection_command_w = 0.0
         self._predictive_protection_reason = None
+        self._predictive_hard_limit_samples = 0
+        self._predictive_resume_charge_power = None
         status = getattr(self, "_capacity_protection_status", None)
         if isinstance(status, dict) and status.get("action") in {
             "peak_shaving", "emergency", "settling", "idle"
@@ -4169,7 +4292,17 @@ class ChargeDischargeController:
             self._set_predictive_protection_status(False, "idle")
             return
         if self._predictive_demand_recovery_samples >= 2:
+            physical_base_load = (
+                sensor_filtered - measured if measured is not None else sensor_filtered
+            )
             self._reset_predictive_demand_runtime()
+            # _reset_predictive_demand_runtime clears transient protection state;
+            # preserve a calculated positive request for the next cycle. This
+            # re-enters from measured headroom, not from the battery rail.
+            self._predictive_resume_charge_power = max(
+                0.0,
+                ceiling - physical_base_load - max(float(self.deadband), 50.0),
+            )
             self._grid_charging_initialized = False
             self.previous_power = 0
             self.previous_error = 0
@@ -4181,8 +4314,9 @@ class ChargeDischargeController:
         """
         Handle predictive grid charging mode.
 
-        Target: Keep consumption/export sensor at max_contracted_power.
-        If home consumption increases, reduce battery charging to avoid exceeding ICP.
+        Target: regulate grid import toward the predictive ceiling while keeping
+        the battery in a positive charging state. A confirmed hard overload still
+        hands control to demand protection.
         """
         consumption_state = self.hass.states.get(self.consumption_sensor)
         sensor_raw = self._apply_meter_transform(consumption_state)
@@ -4265,6 +4399,7 @@ class ChargeDischargeController:
             await self._suspend_predictive_grid_charging_for_demand(
                 grid_power=sensor_filtered,
                 target_power=self._predictive_charge_ceiling(),
+                reason="explicit_charge_block",
             )
             return
         
@@ -4294,10 +4429,14 @@ class ChargeDischargeController:
             available_batteries,
             is_charging=True,
         )
+        minimum_charge_power = self._predictive_min_charge_power(
+            available_batteries,
+            max_battery_charge,
+        )
         
-        # Capacity protection constrains predictive import too.  The battery
-        # must stop charging before it turns an otherwise harmless cheap-slot
-        # load into a contracted-power/peak-limit breach.
+        # Capacity protection supplies the predictive regulation target. A normal
+        # target overshoot is handled by the incremental PD; only a confirmed
+        # hard overload below enters the demand-protection state machine.
         # ERROR: target - sensor_actual (INVERTED for predictive mode)
         # Positive error = importing LESS than target → increase charging
         # Negative error = importing MORE than target → reduce charging
@@ -4307,14 +4446,36 @@ class ChargeDischargeController:
         
         # PD Control with modified target
         if not self._grid_charging_initialized:
-            # Initialize for grid charging mode (first time entering)
+            # Initialize for grid charging mode (first time entering). A
+            # legitimate return from hard protection may provide a calculated
+            # resume power; only a fresh slot with no such context starts at
+            # the available maximum.
             self.previous_error = error
             self.derivative_filtered = 0.0  # drop any derivative carried from the main loop
-            self.previous_power = -min(max_battery_charge, target_power)  # Start at max charge
+            resume_charge = getattr(self, "_predictive_resume_charge_power", None)
+            if resume_charge is not None:
+                try:
+                    resume_charge = max(0.0, float(resume_charge))
+                except (TypeError, ValueError):
+                    resume_charge = 0.0
+                initial_charge = min(
+                    max_battery_charge,
+                    max(minimum_charge_power, resume_charge),
+                )
+                self._predictive_resume_charge_power = None
+                initialization_reason = "calculated resume"
+            else:
+                initial_charge = min(max_battery_charge, target_power)
+                initialization_reason = "new slot"
+            self.previous_power = -initial_charge
             self._grid_charging_initialized = True
             self.first_execution = False  # Mark as initialized to avoid conflicts
-            _LOGGER.info("Initialized predictive charging: target=%dW, initial_charge=%dW",
-                        target_power, abs(self.previous_power))
+            _LOGGER.info(
+                "Initialized predictive charging: target=%dW, initial_charge=%dW (%s)",
+                target_power,
+                abs(self.previous_power),
+                initialization_reason,
+            )
         
         if not has_new_control_sample:
             # A stale-safety pass may still clamp the existing order to the
@@ -4357,27 +4518,52 @@ class ChargeDischargeController:
         else:
             new_power = new_power_raw
         
-        # A limit breach (or an incremental request beyond idle) never falls
-        # through to normal PD.  Stop first and make the peak decision only
-        # after fresh, settled telemetry arrives.
-        if sensor_filtered > target_power + max(float(self.deadband), 50.0) or new_power > 0:
+        # The configured ceiling is a regulation target, not an immediate idle
+        # trigger. A normal overshoot continues through the incremental PD and
+        # is kept at a positive charge floor below. Only a substantial physical
+        # overload confirmed by fresh samples enters hard demand protection.
+        if self._predictive_hard_limit_confirmed(
+            sensor_filtered=sensor_filtered,
+            target_power=target_power,
+            has_new_control_sample=has_new_control_sample,
+            sensor_within_stale_tolerance=sensor_within_stale_tolerance,
+        ):
             await self._suspend_predictive_grid_charging_for_demand(
                 grid_power=sensor_filtered,
                 target_power=target_power,
+                reason="confirmed_hard_limit",
             )
             return
+
+        # Clamp normal predictive output to a positive charge floor. The
+        # internal sign remains negative for charging; _set_battery_power below
+        # receives the positive magnitude. Re-apply the rate limit to the floor
+        # so a zero-crossing cannot create a larger reverse step than the PD
+        # limiter permits.
+        if minimum_charge_power <= 0:
+            new_power = 0.0
+        elif new_power > -minimum_charge_power:
+            # A reduction of internal predictive charge moves the negative
+            # value towards zero.  Use the positive-direction ramp boundary
+            # and keep the result no closer to zero than the charge floor;
+            # subtracting max_change here would move farther into charge and
+            # then let the floor clamp create a full-size step to the minimum.
+            ramp_floor = self.previous_power + max_change
+            limited_floor = min(-minimum_charge_power, ramp_floor)
+            if limited_floor != new_power:
+                _LOGGER.info(
+                    "Predictive: keeping positive charge floor %.1fW "
+                    "after PD zero crossing (internal %.1fW -> %.1fW)",
+                    abs(limited_floor),
+                    new_power,
+                    limited_floor,
+                )
+            new_power = limited_floor
 
         # Clamp to battery limits (negative = charging)
         if new_power < -max_battery_charge:
             _LOGGER.info("Predictive: Clamping charge to max available: %dW", max_battery_charge)
             new_power = -max_battery_charge
-        elif new_power > 0:
-            _LOGGER.debug(
-                "Predictive: discharge request %.1fW is outside charging mode; "
-                "clamping charge output to 0W",
-                new_power,
-            )
-            new_power = 0
         
         _LOGGER.info(
             "Predictive Grid Charging: Grid=%.1fW, Target=%dW, Error=%.1fW, P=%.1fW, D=%.1fW, "

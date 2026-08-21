@@ -437,6 +437,12 @@ def _predictive_controller(state_holder, writes):
     controller._predictive_charge_ceiling = ChargeDischargeController._predictive_charge_ceiling.__get__(
         controller, ChargeDischargeController
     )
+    controller._predictive_min_charge_power = ChargeDischargeController._predictive_min_charge_power.__get__(
+        controller, ChargeDischargeController
+    )
+    controller._predictive_hard_limit_confirmed = ChargeDischargeController._predictive_hard_limit_confirmed.__get__(
+        controller, ChargeDischargeController
+    )
     controller._predictive_demand_settle_window_s = ChargeDischargeController._predictive_demand_settle_window_s.__get__(
         controller, ChargeDischargeController
     )
@@ -459,6 +465,16 @@ async def _record_write(writes, coordinator, charge, discharge):
 
 def _complete_predictive_latency_wait(controller):
     controller._predictive_demand_transition_monotonic = time.monotonic() - 10.0
+
+
+def _confirm_predictive_hard_limit(controller, state_holder, first_report, value=3000):
+    """Feed the three fresh publications required by hard protection."""
+    for seconds in (0, 4, 8):
+        state_holder["state"] = _state(
+            value,
+            first_report + timedelta(seconds=seconds),
+        )
+        asyncio.run(controller._handle_predictive_grid_charging())
 
 
 def test_predictive_pd_does_not_integrate_identical_publications():
@@ -490,20 +506,84 @@ def test_predictive_pd_does_not_integrate_identical_publications():
     assert controller.previous_power != first_power
 
 
+def test_predictive_ordinary_overshoot_modulates_without_idle_command():
+    first_report = datetime.now(timezone.utc)
+    state_holder = {"state": _state(1100, first_report)}
+    writes = []
+    controller = _predictive_controller(state_holder, writes)
+
+    asyncio.run(controller._handle_predictive_grid_charging())
+    first_power = controller.previous_power
+    assert first_power < 0
+    assert writes[-1][1] > 0
+    assert writes[-1][2] == 0
+    assert controller._predictive_charge_suspended_for_demand is False
+
+    # Still above the regulation target, but below the confirmed hard-limit
+    # threshold: the incremental state continues from the previous command.
+    state_holder["state"] = _state(
+        1150,
+        first_report + timedelta(seconds=4),
+    )
+    asyncio.run(controller._handle_predictive_grid_charging())
+    assert controller.previous_power < 0
+    assert controller.previous_power != first_power
+    assert all(charge > 0 and discharge == 0 for _, charge, discharge in writes)
+
+
+def test_predictive_zero_cross_is_clamped_to_positive_effective_charge():
+    first_report = datetime.now(timezone.utc)
+    state_holder = {"state": _state(1100, first_report)}
+    writes = []
+    controller = _predictive_controller(state_holder, writes)
+    controller.previous_power = -50.0
+    controller.previous_error = 0.0
+
+    asyncio.run(controller._handle_predictive_grid_charging())
+
+    # The P term asks to cross into internal discharge, but predictive mode
+    # retains a positive device-side charge and its negative internal state.
+    assert controller.previous_power < 0
+    assert writes[-1][1] >= 100
+    assert writes[-1][2] == 0
+    assert (writes[-1][1], writes[-1][2]) != (0, 0)
+    assert controller._predictive_charge_suspended_for_demand is False
+
+
+def test_predictive_zero_cross_respects_rate_limit_before_charge_floor():
+    first_report = datetime.now(timezone.utc)
+    state_holder = {"state": _state(4000, first_report)}
+    writes = []
+    controller = _predictive_controller(state_holder, writes)
+    controller.previous_power = -500.0
+    controller.previous_error = 0.0
+
+    asyncio.run(controller._handle_predictive_grid_charging())
+
+    # A large P correction is rate-limited before the positive floor is
+    # applied. The internal sign must remain charging (negative), rather than
+    # becoming a positive value that would be interpreted as discharge state.
+    assert controller.previous_power == -100.0
+    assert writes[-1][1] == 100
+    assert writes[-1][2] == 0
+
+
 def test_predictive_demand_spike_keeps_predictive_slot_while_settling():
     first_report = datetime.now(timezone.utc)
     state_holder = {"state": _state(3000, first_report)}
     writes = []
     controller = _predictive_controller(state_holder, writes)
 
-    asyncio.run(controller._handle_predictive_grid_charging())
+    _confirm_predictive_hard_limit(controller, state_holder, first_report)
 
     assert controller.grid_charging_active is True
     assert controller._predictive_charge_suspended_for_demand is True
     assert controller._grid_charging_initialized is False
     assert controller.first_execution is False
     assert controller.previous_power == 0
-    assert [(charge, discharge) for _, charge, discharge in writes] == [(0, 0)]
+    assert len(writes) == 3
+    assert all(charge > 0 and discharge == 0 for _, charge, discharge in writes[:2])
+    assert [(charge, discharge) for _, charge, discharge in writes][-1] == (0, 0)
 
     # The predictive owner itself remains idle while telemetry settles; normal
     # PD must not receive this old charge-inclusive meter sample.
@@ -523,18 +603,19 @@ def test_predictive_peak_shaving_waits_for_two_fresh_samples_before_discharge():
     controller._capacity_protection_status = {}
     controller._capacity_protection_active = False
 
-    asyncio.run(controller._handle_predictive_grid_charging())
-    assert [(charge, discharge) for _, charge, discharge in writes] == [(0, 0)]
+    _confirm_predictive_hard_limit(controller, state_holder, first_report)
+    assert len(writes) == 3
+    assert [(charge, discharge) for _, charge, discharge in writes][-1] == (0, 0)
     _complete_predictive_latency_wait(controller)
 
     # First post-idle publication still may include inverter ramp/old charge.
-    state_holder["state"] = _state(3000, first_report + timedelta(seconds=4))
+    state_holder["state"] = _state(3000, first_report + timedelta(seconds=12))
     asyncio.run(controller._handle_predictive_grid_charging())
-    assert len(writes) == 1
+    assert len(writes) == 3
 
     # A second independent sample confirms a real 1 kW excess, which is the
     # only amount Peak Shaving is allowed to discharge.
-    state_holder["state"] = _state(3000, first_report + timedelta(seconds=8))
+    state_holder["state"] = _state(3000, first_report + timedelta(seconds=16))
     asyncio.run(controller._handle_predictive_grid_charging())
     assert [(charge, discharge) for _, charge, discharge in writes][-1] == (0, 1000)
     assert controller._predictive_demand_state == "peak_shaving"
@@ -551,10 +632,10 @@ def test_predictive_charge_blocker_keeps_peak_protection_ownership():
     controller._capacity_protection_status = {}
     controller._capacity_protection_active = False
 
-    asyncio.run(controller._handle_predictive_grid_charging())
+    _confirm_predictive_hard_limit(controller, state_holder, first_report)
     controller.is_charge_blocked = lambda: True
     _complete_predictive_latency_wait(controller)
-    for seconds in (4, 8):
+    for seconds in (12, 16):
         state_holder["state"] = _state(3000, first_report + timedelta(seconds=seconds))
         asyncio.run(controller._handle_predictive_grid_charging())
 
@@ -574,14 +655,14 @@ def test_predictive_protection_clears_status_while_settling_after_peak():
     controller._capacity_protection_status = {}
     controller._capacity_protection_active = False
 
-    asyncio.run(controller._handle_predictive_grid_charging())
+    _confirm_predictive_hard_limit(controller, state_holder, first_report)
     _complete_predictive_latency_wait(controller)
-    for seconds in (4, 8):
+    for seconds in (12, 16):
         state_holder["state"] = _state(3000, first_report + timedelta(seconds=seconds))
         asyncio.run(controller._handle_predictive_grid_charging())
     assert controller._capacity_protection_status["active"] is True
 
-    state_holder["state"] = _state(1500, first_report + timedelta(seconds=12))
+    state_holder["state"] = _state(1500, first_report + timedelta(seconds=20))
     asyncio.run(controller._handle_predictive_grid_charging())
     assert controller._capacity_protection_active is False
     assert controller._capacity_protection_status["action"] == "settling"
@@ -600,9 +681,9 @@ def test_predictive_emergency_uses_physical_load_when_excluded_load_is_ignored()
     controller._capacity_protection_status = {}
     controller._capacity_protection_active = False
 
-    asyncio.run(controller._handle_predictive_grid_charging())
+    _confirm_predictive_hard_limit(controller, state_holder, first_report)
     _complete_predictive_latency_wait(controller)
-    for seconds in (4, 8):
+    for seconds in (12, 16):
         state_holder["state"] = _state(3000, first_report + timedelta(seconds=seconds))
         asyncio.run(controller._handle_predictive_grid_charging())
 
@@ -623,22 +704,22 @@ def test_predictive_settling_counts_samples_only_after_measured_idle():
     measured = {"power": 500.0}
     controller._measured_battery_power = lambda: measured["power"]
 
-    asyncio.run(controller._handle_predictive_grid_charging())
+    _confirm_predictive_hard_limit(controller, state_holder, first_report)
     _complete_predictive_latency_wait(controller)
 
     # Reports received while the old charge is still physically present do not
     # count towards the two post-idle confirmations.
-    state_holder["state"] = _state(3000, first_report + timedelta(seconds=4))
+    state_holder["state"] = _state(3000, first_report + timedelta(seconds=12))
     asyncio.run(controller._handle_predictive_grid_charging())
     assert controller._predictive_demand_fresh_samples == 0
 
     measured["power"] = 0.0
-    state_holder["state"] = _state(3000, first_report + timedelta(seconds=8))
+    state_holder["state"] = _state(3000, first_report + timedelta(seconds=16))
     asyncio.run(controller._handle_predictive_grid_charging())
     assert controller._predictive_demand_fresh_samples == 1
-    assert len(writes) == 1
+    assert len(writes) == 3
 
-    state_holder["state"] = _state(3000, first_report + timedelta(seconds=12))
+    state_holder["state"] = _state(3000, first_report + timedelta(seconds=20))
     asyncio.run(controller._handle_predictive_grid_charging())
     assert [(charge, discharge) for _, charge, discharge in writes][-1] == (0, 1000)
 
@@ -654,9 +735,9 @@ def test_predictive_peak_does_not_recalculate_from_watchdog_sample():
     controller._capacity_protection_status = {}
     controller._capacity_protection_active = False
 
-    asyncio.run(controller._handle_predictive_grid_charging())
+    _confirm_predictive_hard_limit(controller, state_holder, first_report)
     _complete_predictive_latency_wait(controller)
-    for seconds in (4, 8):
+    for seconds in (12, 16):
         state_holder["state"] = _state(3000, first_report + timedelta(seconds=seconds))
         asyncio.run(controller._handle_predictive_grid_charging())
     write_count = len(writes)
@@ -681,9 +762,9 @@ def test_predictive_peak_stops_discharge_when_meter_is_too_stale():
     controller._capacity_protection_status = {}
     controller._capacity_protection_active = False
 
-    asyncio.run(controller._handle_predictive_grid_charging())
+    _confirm_predictive_hard_limit(controller, state_holder, first_report)
     _complete_predictive_latency_wait(controller)
-    for seconds in (4, 8):
+    for seconds in (12, 16):
         state_holder["state"] = _state(3000, first_report + timedelta(seconds=seconds))
         asyncio.run(controller._handle_predictive_grid_charging())
 
