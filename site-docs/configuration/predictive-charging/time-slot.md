@@ -22,8 +22,8 @@ Charges from the grid during a **fixed time window** (typically cheap overnight 
 
 ## Evaluation flow
 
-1. **On slot entry**: batteries are held idle for 5 minutes to allow the solar forecast sensor time to update (particularly relevant when the slot starts at 00:00).
-2. **5 minutes in**: the system evaluates the remaining energy balance and simulates consumption, solar and usable battery energy in 15-minute intervals until midnight.
+1. **On slot entry**: the system evaluates the remaining energy balance immediately when no solar forecast is configured or the configured forecast is readable. If the forecast is temporarily unavailable, the evaluation is retried for up to five minutes so a transient provider update does not produce a false decision.
+2. **After the evaluation**: the system simulates consumption, solar and usable battery energy in 15-minute intervals until midnight. If the forecast remains unavailable after the retry grace, it evaluates conservatively with zero solar.
 3. Every configured window receives its own kWh quota. Energy needed before a projected minimum-SOC crossing is assigned only to windows that can deliver it in time; later energy is distributed across the remaining configured windows.
 4. A notification is sent with the decision. If no configured window can meet a deadline, the diagnostic attributes expose the uncovered kWh instead of claiming that a later window covers it.
 5. Charging stops when the current window's quota is stored or when the window ends. The first window therefore no longer consumes the whole flexible daily target by default.

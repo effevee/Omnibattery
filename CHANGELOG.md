@@ -6,6 +6,7 @@
 
 - **Predictive charging could oscillate between maximum power and 0 W**: ordinary grid-import overshoots now modulate a positive battery-charge power instead of suspending predictive control, while confirmed demand protection still requires three fresh samples before using the 0 W safety stop. Recovery resumes from measured grid headroom rather than restarting at the battery's maximum charge power.
 - **Dynamic EV power control could suppress residual solar charging after the EV stopped**: the restart hold now gives the wallbox a short re-yield window, then allows the battery to absorb stable solar surplus while keeping discharge blocked for the full safety hold. Blocker logs now report the actual source instead of mislabeling it as a time-slot restriction.
+- **Predictive Time Slot windows could delay charging by five minutes on every entry**: the fixed entry wait was replaced with immediate evaluation when the solar forecast is valid (or not configured), bounded retries during transient forecast outages, and a conservative zero-solar fallback after the retry grace. Additional configured windows no longer inherit an unnecessary delay.
 
 ## [1.4.0b3] - 2026-08-20
 

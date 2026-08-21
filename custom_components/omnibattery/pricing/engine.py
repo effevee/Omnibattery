@@ -95,6 +95,12 @@ if TYPE_CHECKING:
 
 _LOGGER = logging.getLogger(__name__)
 
+# A configured forecast may briefly be unavailable while its provider refreshes
+# around midnight.  This is a retry grace period, not a delay applied to every
+# predictive time slot.  The controller's existing charge-delay grace can
+# override it at runtime; the local default keeps lightweight callers safe.
+TIME_SLOT_FORECAST_GRACE_S = 300.0
+
 # A plan is intentionally not rebuilt on every control sample: that would make
 # the selected high-value blocks chatter while SOC telemetry is settling.  It
 # is rebuilt when the available headroom has moved enough to change the answer,
@@ -166,6 +172,38 @@ class PricingManager:
     def __init__(self, hass: "HomeAssistant", controller: Any) -> None:
         self._hass = hass
         self._controller = controller
+
+    def _now(self) -> datetime:
+        """Return local wall-clock time, isolated for deterministic slot tests."""
+        return datetime.now()
+
+    def _time_slot_forecast_grace_s(self) -> float:
+        """Return the configured forecast retry grace for Time Slot mode."""
+        raw_grace = getattr(
+            self._controller,
+            "_forecast_grace_s",
+            TIME_SLOT_FORECAST_GRACE_S,
+        )
+        try:
+            grace = float(raw_grace)
+        except (TypeError, ValueError):
+            grace = TIME_SLOT_FORECAST_GRACE_S
+        if not math.isfinite(grace):
+            grace = TIME_SLOT_FORECAST_GRACE_S
+        return max(0.0, grace)
+
+    def _time_slot_forecast_unavailable_elapsed_s(self, now: datetime) -> float:
+        """Return seconds since the current slot began, tolerating old state."""
+        entry_time = getattr(self._controller, "_slot_entry_time", None)
+        if not isinstance(entry_time, datetime):
+            return 0.0
+        try:
+            return max(0.0, (now - entry_time).total_seconds())
+        except (TypeError, ValueError):
+            # A restored aware/naive mismatch must not create an indefinite
+            # retry.  Restart the grace clock from the current cycle instead.
+            self._controller._slot_entry_time = now
+            return 0.0
 
     def _reset_predictive_demand_runtime(self) -> None:
         """Clear demand-protection state whenever a predictive slot aborts."""
@@ -4355,6 +4393,7 @@ class PricingManager:
             bool(self._controller.charging_time_slots) and
             self._controller._check_time_window()
         )
+        now = self._now()
 
         if in_time_window:
             if self._controller.predictive_charging_overridden:
@@ -4376,23 +4415,16 @@ class PricingManager:
             )
             is_initial_eval = self._controller.last_evaluation_soc is None
 
-            # On slot entry, wait 5 minutes before the initial evaluation so the
-            # forecast sensor (which resets at midnight) has time to update.
-            if is_initial_eval:
-                if self._controller._slot_entry_time is None:
-                    self._controller._slot_entry_time = datetime.now()
-                    _LOGGER.info(
-                        "Time slot entered (SOC: %.1f%%) — waiting 5 min before evaluation "
-                        "to allow forecast sensor to update",
-                        current_avg_soc,
-                    )
-                wait_elapsed_s = (datetime.now() - self._controller._slot_entry_time).total_seconds()
-                if wait_elapsed_s < 5 * 60:
-                    _LOGGER.debug(
-                        "Predictive charging: waiting for forecast sensor (%.0f / 300 s) - normal operation continues",
-                        wait_elapsed_s,
-                    )
-                    return
+            # Record entry for diagnostics and for the bounded retry grace below.
+            # A valid forecast (or no configured forecast) is evaluated in this
+            # same cycle; entering a second configured window must not impose a
+            # fixed five-minute delay.
+            if self._controller._slot_entry_time is None:
+                self._controller._slot_entry_time = now
+                _LOGGER.info(
+                    "Time slot entered (SOC: %.1f%%) — evaluating predictive charging",
+                    current_avg_soc,
+                )
 
             # Guaranteed-minimum-SOC floor: the 30% re-eval threshold can't fire
             # once last_evaluation_soc drifts below (floor - margin), so the battery
@@ -4445,44 +4477,78 @@ class PricingManager:
                         self._controller, "today"
                     )
                 )
+                forecast_unavailable = False
+                forecast_unavailable_elapsed_s = 0.0
+                forecast_grace_s = self._time_slot_forecast_grace_s()
                 if is_initial_eval and forecast_configured:
                     # ``_evaluate_remaining_grid_charging`` deliberately uses
                     # zero solar as its fail-safe when a forecast read fails.
-                    # For the one-shot slot-entry evaluation, distinguish that
+                    # For the one-shot slot-entry evaluation, distinguish a
                     # transient failure before it is flattened to 0 kWh so the
                     # next cycle can retry instead of publishing a misleading
-                    # safe-mode notification.
-                    if read_solar_forecast_kwh(self._hass, self._controller) is None:
-                        _LOGGER.debug(
-                            "Predictive charging: configured solar forecast is not "
-                            "readable yet; deferring initial evaluation"
+                    # safe-mode notification. Once the existing five-minute
+                    # grace expires, the normal conservative fallback is safe.
+                    forecast_unavailable = (
+                        read_solar_forecast_kwh(self._hass, self._controller) is None
+                    )
+                    if forecast_unavailable:
+                        forecast_unavailable_elapsed_s = (
+                            self._time_slot_forecast_unavailable_elapsed_s(now)
                         )
-                        return
+                        if forecast_unavailable_elapsed_s < forecast_grace_s:
+                            _LOGGER.debug(
+                                "Predictive charging: configured solar forecast is "
+                                "unavailable (%.0f / %.0f s grace); retrying",
+                                forecast_unavailable_elapsed_s,
+                                forecast_grace_s,
+                            )
+                            return
+                        _LOGGER.warning(
+                            "Predictive charging: configured solar forecast has been "
+                            "unavailable for %.0f s; evaluating conservatively with solar=0",
+                            forecast_unavailable_elapsed_s,
+                        )
 
                 decision_data = await self._current_horizon_grid_charging_decision()
 
-                # A configured forecast can still be unavailable when the
-                # provider is rebuilding its state around midnight.  Do not
-                # consume the one-shot initial evaluation or publish a false
-                # safe-mode notification in that case.  Leaving
-                # ``last_evaluation_soc`` unset makes the next control cycle
-                # retry as soon as the sensor recovers.  An installation with
-                # no forecast configured keeps the existing conservative
-                # notification path.
-                if (
+                # A provider can change state between the pre-check above and
+                # the actual balance decision. Apply the same bounded retry to
+                # that race, while accepting the existing solar=0 fallback once
+                # the grace has elapsed.
+                decision_forecast_unavailable = (
                     is_initial_eval
-                    and decision_data.get("solar_forecast_kwh") is None
                     and forecast_configured
-                ):
-                    _LOGGER.debug(
-                        "Predictive charging: configured solar forecast is not "
-                        "readable yet; deferring initial evaluation"
+                    and decision_data.get("solar_forecast_kwh") is None
+                )
+                if decision_forecast_unavailable:
+                    if not forecast_unavailable:
+                        forecast_unavailable_elapsed_s = (
+                            self._time_slot_forecast_unavailable_elapsed_s(now)
+                        )
+                    if forecast_unavailable_elapsed_s < forecast_grace_s:
+                        _LOGGER.debug(
+                            "Predictive charging: configured solar forecast became "
+                            "unavailable during evaluation (%.0f / %.0f s grace); retrying",
+                            forecast_unavailable_elapsed_s,
+                            forecast_grace_s,
+                        )
+                        return
+                    _LOGGER.warning(
+                        "Predictive charging: forecast remained unavailable for %.0f s; "
+                        "accepting the conservative solar=0 evaluation",
+                        forecast_unavailable_elapsed_s,
                     )
-                    return
+                    forecast_unavailable = True
+
+                if forecast_unavailable:
+                    decision_data["solar_forecast_fallback"] = True
+                    decision_data["solar_forecast_fallback_reason"] = (
+                        "unavailable_after_time_slot_grace"
+                    )
 
                 decision_data = self._apply_time_slot_chronological_plan(
                     decision_data,
-                    now=datetime.now(),
+                    now=now,
                 )
 
                 self._controller.grid_charging_active = decision_data["should_charge"]
@@ -4503,7 +4569,7 @@ class PricingManager:
                 return
         else:
             await self._ensure_time_slot_chronological_preview(
-                now=datetime.now()
+                now=now
             )
             # `last_evaluation_soc is not None` marks that we evaluated during a
             # slot (set on every slot's initial eval, charging or not). Including
@@ -4524,7 +4590,7 @@ class PricingManager:
                     # explicit chronological shortfall in diagnostics.
                     replanned = await self._current_horizon_grid_charging_decision()
                     replanned = self._apply_time_slot_chronological_plan(
-                        replanned, now=datetime.now()
+                        replanned, now=now
                     )
                     self._controller._last_decision_data = replanned
                 self._reset_predictive_demand_runtime()

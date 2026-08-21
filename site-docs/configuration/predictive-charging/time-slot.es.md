@@ -20,8 +20,8 @@ Carga desde la red durante una **ventana horaria fija** (típicamente tarifa noc
 
 ## Flujo de evaluación
 
-1. **Al entrar en el slot**: las baterías se mantienen en reposo durante 5 minutos para que el sensor de previsión solar tenga tiempo de actualizarse (especialmente relevante si el slot comienza a las 00:00).
-2. **5 minutos después**: el sistema evalúa el balance restante y simula consumo, solar y energía utilizable de batería en intervalos de 15 minutos hasta medianoche.
+1. **Al entrar en el slot**: el sistema evalúa inmediatamente el balance restante si no hay sensor de previsión solar o si el sensor configurado es legible. Si la previsión está temporalmente indisponible, la evaluación se reintenta durante un máximo de cinco minutos para evitar una decisión falsa durante una actualización del proveedor.
+2. **Después de la evaluación**: el sistema simula consumo, solar y energía utilizable de batería en intervalos de 15 minutos hasta medianoche. Si la previsión sigue indisponible tras ese margen, evalúa de forma conservadora suponiendo cero solar.
 3. Cada ventana configurada recibe su propia cuota en kWh. La energía necesaria antes de un cruce previsto del SOC mínimo solo se asigna a ventanas capaces de entregarla a tiempo; la energía posterior se reparte entre las demás ventanas configuradas.
 4. Se envía una notificación con la decisión. Si ninguna ventana puede cumplir un plazo, los atributos diagnósticos muestran los kWh no cubiertos en vez de afirmar que una ventana posterior los resuelve.
 5. La carga se detiene al almacenar la cuota de la ventana actual o cuando termina la ventana. Así la primera franja ya no consume por defecto todo el objetivo flexible del día.
