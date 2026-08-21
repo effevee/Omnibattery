@@ -645,6 +645,32 @@ class MarstekVenusDataUpdateCoordinator(DataUpdateCoordinator):
             self.device_max_discharge_power,
         )
 
+    def _sync_zendure_inverse_max_power(self) -> None:
+        """Keep Zendure's reported inverter cap on the canonical control path."""
+        if getattr(self, "brand", None) != "zendure" or not self.data:
+            return
+        reported_limit = self.data.get("inverse_max_power")
+        if reported_limit is None:
+            return
+        try:
+            reported_limit = int(reported_limit)
+        except (TypeError, ValueError):
+            return
+        if reported_limit <= 0:
+            return
+        if reported_limit == self.configured_max_discharge_power:
+            return
+
+        old_limit = self.effective_max_discharge_power
+        self.configured_max_discharge_power = reported_limit
+        self.persist_battery_config("max_discharge_power", reported_limit)
+        _LOGGER.info(
+            "[%s] Synchronized Zendure inverseMaxPower %d W → %d W",
+            self.name,
+            old_limit,
+            self.effective_max_discharge_power,
+        )
+
     async def disconnect(self) -> None:
         """Disconnect from the battery via the driver."""
         await self.driver.close()
@@ -1089,6 +1115,15 @@ class MarstekVenusDataUpdateCoordinator(DataUpdateCoordinator):
 
         # Update the coordinator's data
         self.data.update(updated_data)
+
+        # Zendure names its writable discharge ceiling ``inverseMaxPower``.
+        # Treat the reported value like the canonical max_discharge_power used
+        # by register-backed drivers so an existing 4000 W device setting repairs
+        # a legacy 2400 W config entry immediately after startup, without requiring
+        # the user to move the number entity once after upgrading.
+        sync_inverse_max = getattr(self, "_sync_zendure_inverse_max_power", None)
+        if sync_inverse_max is not None:
+            sync_inverse_max()
 
         # Drivers without a hardware nominal-capacity value (Zendure and Sessy)
         # need the configured value surfaced as battery_total_energy so stored

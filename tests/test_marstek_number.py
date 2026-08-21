@@ -91,8 +91,11 @@ async def test_zendure_inverse_max_power_updates_effective_discharge_limit():
     coordinator.battery_version = "v3"
     coordinator.name = "SolarFlow 4000"
     coordinator._config_entry = None
+    coordinator._device_max_charge_power = 4000
     coordinator._device_max_discharge_power = 4000
+    coordinator._configured_max_charge_power = 4000
     coordinator._configured_max_discharge_power = 2400
+    coordinator._effective_max_charge_power = 4000
     coordinator._effective_max_discharge_power = 2400
     coordinator.data = {"inverse_max_power": 2400}
     coordinator.write_control = AsyncMock()

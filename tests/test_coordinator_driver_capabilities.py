@@ -198,6 +198,66 @@ def test_zendure_model_promotion_repairs_stale_saved_cap_after_restart():
     ]
 
 
+def test_zendure_reported_inverse_max_power_repairs_stale_configured_cap():
+    coordinator = object.__new__(MarstekVenusDataUpdateCoordinator)
+    coordinator.brand = "zendure"
+    coordinator.name = "SolarFlow"
+    coordinator._device_max_charge_power = 4000
+    coordinator._device_max_discharge_power = 4000
+    coordinator._configured_max_charge_power = 4000
+    coordinator._configured_max_discharge_power = 2400
+    coordinator._effective_max_charge_power = 4000
+    coordinator._effective_max_discharge_power = 2400
+    coordinator.data = {"inverse_max_power": 4000}
+    coordinator.persist_battery_config = Mock()
+
+    coordinator._sync_zendure_inverse_max_power()
+
+    assert coordinator.configured_max_discharge_power == 4000
+    assert coordinator.effective_max_discharge_power == 4000
+    coordinator.persist_battery_config.assert_called_once_with(
+        "max_discharge_power", 4000
+    )
+
+
+def test_zendure_reported_inverse_max_power_does_not_repersist_matching_cap():
+    coordinator = object.__new__(MarstekVenusDataUpdateCoordinator)
+    coordinator.brand = "zendure"
+    coordinator.name = "SolarFlow"
+    coordinator._device_max_charge_power = 4000
+    coordinator._device_max_discharge_power = 4000
+    coordinator._configured_max_charge_power = 4000
+    coordinator._configured_max_discharge_power = 4000
+    coordinator._effective_max_charge_power = 4000
+    coordinator._effective_max_discharge_power = 4000
+    coordinator.data = {"inverse_max_power": 4000}
+    coordinator.persist_battery_config = Mock()
+
+    coordinator._sync_zendure_inverse_max_power()
+
+    assert coordinator.effective_max_discharge_power == 4000
+    coordinator.persist_battery_config.assert_not_called()
+
+
+def test_zendure_reported_inverse_max_power_ignores_invalid_cap():
+    coordinator = object.__new__(MarstekVenusDataUpdateCoordinator)
+    coordinator.brand = "zendure"
+    coordinator.name = "SolarFlow"
+    coordinator._device_max_charge_power = 4000
+    coordinator._device_max_discharge_power = 4000
+    coordinator._configured_max_charge_power = 4000
+    coordinator._configured_max_discharge_power = 2400
+    coordinator._effective_max_charge_power = 4000
+    coordinator._effective_max_discharge_power = 2400
+    coordinator.data = {"inverse_max_power": "unknown"}
+    coordinator.persist_battery_config = Mock()
+
+    coordinator._sync_zendure_inverse_max_power()
+
+    assert coordinator.effective_max_discharge_power == 2400
+    coordinator.persist_battery_config.assert_not_called()
+
+
 async def test_reconnect_skips_rs485_for_driver_without_capability():
     driver = SimpleNamespace(connect=AsyncMock(return_value=True))
     coordinator = SimpleNamespace(
