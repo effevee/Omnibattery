@@ -322,7 +322,10 @@ class MarstekVenusNumber(CoordinatorEntity, NumberEntity):
             _LOGGER.info("%s: Updated max_charge_power %dW → %dW (immediate sync)",
                          self.coordinator.name, old_value, int(value))
 
-        elif self.definition['key'] == 'max_discharge_power':
+        # Zendure exposes the user-facing discharge ceiling as
+        # ``inverse_max_power``; keep it on the same coordinator path as the
+        # canonical ``max_discharge_power`` key used by the control loop.
+        elif self.definition['key'] in ('max_discharge_power', 'inverse_max_power'):
             old_value = getattr(
                 self.coordinator,
                 "effective_max_discharge_power",
@@ -330,8 +333,13 @@ class MarstekVenusNumber(CoordinatorEntity, NumberEntity):
             )
             self.coordinator.configured_max_discharge_power = int(value)
             self.coordinator.persist_battery_config("max_discharge_power", int(value))
-            _LOGGER.info("%s: Updated max_discharge_power %dW → %dW (immediate sync)",
-                         self.coordinator.name, old_value, int(value))
+            _LOGGER.info(
+                "%s: Updated discharge power limit via %s %dW → %dW (immediate sync)",
+                self.coordinator.name,
+                self.definition['key'],
+                old_value,
+                int(value),
+            )
 
     @property
     def device_info(self):
