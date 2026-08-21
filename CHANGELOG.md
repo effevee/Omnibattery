@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.4.0b5] - 2026-08-21
+
+### Fixed
+
+- **Predictive demand protection could ignore a sustained overload when consecutive grid readings stayed numerically unchanged**: fresh meter publications now advance the three-sample hard-limit confirmation independently from incremental P/D updates, while timer-only watchdog passes break the confirmation streak and unchanged normal readings still avoid duplicate control calculations.
+- **Zendure SolarFlow Mix discharge power could remain capped at 2400 W**: the user-facing `inverse_max_power` control and its reported device value now synchronize and persist the canonical discharge limit. Existing 4000 Mix AC+ and Mix Pro installations whose hardware already reports 4000 W recover automatically after startup, while new control changes still take effect immediately.
+
 ## [1.4.0b4] - 2026-08-21
 
 ### Fixed
@@ -7,7 +14,6 @@
 - **Predictive charging could oscillate between maximum power and 0 W**: ordinary grid-import overshoots now modulate a positive battery-charge power instead of suspending predictive control, while confirmed demand protection still requires three fresh samples before using the 0 W safety stop. Recovery resumes from measured grid headroom rather than restarting at the battery's maximum charge power.
 - **Dynamic EV power control could suppress residual solar charging after the EV stopped**: the restart hold now gives the wallbox a short re-yield window, then allows the battery to absorb stable solar surplus while keeping discharge blocked for the full safety hold. Blocker logs now report the actual source instead of mislabeling it as a time-slot restriction.
 - **Predictive Time Slot windows could delay charging by five minutes on every entry**: the fixed entry wait was replaced with immediate evaluation when the solar forecast is valid (or not configured), bounded retries during transient forecast outages, and a conservative zero-solar fallback after the retry grace. Additional configured windows no longer inherit an unnecessary delay.
-- **Zendure SolarFlow Mix discharge power could remain capped at 2400 W**: the user-facing `inverse_max_power` control and its reported device value now synchronize and persist the canonical discharge limit. Existing 4000 Mix AC+ and Mix Pro installations whose hardware already reports 4000 W recover automatically after startup, while new control changes still take effect immediately.
 
 ## [1.4.0b3] - 2026-08-20
 

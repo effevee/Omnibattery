@@ -592,6 +592,32 @@ def test_predictive_demand_spike_keeps_predictive_slot_while_settling():
     assert len(writes) == write_count
 
 
+def test_predictive_hard_limit_watchdog_breaks_confirmation_streak():
+    first_report = datetime.now(timezone.utc)
+    state_holder = {"state": _state(3000, first_report)}
+    writes = []
+    controller = _predictive_controller(state_holder, writes)
+
+    asyncio.run(controller._handle_predictive_grid_charging())
+    assert controller._predictive_hard_limit_samples == 1
+
+    # A timer-only pass is not fresh evidence and breaks consecutiveness.
+    asyncio.run(controller._handle_predictive_grid_charging())
+    assert controller._predictive_hard_limit_samples == 0
+    assert controller._predictive_charge_suspended_for_demand is False
+
+    # Three later publications with the same value are nevertheless fresh
+    # evidence and must confirm the sustained overload.
+    for seconds in (4, 8, 12):
+        state_holder["state"] = _state(
+            3000,
+            first_report + timedelta(seconds=seconds),
+        )
+        asyncio.run(controller._handle_predictive_grid_charging())
+
+    assert controller._predictive_charge_suspended_for_demand is True
+
+
 def test_predictive_peak_shaving_waits_for_two_fresh_samples_before_discharge():
     first_report = datetime.now(timezone.utc)
     state_holder = {"state": _state(3000, first_report)}

@@ -4012,7 +4012,7 @@ class ChargeDischargeController:
         *,
         sensor_filtered: float,
         target_power: float,
-        has_new_control_sample: bool,
+        has_fresh_publication: bool,
         sensor_within_stale_tolerance: bool,
     ) -> bool:
         """Confirm a real sustained import/peak emergency.
@@ -4025,7 +4025,7 @@ class ChargeDischargeController:
         demand.  Missing battery telemetry remains fail-safe after the same
         confirmation window: a persistent severe import is still protected.
         """
-        if not has_new_control_sample or not sensor_within_stale_tolerance:
+        if not has_fresh_publication or not sensor_within_stale_tolerance:
             # Confirmation means consecutive fresh evidence. A stale/watchdog
             # pass breaks the streak instead of carrying an old overload toward
             # a hard stop.
@@ -4336,37 +4336,8 @@ class ChargeDischargeController:
             consumption_state, sensor_raw
         )
         has_new_control_sample = getattr(self, "_control_sample_is_new", True)
-        # A publication can refresh last_reported without changing the transformed
-        # meter value. It still counts for sensor health, but must not integrate the
-        # incremental predictive P/D controller again. Keep the structural
-        # availability check so an SOC/limit transition can still end the mode.
-        if not has_new_control_sample and self._grid_charging_initialized:
-            available_batteries = self._get_available_batteries(is_charging=True)
-            if not available_batteries:
-                _LOGGER.info(
-                    "Predictive charging complete: all batteries reached their active SOC target"
-                )
-                self.grid_charging_active = False
-                self._grid_charging_initialized = False
-                self.first_execution = True
-                return
-            _LOGGER.debug(
-                "Predictive charging: meter publication has no new transformed value; "
-                "maintaining last command %.1fW",
-                self.previous_power,
-            )
-            sensor_within_stale_tolerance = (
-                sensor_report_time is None
-                or self._sensor_is_within_stale_tolerance(sensor_report_time)
-            )
-            if sensor_within_stale_tolerance:
-                return
-            self._stale_cycles = getattr(self, "_stale_cycles", 0) + 1
-            _LOGGER.debug(
-                "Predictive charging: grid sensor stale; maintaining %.1fW for safety review",
-                self.previous_power,
-            )
-        elif is_stale:
+        has_fresh_publication = not is_stale
+        if is_stale:
             self._stale_cycles = getattr(self, "_stale_cycles", 0) + 1
         else:
             self._stale_cycles = 0
@@ -4530,7 +4501,7 @@ class ChargeDischargeController:
         if self._predictive_hard_limit_confirmed(
             sensor_filtered=sensor_filtered,
             target_power=target_power,
-            has_new_control_sample=has_new_control_sample,
+            has_fresh_publication=has_fresh_publication,
             sensor_within_stale_tolerance=sensor_within_stale_tolerance,
         ):
             await self._suspend_predictive_grid_charging_for_demand(
@@ -4539,6 +4510,23 @@ class ChargeDischargeController:
                 reason="confirmed_hard_limit",
             )
             return
+
+        # A numerically unchanged publication must not integrate P/D again, but
+        # it is independent fresh evidence for hard-limit confirmation. While a
+        # confirmation streak is active, re-assert the current positive charge
+        # command; otherwise keep the existing no-op behavior for repeated values.
+        if not has_new_control_sample and sensor_within_stale_tolerance:
+            if getattr(self, "_predictive_hard_limit_samples", 0) == 0:
+                _LOGGER.debug(
+                    "Predictive charging: meter publication has no new transformed "
+                    "value; maintaining last command %.1fW",
+                    self.previous_power,
+                )
+                return
+            _LOGGER.debug(
+                "Predictive charging: fresh unchanged overload publication; "
+                "maintaining positive charge while hard-limit confirmation continues"
+            )
 
         # Clamp normal predictive output to a positive charge floor. The
         # internal sign remains negative for charging; _set_battery_power below
