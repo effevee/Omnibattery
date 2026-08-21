@@ -110,8 +110,10 @@ class ExternalLoads:
         * while drawing: charging may resume for genuine residual export;
         * a >=200 W solar rise starts a new 20-second yield;
         * without a solar sensor, a 20-second probe runs every five minutes;
-        * when power drops: charging remains blocked for five minutes so the
-          external controller can restart after clouds or a phase transition.
+        * when power drops: charging remains blocked for a short restart grace
+          so the external controller can restart after clouds or a phase
+          transition, then genuine residual export may charge the battery;
+          discharge remains blocked for the full five-minute restart hold.
         * with Cover Home disabled: discharge remains blocked throughout every
           active phase so stale telemetry cannot hide grid import from the
           external controller.
@@ -233,9 +235,47 @@ class ExternalLoads:
                 hold_until = self._dynamic_hold_until.get(key)
                 if hold_until is not None and now < hold_until:
                     priority_devices.append(sensor_id)
-                    blocked_devices.append(sensor_id)
                     if block_discharge:
                         discharge_blocked_devices.append(sensor_id)
+
+                    # A power-only sensor cannot distinguish a completed
+                    # charge from a short controller pause. Give the wallbox
+                    # the same short opportunity used by the initial yield,
+                    # but do not keep solar-residual charging blocked for the
+                    # entire five-minute safety hold.
+                    if was_drawing:
+                        yield_until = now + DYNAMIC_CONTROL_INITIAL_YIELD
+                        self._dynamic_yield_until[key] = yield_until
+                        if solar_w is not None:
+                            self._dynamic_solar_reference_w[key] = solar_w
+                    else:
+                        yield_until = self._dynamic_yield_until.get(key, now)
+
+                    if solar_w is not None:
+                        reference_w = self._dynamic_solar_reference_w.get(key, solar_w)
+                        if solar_w < reference_w:
+                            self._dynamic_solar_reference_w[key] = solar_w
+                        elif solar_w - reference_w >= DYNAMIC_CONTROL_SOLAR_STEP_W:
+                            # Keep an existing grace intact if it is longer
+                            # than the re-yield; otherwise start a fresh
+                            # twenty-second opportunity for the wallbox.
+                            re_yield_until = now + DYNAMIC_CONTROL_REYIELD
+                            yield_until = max(yield_until, re_yield_until)
+                            self._dynamic_yield_until[key] = yield_until
+                            self._dynamic_solar_reference_w[key] = solar_w
+                            _LOGGER.debug(
+                                "Dynamic power control for %s: solar rose %.0fW during restart hold, re-yielding for %ds",
+                                sensor_id,
+                                solar_w - reference_w,
+                                int(DYNAMIC_CONTROL_REYIELD.total_seconds()),
+                            )
+
+                    if now < yield_until:
+                        blocked_devices.append(sensor_id)
+                        max_yield_remaining = max(
+                            max_yield_remaining,
+                            int((yield_until - now).total_seconds()),
+                        )
                     phases[sensor_id] = "restart_hold"
                     max_hold_remaining = max(
                         max_hold_remaining,

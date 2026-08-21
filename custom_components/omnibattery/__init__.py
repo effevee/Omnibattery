@@ -2440,6 +2440,11 @@ class ChargeDischargeController:
         """Return True if the refreshed blocker registry allows this operation."""
         return not (self.is_charge_blocked() if is_charging else self.is_discharge_blocked())
 
+    def _operation_blockers_for_log(self, is_charging: bool) -> str:
+        """Return the actual global blocker keys for an operation log."""
+        blockers = self.get_charge_blockers() if is_charging else self.get_discharge_blockers()
+        return ", ".join(blockers) or "unknown"
+
     def _pd_demand_blocked(self, error: float, commanded_power: float) -> bool:
         """Return True when the loop cannot act on what the grid error demands.
 
@@ -7060,14 +7065,15 @@ class ChargeDischargeController:
             operation_allowed = self._is_operation_allowed(is_charging)
             if not operation_allowed:
                 if is_charging:
-                    reason = (
-                        "charge delay active"
-                        if self.charge_delay_enabled and self._charge_delay_mgr.is_charge_delayed()
-                        else "time slot configuration"
+                    _LOGGER.debug(
+                        "ChargeDischargeController: First execution - Charging NOT ALLOWED by blockers [%s], starting at 0W",
+                        self._operation_blockers_for_log(True),
                     )
-                    _LOGGER.debug("ChargeDischargeController: First execution - Charging NOT ALLOWED by %s, starting at 0W", reason)
                 else:
-                    _LOGGER.debug("ChargeDischargeController: First execution - Discharging NOT ALLOWED by time slot, starting at 0W")
+                    _LOGGER.debug(
+                        "ChargeDischargeController: First execution - Discharging NOT ALLOWED by blockers [%s], starting at 0W",
+                        self._operation_blockers_for_log(False),
+                    )
                 self.previous_power = 0
                 is_charging = False
                 # Initialize PD state at 0
@@ -7084,7 +7090,10 @@ class ChargeDischargeController:
 
             # Check price-based discharge block (e.g. RT price mode: cheap price blocks discharge)
             if not is_charging and self._price_based_discharge_blocked:
-                _LOGGER.debug("ChargeDischargeController: First execution - Discharging NOT ALLOWED by price-based control, starting at 0W")
+                _LOGGER.debug(
+                    "ChargeDischargeController: First execution - Discharging NOT ALLOWED by blockers [%s] (price-based control), starting at 0W",
+                    self._operation_blockers_for_log(False),
+                )
                 self.previous_power = 0
                 self.error_integral = 0.0
                 self.previous_error = -(sensor_actual - active_target)
@@ -7244,14 +7253,15 @@ class ChargeDischargeController:
         operation_restricted = not self._is_operation_allowed(is_charging)
         if operation_restricted:
             if is_charging:
-                reason = (
-                    "charge delay active"
-                    if self.charge_delay_enabled and self._charge_delay_mgr.is_charge_delayed()
-                    else "time slot configuration"
+                _LOGGER.debug(
+                    "ChargeDischargeController: Charging NOT ALLOWED by blockers [%s] - controller paused",
+                    self._operation_blockers_for_log(True),
                 )
-                _LOGGER.debug("ChargeDischargeController: Charging NOT ALLOWED by %s - controller paused", reason)
             else:
-                _LOGGER.debug("ChargeDischargeController: Discharging NOT ALLOWED by time slot configuration - controller paused")
+                _LOGGER.debug(
+                    "ChargeDischargeController: Discharging NOT ALLOWED by blockers [%s] - controller paused",
+                    self._operation_blockers_for_log(False),
+                )
             new_power = 0
             is_charging = False  # Reset since we're forcing to 0
             self._active_discharge_batteries = []
@@ -7259,7 +7269,10 @@ class ChargeDischargeController:
 
         # Check price-based discharge control (set each cycle by pricing mode handlers)
         if not operation_restricted and self._price_based_discharge_blocked and not is_charging:
-            _LOGGER.debug("ChargeDischargeController: Discharging NOT ALLOWED by price-based control - controller paused")
+            _LOGGER.debug(
+                "ChargeDischargeController: Discharging NOT ALLOWED by blockers [%s] (price-based control) - controller paused",
+                self._operation_blockers_for_log(False),
+            )
             new_power = 0
             self._active_discharge_batteries = []
             self._active_charge_batteries = []
