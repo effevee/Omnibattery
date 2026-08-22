@@ -813,6 +813,7 @@ NORDPOOL_REFRESH_MINUTES = 60
 # Marker for CONFIG_NUMBER_DEFINITIONS entries whose slider bounds are derived
 # at runtime; the authored min/max become the fallback.
 DYNAMIC_BOUNDS_SYSTEM_POWER = "system_power"
+DYNAMIC_BOUNDS_SYSTEM_POWER_CAP = "system_power_cap"
 
 # Configuration Number Definitions (for config entities exposed in the UI)
 CONFIG_NUMBER_DEFINITIONS = [
@@ -932,23 +933,31 @@ CONFIG_NUMBER_DEFINITIONS = [
         "key": CONF_SYSTEM_MAX_CHARGE_POWER,
         "name": "System Max Charge Power",
         "min": 0,
+        # Fallback only; the live maximum is the configured sum of charge
+        # limits, so batteries with 4 kW (or higher) ceilings are supported.
         "max": MAX_SYSTEM_POWER_W,
         "step": 50,
         "unit": "W",
         "default": DEFAULT_SYSTEM_MAX_CHARGE_POWER,
         "icon": "mdi:battery-arrow-up-outline",
         "condition": CONF_ENABLE_SYSTEM_POWER_LIMITS,
+        "dynamic_bounds": DYNAMIC_BOUNDS_SYSTEM_POWER_CAP,
+        "power_direction": "charge",
     },
     {
         "key": CONF_SYSTEM_MAX_DISCHARGE_POWER,
         "name": "System Max Discharge Power",
         "min": 0,
+        # Fallback only; the live maximum is the configured sum of discharge
+        # limits, so batteries with 4 kW (or higher) ceilings are supported.
         "max": MAX_SYSTEM_POWER_W,
         "step": 50,
         "unit": "W",
         "default": DEFAULT_SYSTEM_MAX_DISCHARGE_POWER,
         "icon": "mdi:battery-arrow-down-outline",
         "condition": CONF_ENABLE_SYSTEM_POWER_LIMITS,
+        "dynamic_bounds": DYNAMIC_BOUNDS_SYSTEM_POWER_CAP,
+        "power_direction": "discharge",
     },
     {
         "key": CONF_MAX_CONTRACTED_POWER,

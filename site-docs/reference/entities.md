@@ -73,8 +73,8 @@ Only present when the [cell balance monitor](../features/cell-balance-monitor.md
 | `number.*_min_soc` | Minimum SOC | 0–100 % |
 | `number.*_max_charge_power` | Max charge power | W |
 | `number.*_max_discharge_power` | Max discharge power | W |
-| `number.marstek_venus_system_system_max_charge_power` | Optional combined charge cap for the whole system (`0 W` = disabled). Only created when system power limits are enabled. | 0–25000 W |
-| `number.marstek_venus_system_system_max_discharge_power` | Optional combined discharge cap for the whole system (`0 W` = disabled). Only created when system power limits are enabled. | 0–25000 W |
+| `number.marstek_venus_system_system_max_charge_power` | Optional combined charge cap for the whole system (`0 W` = disabled). Only created when system power limits are enabled. | Dynamic: configured charge-power sum |
+| `number.marstek_venus_system_system_max_discharge_power` | Optional combined discharge cap for the whole system (`0 W` = disabled). Only created when system power limits are enabled. | Dynamic: configured discharge-power sum |
 | `number.omnibattery_predictive_safety_margin_kwh` | Solar forecast buffer used by predictive charging and Dynamic Pricing anti-curtailment | 0–20 kWh |
 | `number.omnibattery_negative_injection_threshold` | Inclusive price threshold for forecast negative-injection risk slots | -2–2 currency/kWh |
 | `number.omnibattery_predischarge_reserve_soc` | Additional SOC floor for smart pre-discharge | 0–100 % |

@@ -2,7 +2,10 @@
 
 from custom_components.omnibattery.config_flow import _battery_count_schema
 from custom_components.omnibattery.const import (
+    CONF_SYSTEM_MAX_CHARGE_POWER,
+    CONF_SYSTEM_MAX_DISCHARGE_POWER,
     CONFIG_NUMBER_DEFINITIONS,
+    DYNAMIC_BOUNDS_SYSTEM_POWER_CAP,
     MAX_BATTERIES,
     MAX_SYSTEM_POWER_W,
 )
@@ -27,5 +30,13 @@ def test_system_power_definitions_cover_ten_max_power_batteries():
     }
 
     assert MAX_SYSTEM_POWER_W == 25_000
-    assert definitions["system_max_charge_power"]["max"] == MAX_SYSTEM_POWER_W
-    assert definitions["system_max_discharge_power"]["max"] == MAX_SYSTEM_POWER_W
+    assert definitions[CONF_SYSTEM_MAX_CHARGE_POWER]["max"] == MAX_SYSTEM_POWER_W
+    assert definitions[CONF_SYSTEM_MAX_DISCHARGE_POWER]["max"] == MAX_SYSTEM_POWER_W
+    assert (
+        definitions[CONF_SYSTEM_MAX_CHARGE_POWER]["dynamic_bounds"]
+        == DYNAMIC_BOUNDS_SYSTEM_POWER_CAP
+    )
+    assert (
+        definitions[CONF_SYSTEM_MAX_DISCHARGE_POWER]["dynamic_bounds"]
+        == DYNAMIC_BOUNDS_SYSTEM_POWER_CAP
+    )

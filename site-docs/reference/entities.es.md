@@ -65,8 +65,8 @@ Solo presentes cuando el [monitor de equilibrio de celdas](../features/cell-bala
 | `number.*_min_soc` | SOC mínimo | 0–100 % |
 | `number.*_max_charge_power` | Potencia máx. de carga | W |
 | `number.*_max_discharge_power` | Potencia máx. de descarga | W |
-| `number.marstek_venus_system_system_max_charge_power` | Límite opcional de carga combinada para todo el sistema (`0 W` = desactivado). Solo se crea cuando los límites del sistema están activados. | 0–25000 W |
-| `number.marstek_venus_system_system_max_discharge_power` | Límite opcional de descarga combinada para todo el sistema (`0 W` = desactivado). Solo se crea cuando los límites del sistema están activados. | 0–25000 W |
+| `number.marstek_venus_system_system_max_charge_power` | Límite opcional de carga combinada para todo el sistema (`0 W` = desactivado). Solo se crea cuando los límites del sistema están activados. | Dinámico: suma de potencias de carga configuradas |
+| `number.marstek_venus_system_system_max_discharge_power` | Límite opcional de descarga combinada para todo el sistema (`0 W` = desactivado). Solo se crea cuando los límites del sistema están activados. | Dinámico: suma de potencias de descarga configuradas |
 | `number.omnibattery_predictive_safety_margin_kwh` | Margen de previsión solar usado por la carga predictiva y el anti-vertido en Precio Dinámico | 0–20 kWh |
 | `number.omnibattery_negative_injection_threshold` | Umbral inclusivo de precio para franjas de riesgo de inyección negativa | -2–2 moneda/kWh |
 | `number.omnibattery_predischarge_reserve_soc` | Suelo de SOC adicional para la predescarga inteligente | 0–100 % |
