@@ -257,7 +257,23 @@
           "battery_6__soc_min": "Battery 6 — Min SOC (%)",
           "battery_6__soc_max": "Battery 6 — Max SOC (%)",
           "battery_6__max_charge_power_w": "Battery 6 — Max charge power",
-          "battery_6__max_discharge_power_w": "Battery 6 — Max discharge power"
+          "battery_6__max_discharge_power_w": "Battery 6 — Max discharge power",
+          "battery_7__soc_min": "Battery 7 — Min SOC (%)",
+          "battery_7__soc_max": "Battery 7 — Max SOC (%)",
+          "battery_7__max_charge_power_w": "Battery 7 — Max charge power",
+          "battery_7__max_discharge_power_w": "Battery 7 — Max discharge power",
+          "battery_8__soc_min": "Battery 8 — Min SOC (%)",
+          "battery_8__soc_max": "Battery 8 — Max SOC (%)",
+          "battery_8__max_charge_power_w": "Battery 8 — Max charge power",
+          "battery_8__max_discharge_power_w": "Battery 8 — Max discharge power",
+          "battery_9__soc_min": "Battery 9 — Min SOC (%)",
+          "battery_9__soc_max": "Battery 9 — Max SOC (%)",
+          "battery_9__max_charge_power_w": "Battery 9 — Max charge power",
+          "battery_9__max_discharge_power_w": "Battery 9 — Max discharge power",
+          "battery_10__soc_min": "Battery 10 — Min SOC (%)",
+          "battery_10__soc_max": "Battery 10 — Max SOC (%)",
+          "battery_10__max_charge_power_w": "Battery 10 — Max charge power",
+          "battery_10__max_discharge_power_w": "Battery 10 — Max discharge power"
         }
       },
       "add_more_slots": {
@@ -892,7 +908,23 @@
           "battery_6__soc_min": "Battery 6 — Min SOC (%)",
           "battery_6__soc_max": "Battery 6 — Max SOC (%)",
           "battery_6__max_charge_power_w": "Battery 6 — Max charge power",
-          "battery_6__max_discharge_power_w": "Battery 6 — Max discharge power"
+          "battery_6__max_discharge_power_w": "Battery 6 — Max discharge power",
+          "battery_7__soc_min": "Battery 7 — Min SOC (%)",
+          "battery_7__soc_max": "Battery 7 — Max SOC (%)",
+          "battery_7__max_charge_power_w": "Battery 7 — Max charge power",
+          "battery_7__max_discharge_power_w": "Battery 7 — Max discharge power",
+          "battery_8__soc_min": "Battery 8 — Min SOC (%)",
+          "battery_8__soc_max": "Battery 8 — Max SOC (%)",
+          "battery_8__max_charge_power_w": "Battery 8 — Max charge power",
+          "battery_8__max_discharge_power_w": "Battery 8 — Max discharge power",
+          "battery_9__soc_min": "Battery 9 — Min SOC (%)",
+          "battery_9__soc_max": "Battery 9 — Max SOC (%)",
+          "battery_9__max_charge_power_w": "Battery 9 — Max charge power",
+          "battery_9__max_discharge_power_w": "Battery 9 — Max discharge power",
+          "battery_10__soc_min": "Battery 10 — Min SOC (%)",
+          "battery_10__soc_max": "Battery 10 — Max SOC (%)",
+          "battery_10__max_charge_power_w": "Battery 10 — Max charge power",
+          "battery_10__max_discharge_power_w": "Battery 10 — Max discharge power"
         }
       },
       "add_more_slots": {

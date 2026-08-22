@@ -4,7 +4,7 @@ from custom_components.omnibattery.config_flow import (
     _build_slot_step_b_schema,
     _finalize_slot,
 )
-from custom_components.omnibattery.const import SLOT_BATTERY_SCOPE_ALL
+from custom_components.omnibattery.const import MAX_BATTERIES, SLOT_BATTERY_SCOPE_ALL
 
 
 def _power_maxes(schema) -> dict[str, int]:
@@ -80,6 +80,32 @@ def test_time_slot_power_override_keeps_marstek_version_envelope():
         "battery_1__max_charge_power_w": 2500,
         "battery_1__max_discharge_power_w": 2500,
     }
+
+
+def test_time_slot_power_override_renders_all_ten_batteries():
+    """The dynamic per-battery form includes the tenth battery."""
+    schema = _build_slot_step_b_schema(
+        needs_soc=True,
+        needs_power=True,
+        scope=SLOT_BATTERY_SCOPE_ALL,
+        battery_configs=[
+            {
+                "max_charge_power": 2500,
+                "max_discharge_power": 2500,
+            }
+            for _ in range(MAX_BATTERIES)
+        ],
+        defaults={},
+    )
+
+    fields = {marker.schema for marker in schema.schema}
+    assert len(fields) == MAX_BATTERIES * 4
+    assert {
+        "battery_10__soc_min",
+        "battery_10__soc_max",
+        "battery_10__max_charge_power_w",
+        "battery_10__max_discharge_power_w",
+    } <= fields
 
 
 def test_finalize_slot_keeps_disabled_state_of_the_slot_it_replaces():

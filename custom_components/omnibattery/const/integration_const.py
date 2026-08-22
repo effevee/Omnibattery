@@ -48,6 +48,12 @@ MAX_POWER_BY_VERSION = {
 }
 DEFAULT_VERSION = "v2"
 
+# Maximum number of independently controllable battery devices in one entry.
+# Keep the aggregate system-power slider envelope in sync with the largest
+# supported per-battery power ceiling.
+MAX_BATTERIES = 10
+MAX_SYSTEM_POWER_W = MAX_BATTERIES * max(MAX_POWER_BY_VERSION.values())
+
 # Multi-battery activation thresholds derived from efficiency tables (η external)
 # Crossover = power at which splitting load across 2 batteries becomes more efficient
 # than running a single battery.  Based on Venus efficiency measurements at 2500 W max.
@@ -926,7 +932,7 @@ CONFIG_NUMBER_DEFINITIONS = [
         "key": CONF_SYSTEM_MAX_CHARGE_POWER,
         "name": "System Max Charge Power",
         "min": 0,
-        "max": 15000,
+        "max": MAX_SYSTEM_POWER_W,
         "step": 50,
         "unit": "W",
         "default": DEFAULT_SYSTEM_MAX_CHARGE_POWER,
@@ -937,7 +943,7 @@ CONFIG_NUMBER_DEFINITIONS = [
         "key": CONF_SYSTEM_MAX_DISCHARGE_POWER,
         "name": "System Max Discharge Power",
         "min": 0,
-        "max": 15000,
+        "max": MAX_SYSTEM_POWER_W,
         "step": 50,
         "unit": "W",
         "default": DEFAULT_SYSTEM_MAX_DISCHARGE_POWER,

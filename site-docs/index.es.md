@@ -20,7 +20,7 @@
 
 -   :material-battery-sync: **Multi-batería**
 
-    Coordina hasta 6 baterías con prioridades de SOC, histéresis de energía y distribución de potencia basada en la eficiencia.
+    Coordina hasta 10 baterías con prioridades de SOC, histéresis de energía y distribución de potencia basada en la eficiencia.
 
 -   :material-brand_family: **Multi-marca**
 

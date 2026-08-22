@@ -5251,8 +5251,8 @@ class MarstekVenusPanel extends HTMLElement {
       .placeholder p { max-width: 360px; font-size: 14px; }
 
       /* ===== Baterías tab ===== */
-      .bat-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(400px, 1fr)); gap: var(--gap); align-items: start; }
-      .bat-card { display: flex; flex-direction: column; gap: 16px; }
+      .bat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(400px, 100%), 1fr)); gap: var(--gap); align-items: start; }
+      .bat-card { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
       .bat-head { display: flex; align-items: center; gap: 10px; }
       .bat-title { display: flex; align-items: center; gap: 9px; min-width: 0; flex: 1 1 auto; --mdc-icon-size: 18px; }
       .bat-title .ic { color: var(--ink-dim); display: grid; place-items: center; flex-shrink: 0; }

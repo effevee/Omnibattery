@@ -91,6 +91,7 @@ from .const import (
     CONF_SERIAL_PORT,
     DEFAULT_VERSION,
     MAX_POWER_BY_VERSION,
+    MAX_BATTERIES,
     CONF_ENABLE_SYSTEM_POWER_LIMITS,
     CONF_CAPACITY_PROTECTION_ENABLED,
     CONF_CAPACITY_PROTECTION_EXCLUDED_DEVICES,
@@ -662,6 +663,19 @@ def _battery_scope_options(battery_configs: list[dict]) -> list[dict]:
         name = bcfg.get(CONF_NAME) or f"Battery {i + 1}"
         opts.append({"value": f"battery_{i + 1}", "label": name})
     return opts
+
+
+def _battery_count_schema(default: int = 1) -> vol.Schema:
+    """Build the shared selector for the number of controllable batteries."""
+    return vol.Schema(
+        {
+            vol.Required("num_batteries", default=default): NumberSelector(
+                NumberSelectorConfig(
+                    min=1, max=MAX_BATTERIES, mode=NumberSelectorMode.SLIDER
+                )
+            )
+        }
+    )
 
 
 def _scope_value_in_options(scope: str, opts: list[dict]) -> bool:
@@ -1242,16 +1256,7 @@ class MarstekVenusConfigFlow(LegacyDomainMigrationMixin, ConfigFlow, domain=DOMA
 
         return self.async_show_form(
             step_id="batteries",
-            data_schema=vol.Schema(
-                {
-                    vol.Required("num_batteries", default=1):
-                        NumberSelector(
-                            NumberSelectorConfig(
-                                min=1, max=6, mode=NumberSelectorMode.SLIDER
-                            )
-                        ),
-                }
-            ),
+            data_schema=_battery_count_schema(),
         )
 
     async def async_step_battery_brand(
@@ -3263,16 +3268,7 @@ class OptionsFlowHandler(OptionsFlow):
 
         return self.async_show_form(
             step_id="batteries",
-            data_schema=vol.Schema(
-                {
-                    vol.Required("num_batteries", default=current_batteries):
-                        NumberSelector(
-                            NumberSelectorConfig(
-                                min=1, max=6, mode=NumberSelectorMode.SLIDER
-                            )
-                        ),
-                }
-            ),
+            data_schema=_battery_count_schema(current_batteries),
         )
 
     async def async_step_battery_brand(self, user_input: dict[str, Any] | None = None) -> FlowResult:

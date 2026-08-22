@@ -59,6 +59,11 @@ def test_bounds_scale_with_battery_count():
     assert _bounds({"batteries": [_bat(2500, 2500)] * 3}) == (-7500, 7500)
 
 
+def test_bounds_scale_to_ten_batteries():
+    """Ten 2500 W batteries expose the full aggregate +/-25000 W range."""
+    assert _bounds({"batteries": [_bat(2500, 2500)] * 10}) == (-25000, 25000)
+
+
 def test_single_battery_matches_legacy_range():
     """No regression for the common single-battery install."""
     assert _bounds({"batteries": [_bat(2500, 2500)]}) == (-2500, 2500)
