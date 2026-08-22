@@ -539,3 +539,32 @@ def test_soc_window_reaches_the_hardware_discharge_floor():
     # reject it the way the Marstek default (12 %) did.
     assert min_lo <= 5 <= min_hi
     assert min_lo <= min_default <= min_hi
+
+
+# ----------------------------------------------------------------------
+# device registry
+# ----------------------------------------------------------------------
+def test_device_info_reports_huawei_as_the_manufacturer():
+    """The brand chain used to fall through to Marstek for every new brand.
+
+    On real hardware that produced a device card reading
+    "Marstek / SUN2000-8K-MAP0".
+    """
+    from types import SimpleNamespace
+
+    from custom_components.omnibattery.infra.coordinator import (
+        MarstekVenusDataUpdateCoordinator,
+    )
+
+    coordinator = SimpleNamespace(
+        device_key="192.168.1.10_2502_4",
+        name="Huawei LUNA2000",
+        brand="huawei",
+        driver=SimpleNamespace(model_label="SUN2000-8K-MAP0"),
+        host="192.168.1.10",
+        port=2502,
+        data={},
+    )
+    info = MarstekVenusDataUpdateCoordinator.battery_device_info.fget(coordinator)
+    assert info["manufacturer"] == "Huawei"
+    assert info["model"] == "SUN2000-8K-MAP0"

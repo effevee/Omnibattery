@@ -578,6 +578,7 @@ class MarstekVenusDataUpdateCoordinator(DataUpdateCoordinator):
                 else "Anker" if self.brand == "anker"
                 else "Sessy" if self.brand == "sessy"
                 else "Hoymiles" if self.brand == "hoymiles"
+                else "Huawei" if self.brand == "huawei"
                 else "Marstek"
             ),
             "model": self.driver.model_label or (
