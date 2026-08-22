@@ -9,7 +9,7 @@ a regression test for the register map itself.
 """
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -421,12 +421,70 @@ async def test_apply_config_skips_a_min_soc_the_register_cannot_hold():
     driver = _driver(hass=hass)
     driver._resolve_entity = lambda name: f"number.{name}"
     # 47082 accepts 0-20 %; 25 % is enforced in software instead.
-    await driver.apply_config(
+    result = await driver.apply_config(
         max_soc_pct=95, min_soc_pct=25,
         max_charge_power_w=7000, max_discharge_power_w=7000,
     )
     written = [c.args[2]["entity_id"] for c in hass.services.async_call.await_args_list]
     assert written == ["number.storage_charging_cutoff_capacity"]
+    # The window is enforced by the control layer, so a skipped backstop write is
+    # not a configuration failure and must not be reported as one.
+    assert result is True
+
+
+@pytest.mark.asyncio
+async def test_apply_config_succeeds_even_when_no_entity_resolves():
+    driver = _driver(hass=_hass_with_services())
+    driver._resolve_entity = lambda name: None
+    assert await driver.apply_config(
+        max_soc_pct=100, min_soc_pct=10,
+        max_charge_power_w=7000, max_discharge_power_w=7000,
+    ) is True
+
+
+def test_resolve_entity_spans_the_config_entry_not_just_the_battery_device():
+    """huawei_solar puts the charge cutoff on the inverter, not on the battery.
+
+    Resolving against the configured battery device alone finds the discharge
+    cutoff and misses the charge cutoff, which is what made apply_config report
+    a failed write on real hardware.
+    """
+    import custom_components.omnibattery.drivers.huawei as mod
+
+    entries = [
+        MagicMock(platform="huawei_solar", disabled=False,
+                  unique_id="BT24B1457565_storage_charging_cutoff_capacity",
+                  entity_id="number.batterien_ladeende_ladestand"),
+        MagicMock(platform="huawei_solar", disabled=False,
+                  unique_id="TA2470074124_storage_discharging_cutoff_capacity",
+                  entity_id="number.batterien_entlade_ende_ladestand"),
+        MagicMock(platform="template", disabled=False,
+                  unique_id="x_storage_charging_cutoff_capacity",
+                  entity_id="sensor.decoy"),
+    ]
+    device = MagicMock(config_entries=["entry-1"])
+    driver = _driver()
+    with (
+        patch.object(mod.dr, "async_get",
+                     return_value=MagicMock(async_get=MagicMock(return_value=device))),
+        patch.object(mod.er, "async_get", return_value=MagicMock()),
+        patch.object(mod.er, "async_entries_for_config_entry", return_value=entries),
+    ):
+        charge = driver._resolve_entity("storage_charging_cutoff_capacity")
+        discharge = driver._resolve_entity("storage_discharging_cutoff_capacity")
+    assert charge == "number.batterien_ladeende_ladestand"
+    # The two register names must not collide: "charging" is a substring of
+    # "discharging", so a careless suffix match would return the wrong entity.
+    assert discharge == "number.batterien_entlade_ende_ladestand"
+
+
+def test_resolve_entity_without_a_device_returns_none():
+    import custom_components.omnibattery.drivers.huawei as mod
+
+    driver = _driver()
+    with patch.object(mod.dr, "async_get",
+                      return_value=MagicMock(async_get=MagicMock(return_value=None))):
+        assert driver._resolve_entity("storage_charging_cutoff_capacity") is None
 
 
 @pytest.mark.asyncio

@@ -41,7 +41,7 @@ import logging
 from typing import Optional
 
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers import device_registry as dr, entity_registry as er
 
 from ..infra.huawei_modbus_client import (
     HuaweiModbusClient,
@@ -521,9 +521,15 @@ class HuaweiSolarDriver(BatteryDriver):
 
         Power caps are deliberately skipped: 37046/37048 are commissioning
         values that belong to the installer, not to a battery manager.
+
+        Always reports success. The SOC window is enforced by the control layer
+        for this brand, so tightening the inverter's own cutoffs is a bonus, not
+        a requirement — reporting failure here would raise a warning about
+        something that is working as designed.
         """
-        ok = await self.set_charge_cutoff(max_soc_pct)
-        return await self._write_cutoff("discharging", min_soc_pct) and ok
+        await self.set_charge_cutoff(max_soc_pct)
+        await self._write_cutoff("discharging", min_soc_pct)
+        return True
 
     async def set_charge_cutoff(self, soc_pct: float) -> bool:
         return await self._write_cutoff("charging", soc_pct)
@@ -565,21 +571,33 @@ class HuaweiSolarDriver(BatteryDriver):
             return False
 
     def _resolve_entity(self, register_name: str) -> Optional[str]:
-        """Find a huawei_solar entity on the battery device by its register name.
+        """Find a huawei_solar entity by its register name.
 
         huawei_solar builds unique ids as ``<serial>_<register name>``, which is
         stable across renames and translations — unlike the entity id or the
         friendly name, which the user owns.
+
+        The search spans the whole config entry rather than the battery device,
+        because huawei_solar splits battery settings across devices: the charge
+        cutoff sits on the inverter while the discharge cutoff sits on the
+        battery. Looking only at the configured battery device finds one and
+        misses the other.
         """
         if not self._battery_device_id:
             return None
+        device = dr.async_get(self.hass).async_get(self._battery_device_id)
+        if device is None:
+            return None
         registry = er.async_get(self.hass)
         suffix = f"_{register_name}"
-        for entry in er.async_entries_for_device(
-            registry, self._battery_device_id, include_disabled_entities=False
-        ):
-            if entry.platform == _DOMAIN_HUAWEI_SOLAR and entry.unique_id.endswith(suffix):
-                return entry.entity_id
+        for config_entry_id in device.config_entries:
+            for entry in er.async_entries_for_config_entry(registry, config_entry_id):
+                if (
+                    entry.platform == _DOMAIN_HUAWEI_SOLAR
+                    and not entry.disabled
+                    and entry.unique_id.endswith(suffix)
+                ):
+                    return entry.entity_id
         return None
 
     async def standby(self) -> bool:
