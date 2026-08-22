@@ -613,6 +613,12 @@
         "data": {"name": "Nom", "host": "Adreça IP", "port": "Port HTTP", "username": "Usuari", "password": "Contrasenya"},
         "data_description": {"name": "Nom descriptiu per identificar aquesta bateria", "host": "Adreça IP del dispositiu Sessy a la xarxa local", "port": "Port HTTP (per defecte 80)", "username": "Usuari local imprès al dongle Sessy", "password": "Contrasenya local impresa al dongle Sessy"}
       },
+      "battery_connection_huawei": {
+        "title": "Configure battery {battery_num} — Connection (Huawei)",
+        "description": "Omnibattery reads this battery over Modbus and sends its set-points through the Huawei Solar integration, so it needs both: a Modbus endpoint and the battery device. Point the Modbus address at a Modbus proxy rather than straight at the inverter — the Huawei Solar integration already holds a connection to it.",
+        "data": {"name": "Name", "host": "IP Address", "port": "Modbus Port", "slave_id": "Modbus Slave ID", "huawei_battery_device": "Huawei Solar battery device"},
+        "data_description": {"name": "Descriptive name to identify this battery", "host": "Address of the Modbus proxy or inverter Omnibattery reads from", "port": "Modbus TCP port (default 502)", "slave_id": "Unit ID of the inverter, not of the EMMA or a charger", "huawei_battery_device": "The 'Batteries' device of the Huawei Solar integration; set-points are sent through its services"}
+      },
       "battery_connection_anker": {
         "title": "Configure battery {battery_num} — Connection (Anker)",
         "description": "Enter connection details for Anker SOLIX Solarbank Max AC / 4 E5000 Pro battery {battery_num}. Enable Modbus TCP under Third-Party Control in the Anker app first. Only one Modbus client can connect at a time.",
@@ -632,6 +638,7 @@
     },
     "error": {
       "cannot_connect": "No es pot connectar a la bateria. Verifica l'adreça IP i que la bateria sigui accessible a la xarxa.",
+      "no_battery": "Inverter reached, but it reports no battery. Check that the LUNA2000 is attached and the Modbus slave ID points at the inverter.",
       "esphome_entities_missing": "Al dispositiu ESPHome seleccionat li falten entitats necessàries: {missing}. Assegura't que executa el firmware marstek-lilygo-rs485 amb els noms d'entitat originals.",
       "sensor_not_found": "El sensor de predicció solar no existeix. Verifica que el sensor estigui disponible.",
       "invalid_unit": "El sensor de predicció solar ha de tenir com a unitat 'kWh' o 'Wh'.",
@@ -1186,6 +1193,12 @@
         "data": {"name": "Nom", "host": "Adreça IP", "port": "Port HTTP", "username": "Usuari", "password": "Contrasenya"},
         "data_description": {"name": "Nom descriptiu per identificar aquesta bateria", "host": "Adreça IP del dispositiu Sessy a la xarxa local", "port": "Port HTTP (per defecte 80)", "username": "Usuari local imprès al dongle Sessy", "password": "Contrasenya local impresa al dongle Sessy"}
       },
+      "battery_connection_huawei": {
+        "title": "Configure battery {battery_num} — Connection (Huawei)",
+        "description": "Modify the Modbus endpoint and the Huawei Solar battery device used for battery {battery_num}.",
+        "data": {"name": "Name", "host": "IP Address", "port": "Modbus Port", "slave_id": "Modbus Slave ID", "huawei_battery_device": "Huawei Solar battery device"},
+        "data_description": {"name": "Descriptive name to identify this battery", "host": "Address of the Modbus proxy or inverter Omnibattery reads from", "port": "Modbus TCP port (default 502)", "slave_id": "Unit ID of the inverter, not of the EMMA or a charger", "huawei_battery_device": "The 'Batteries' device of the Huawei Solar integration; set-points are sent through its services"}
+      },
       "battery_connection_anker": {
         "title": "Configure battery {battery_num} — Connection (Anker)",
         "description": "Modify connection details for Anker SOLIX Solarbank Max AC / 4 E5000 Pro battery {battery_num}. Enable Modbus TCP under Third-Party Control in the Anker app first. Only one Modbus client can connect at a time.",
@@ -1205,6 +1218,7 @@
     },
     "error": {
       "cannot_connect": "No es pot connectar a la bateria. Verifica l'adreça IP i que la bateria sigui accessible a la xarxa.",
+      "no_battery": "Inverter reached, but it reports no battery. Check that the LUNA2000 is attached and the Modbus slave ID points at the inverter.",
       "esphome_entities_missing": "Al dispositiu ESPHome seleccionat li falten entitats necessàries: {missing}. Assegura't que executa el firmware marstek-lilygo-rs485 amb els noms d'entitat originals.",
       "sensor_not_found": "El sensor de predicció solar no existeix. Verifica que el sensor estigui disponible.",
       "invalid_unit": "El sensor de predicció solar ha de tenir com a unitat 'kWh' o 'Wh'.",

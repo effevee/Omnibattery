@@ -156,6 +156,7 @@ from .drivers.zendure import (
 )
 from .drivers.anker import AnkerModbusDriver
 from .drivers.sessy import SessyLocalDriver
+from .drivers.huawei import HuaweiSolarDriver
 from .drivers.hoymiles import (
     DEFAULT_HOYMILES_MODEL,
     HOYMILES_MODEL_PROFILES,
@@ -1230,6 +1231,8 @@ class MarstekVenusConfigFlow(LegacyDomainMigrationMixin, ConfigFlow, domain=DOMA
                 return await self.async_step_battery_connection_hoymiles()
             if brand == "sessy":
                 return await self.async_step_battery_connection_sessy()
+            if brand == "huawei":
+                return await self.async_step_battery_connection_huawei()
             return await self.async_step_battery_connection()
 
         return self.async_show_form(
@@ -1245,6 +1248,7 @@ class MarstekVenusConfigFlow(LegacyDomainMigrationMixin, ConfigFlow, domain=DOMA
                                 {"value": "anker", "label": "Anker SOLIX Solarbank Max AC / 4 E5000 Pro"},
                                 {"value": "sessy", "label": "Sessy"},
                                 {"value": "hoymiles", "label": "Hoymiles MQTT"},
+                                {"value": "huawei", "label": "Huawei SUN2000 + LUNA2000"},
                             ],
                             mode=SelectSelectorMode.DROPDOWN,
                         )),
@@ -1430,6 +1434,80 @@ class MarstekVenusConfigFlow(LegacyDomainMigrationMixin, ConfigFlow, domain=DOMA
             ),
         }), errors=errors, description_placeholders={"battery_num": str(self.battery_index + 1)})
 
+    async def async_step_battery_connection_huawei(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        """Configure a Huawei SUN2000 + LUNA2000.
+
+        Two addresses are needed because the driver is split-transport: a Modbus
+        endpoint it reads natively, and the ``huawei_solar`` battery device whose
+        services it writes through. The Modbus endpoint is normally a proxy
+        rather than the inverter itself, since huawei_solar already holds a
+        connection to it.
+        """
+        errors = {}
+        battery_num = self.battery_index + 1
+        # Shared by the config and options flows; only the latter has an entry
+        # to pre-fill the form from.
+        entry = getattr(self, "config_entry", None)
+        current_batteries = entry.data.get("batteries", []) if entry else []
+        current_battery = (
+            current_batteries[self.battery_index]
+            if self.battery_index < len(current_batteries)
+            else {}
+        )
+
+        if user_input is not None:
+            host = (user_input[CONF_HOST] or "").strip()
+            port = int(user_input.get(CONF_PORT, 502))
+            slave_id = int(user_input.get(CONF_SLAVE_ID, 1))
+            device_id = user_input["huawei_battery_device"]
+            _LOGGER.info(
+                "Probing Huawei inverter at %s:%s (slave %s)", host, port, slave_id
+            )
+            ok, model, max_charge, max_discharge = await HuaweiSolarDriver.probe(
+                self.hass, host, port, slave_id
+            )
+            if ok:
+                self._current_battery_data.update({
+                    CONF_NAME: user_input[CONF_NAME],
+                    CONF_HOST: host,
+                    CONF_PORT: port,
+                    CONF_SLAVE_ID: slave_id,
+                    "brand": "huawei",
+                    "huawei_battery_device_id": device_id,
+                    "huawei_model": model,
+                })
+                if max_charge:
+                    self._current_battery_data["device_max_charge_power"] = int(max_charge)
+                if max_discharge:
+                    self._current_battery_data["device_max_discharge_power"] = int(max_discharge)
+                return await self.async_step_battery_limits()
+            # A reachable inverter with no SOC means no battery is attached, which
+            # is a different mistake than an unreachable address.
+            errors["base"] = "no_battery" if model else "cannot_connect"
+
+        return self.async_show_form(
+            step_id="battery_connection_huawei",
+            data_schema=vol.Schema({
+                vol.Required(
+                    CONF_NAME,
+                    default=current_battery.get(CONF_NAME, f"Huawei LUNA2000 {battery_num}"),
+                ): str,
+                vol.Required(CONF_HOST, default=current_battery.get(CONF_HOST, "")): str,
+                vol.Optional(CONF_PORT, default=current_battery.get(CONF_PORT, 502)): int,
+                vol.Optional(CONF_SLAVE_ID, default=current_battery.get(CONF_SLAVE_ID, 1)): int,
+                vol.Required(
+                    "huawei_battery_device",
+                    description={
+                        "suggested_value": current_battery.get("huawei_battery_device_id")
+                    },
+                ): DeviceSelector(
+                    DeviceSelectorConfig(integration="huawei_solar", model="Batteries")
+                ),
+            }),
+            errors=errors,
+            description_placeholders={"battery_num": str(battery_num)},
+        )
+
     async def async_step_battery_connection_hoymiles(self, user_input: dict[str, Any] | None = None) -> FlowResult:
         """Configure a Hoymiles battery through Home Assistant's MQTT broker."""
         errors = {}
@@ -1558,7 +1636,7 @@ class MarstekVenusConfigFlow(LegacyDomainMigrationMixin, ConfigFlow, domain=DOMA
                 )
                 merged["backup_offgrid_threshold"] = int(user_input.get("backup_offgrid_threshold", 50))
                 merged[CONF_FULL_CHARGE_VOLTAGE_TAPER_ENABLED] = (
-                    False if brand in ("zendure", "anker", "sessy", "hoymiles")
+                    False if brand in ("zendure", "anker", "sessy", "hoymiles", "huawei")
                     else user_input.get(CONF_FULL_CHARGE_VOLTAGE_TAPER_ENABLED, DEFAULT_FULL_CHARGE_VOLTAGE_TAPER_ENABLED)
                 )
                 if brand in ("zendure", "sessy", "hoymiles"):
@@ -1602,7 +1680,7 @@ class MarstekVenusConfigFlow(LegacyDomainMigrationMixin, ConfigFlow, domain=DOMA
             vol.Required("backup_offgrid_threshold", default=50):
                 NumberSelector(NumberSelectorConfig(min=0, max=2500, step=10, unit_of_measurement="W", mode=NumberSelectorMode.SLIDER)),
         })
-        if brand not in ("zendure", "anker", "sessy", "hoymiles"):
+        if brand not in ("zendure", "anker", "sessy", "hoymiles", "huawei"):
             _schema[vol.Required(CONF_FULL_CHARGE_VOLTAGE_TAPER_ENABLED, default=DEFAULT_FULL_CHARGE_VOLTAGE_TAPER_ENABLED)] = bool
         if brand == "sessy":
             _schema[vol.Required("battery_capacity_kwh")] = NumberSelector(
@@ -3158,6 +3236,8 @@ class OptionsFlowHandler(OptionsFlow):
                 return await self.async_step_battery_connection_anker()
             if brand == "sessy":
                 return await self.async_step_battery_connection_sessy()
+            if brand == "huawei":
+                return await self.async_step_battery_connection_huawei()
             if brand == "hoymiles":
                 return await self.async_step_battery_connection_hoymiles()
             return await self.async_step_battery_connection()
@@ -3175,6 +3255,7 @@ class OptionsFlowHandler(OptionsFlow):
                                 {"value": "anker", "label": "Anker SOLIX Solarbank Max AC / 4 E5000 Pro"},
                                 {"value": "sessy", "label": "Sessy"},
                                 {"value": "hoymiles", "label": "Hoymiles MQTT"},
+                                {"value": "huawei", "label": "Huawei SUN2000 + LUNA2000"},
                             ],
                             mode=SelectSelectorMode.DROPDOWN,
                         )),
@@ -3439,6 +3520,80 @@ class OptionsFlowHandler(OptionsFlow):
         )
 
 
+    async def async_step_battery_connection_huawei(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        """Configure a Huawei SUN2000 + LUNA2000.
+
+        Two addresses are needed because the driver is split-transport: a Modbus
+        endpoint it reads natively, and the ``huawei_solar`` battery device whose
+        services it writes through. The Modbus endpoint is normally a proxy
+        rather than the inverter itself, since huawei_solar already holds a
+        connection to it.
+        """
+        errors = {}
+        battery_num = self.battery_index + 1
+        # Shared by the config and options flows; only the latter has an entry
+        # to pre-fill the form from.
+        entry = getattr(self, "config_entry", None)
+        current_batteries = entry.data.get("batteries", []) if entry else []
+        current_battery = (
+            current_batteries[self.battery_index]
+            if self.battery_index < len(current_batteries)
+            else {}
+        )
+
+        if user_input is not None:
+            host = (user_input[CONF_HOST] or "").strip()
+            port = int(user_input.get(CONF_PORT, 502))
+            slave_id = int(user_input.get(CONF_SLAVE_ID, 1))
+            device_id = user_input["huawei_battery_device"]
+            _LOGGER.info(
+                "Probing Huawei inverter at %s:%s (slave %s)", host, port, slave_id
+            )
+            ok, model, max_charge, max_discharge = await HuaweiSolarDriver.probe(
+                self.hass, host, port, slave_id
+            )
+            if ok:
+                self._current_battery_data.update({
+                    CONF_NAME: user_input[CONF_NAME],
+                    CONF_HOST: host,
+                    CONF_PORT: port,
+                    CONF_SLAVE_ID: slave_id,
+                    "brand": "huawei",
+                    "huawei_battery_device_id": device_id,
+                    "huawei_model": model,
+                })
+                if max_charge:
+                    self._current_battery_data["device_max_charge_power"] = int(max_charge)
+                if max_discharge:
+                    self._current_battery_data["device_max_discharge_power"] = int(max_discharge)
+                return await self.async_step_battery_limits()
+            # A reachable inverter with no SOC means no battery is attached, which
+            # is a different mistake than an unreachable address.
+            errors["base"] = "no_battery" if model else "cannot_connect"
+
+        return self.async_show_form(
+            step_id="battery_connection_huawei",
+            data_schema=vol.Schema({
+                vol.Required(
+                    CONF_NAME,
+                    default=current_battery.get(CONF_NAME, f"Huawei LUNA2000 {battery_num}"),
+                ): str,
+                vol.Required(CONF_HOST, default=current_battery.get(CONF_HOST, "")): str,
+                vol.Optional(CONF_PORT, default=current_battery.get(CONF_PORT, 502)): int,
+                vol.Optional(CONF_SLAVE_ID, default=current_battery.get(CONF_SLAVE_ID, 1)): int,
+                vol.Required(
+                    "huawei_battery_device",
+                    description={
+                        "suggested_value": current_battery.get("huawei_battery_device_id")
+                    },
+                ): DeviceSelector(
+                    DeviceSelectorConfig(integration="huawei_solar", model="Batteries")
+                ),
+            }),
+            errors=errors,
+            description_placeholders={"battery_num": str(battery_num)},
+        )
+
     async def async_step_battery_connection_hoymiles(self, user_input: dict[str, Any] | None = None) -> FlowResult:
         """Configure a Hoymiles MQTT device id in the options flow."""
         errors = {}
@@ -3613,7 +3768,7 @@ class OptionsFlowHandler(OptionsFlow):
                 )
                 merged["backup_offgrid_threshold"] = int(user_input.get("backup_offgrid_threshold", 50))
                 merged[CONF_FULL_CHARGE_VOLTAGE_TAPER_ENABLED] = (
-                    False if brand in ("zendure", "anker", "sessy", "hoymiles")
+                    False if brand in ("zendure", "anker", "sessy", "hoymiles", "huawei")
                     else user_input.get(CONF_FULL_CHARGE_VOLTAGE_TAPER_ENABLED, DEFAULT_FULL_CHARGE_VOLTAGE_TAPER_ENABLED)
                 )
                 if brand in ("zendure", "sessy", "hoymiles"):
@@ -3707,7 +3862,7 @@ class OptionsFlowHandler(OptionsFlow):
             vol.Required("backup_offgrid_threshold", default=defaults["backup_offgrid_threshold"]):
                 NumberSelector(NumberSelectorConfig(min=0, max=2500, step=10, unit_of_measurement="W", mode=NumberSelectorMode.SLIDER)),
         })
-        if brand not in ("zendure", "anker", "sessy", "hoymiles"):
+        if brand not in ("zendure", "anker", "sessy", "hoymiles", "huawei"):
             _schema[vol.Required(CONF_FULL_CHARGE_VOLTAGE_TAPER_ENABLED, default=defaults[CONF_FULL_CHARGE_VOLTAGE_TAPER_ENABLED])] = bool
         if brand == "sessy":
             saved_capacity = float(defaults["battery_capacity_kwh"])

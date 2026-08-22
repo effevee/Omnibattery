@@ -25,6 +25,7 @@ from ..drivers.zendure import ZendureLocalDriver, ZENDURE_MODEL_2400AC_PRO
 from ..drivers.anker import AnkerModbusDriver
 from ..drivers.sessy import SessyLocalDriver
 from ..drivers.hoymiles import HoymilesMqttDriver
+from ..drivers.huawei import HuaweiSolarDriver
 from ..drivers.base import SetpointResult
 from .alarm_notifier import AlarmNotifier
 from .mac_tracking import normalise_mac
@@ -121,6 +122,7 @@ class MarstekVenusDataUpdateCoordinator(DataUpdateCoordinator):
                  hoymiles_model: str | None = None,
                  serial_port: str | None = None,
                  esphome_device_id: str | None = None,
+                 huawei_battery_device_id: str | None = None,
                  username: str = "",
                  password: str = "",
                  battery_manual_mode_enabled: bool = False,
@@ -150,7 +152,7 @@ class MarstekVenusDataUpdateCoordinator(DataUpdateCoordinator):
         self.serial_port = serial_port
         self.consumption_sensor = consumption_sensor
         self.brand = brand
-        if self.brand in ("zendure", "anker", "hoymiles"):
+        if self.brand in ("zendure", "anker", "hoymiles", "huawei"):
             full_charge_voltage_taper_enabled = False
 
         # Validate and store battery version
@@ -289,6 +291,19 @@ class MarstekVenusDataUpdateCoordinator(DataUpdateCoordinator):
                 self.host, port=self.port,
                 username=username,
                 password=password,
+                max_charge_power_w=self.configured_max_charge_power,
+                max_discharge_power_w=self.configured_max_discharge_power,
+            )
+        elif self.brand == "huawei":
+            # Telemetry is read natively over Modbus; set-points go out through
+            # the huawei_solar integration, which owns the battery device named
+            # here. Both halves address the same inverter.
+            self.driver = HuaweiSolarDriver(
+                hass,
+                self.host,
+                port=self.port,
+                slave_id=self.slave_id,
+                battery_device_id=huawei_battery_device_id or "",
                 max_charge_power_w=self.configured_max_charge_power,
                 max_discharge_power_w=self.configured_max_discharge_power,
             )

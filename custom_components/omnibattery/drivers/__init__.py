@@ -12,6 +12,8 @@ Drivers:
   - ``esphome``: HA-entity based, push (Marstek behind a LilyGo RS485 bridge).
   - ``anker``: Modbus-TCP, register based, polled (SOLIX Solarbank Max AC / 4 E5000 Pro).
   - ``hoymiles``: HA MQTT based, push telemetry (MS-A2).
+  - ``huawei``: native Modbus-TCP telemetry, set-points via huawei_solar
+    services (SUN2000 + LUNA2000).
 
 See ``docs/plans/driver_abstraction.md`` for the phased extraction plan.
 """
@@ -29,6 +31,7 @@ from .zendure import ZendureLocalDriver
 from .anker import AnkerModbusDriver
 from .sessy import SessyLocalDriver
 from .hoymiles import HoymilesMqttDriver
+from .huawei import HuaweiSolarDriver
 
 __all__ = [
     "BatteryDriver",
@@ -42,4 +45,5 @@ __all__ = [
     "AnkerModbusDriver",
     "SessyLocalDriver",
     "HoymilesMqttDriver",
+    "HuaweiSolarDriver",
 ]
