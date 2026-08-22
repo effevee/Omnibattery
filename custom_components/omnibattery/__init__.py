@@ -407,6 +407,39 @@ def _async_unregister_frontend_panel(hass: HomeAssistant) -> None:
         hass.data[DOMAIN][_PANEL_REGISTERED_KEY] = False
 
 
+def _apply_driver_dynamic_limit(coordinator, current_limit: int) -> int:
+    """Narrow a discharge limit to the live headroom the driver reports.
+
+    Only DC-coupled hybrids report one: battery and PV share an inverter there,
+    so the reachable discharge power falls as PV rises. Every other driver
+    returns None and keeps its static envelope.
+
+    Applied in the control path rather than on the coordinator's power
+    properties on purpose — those also drive the user-facing power sliders, and
+    a bound that moved with the sun would be unusable.
+    """
+    driver = getattr(coordinator, "driver", None)
+    limiter = getattr(driver, "dynamic_discharge_limit_w", None)
+    if limiter is None:
+        return current_limit
+    try:
+        dynamic = limiter(getattr(coordinator, "data", None) or {})
+    except Exception:  # a driver must never break the control cycle
+        _LOGGER.debug(
+            "[%s] dynamic discharge limit raised; keeping static limit",
+            getattr(coordinator, "name", "?"),
+            exc_info=True,
+        )
+        return current_limit
+    if dynamic is None or dynamic >= current_limit:
+        return current_limit
+    _LOGGER.debug(
+        "[%s] discharge limit narrowed %dW -> %dW by inverter AC headroom",
+        getattr(coordinator, "name", "?"), current_limit, dynamic,
+    )
+    return max(0, int(dynamic))
+
+
 class ChargeDischargeController:
     """Controller to manage charge/discharge logic for all batteries."""
 
@@ -1306,6 +1339,7 @@ class ChargeDischargeController:
                     coordinator.max_discharge_power,
                 ),
             )
+            limit = _apply_driver_dynamic_limit(coordinator, limit)
             return self._apply_slot_power_ceiling(coordinator, False, limit)
 
         limit = getattr(

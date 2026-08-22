@@ -568,3 +568,133 @@ def test_device_info_reports_huawei_as_the_manufacturer():
     info = MarstekVenusDataUpdateCoordinator.battery_device_info.fget(coordinator)
     assert info["manufacturer"] == "Huawei"
     assert info["model"] == "SUN2000-8K-MAP0"
+
+
+# ----------------------------------------------------------------------
+# dynamic discharge headroom
+#
+# Battery and PV share one inverter on a DC-coupled hybrid, so the nameplate
+# battery limit is only reachable when PV is idle. Allocating against the
+# nameplate starves the other batteries of the share they could have delivered.
+# ----------------------------------------------------------------------
+def _headroom(ceiling, ac_power, battery_power):
+    return _driver().dynamic_discharge_limit_w({
+        "inverter_max_power": ceiling,
+        "ac_power": ac_power,
+        "battery_power": battery_power,
+    })
+
+
+def test_headroom_is_the_full_ceiling_when_pv_is_idle():
+    # Night: nothing but the inverter's own draw on the AC side.
+    assert _headroom(8800, 0, 50) == 8800
+
+
+def test_pv_output_consumes_the_headroom():
+    # 7 kW of PV on an 8.8 kW inverter leaves 1.8 kW for the battery, whatever
+    # its BMS allows.
+    assert _headroom(8800, 7000, 0) == 1800
+
+
+def test_headroom_ignores_the_batterys_own_contribution():
+    """The limit must describe what PV occupies, not what the battery does.
+
+    Subtracting the battery's own output too would make the limit chase itself:
+    discharging more would shrink the limit, which would cut the allocation,
+    which would raise the limit again.
+    """
+    # Same 7 kW of PV, but now the battery is already delivering its 1.8 kW, so
+    # the inverter reads 8.8 kW total. The answer must not change.
+    assert _headroom(8800, 8800, -1800) == 1800
+    # And it stays put at any point along the ramp.
+    assert _headroom(8800, 7900, -900) == 1800
+
+
+def test_charging_does_not_consume_discharge_headroom():
+    # Importing to charge: AC flows the other way and frees the whole ceiling.
+    assert _headroom(8800, -2000, 2000) == 8800
+
+
+def test_headroom_never_goes_negative():
+    # An inverter briefly above its own ceiling must clamp to zero, not invert.
+    assert _headroom(8800, 9500, 0) == 0
+
+
+def test_large_system_headroom():
+    """A 25 kW inverter with 22 kW of batteries — the constraint still binds."""
+    assert _headroom(25000, 18000, 0) == 7000
+    assert _headroom(25000, 0, 0) == 25000
+
+
+@pytest.mark.parametrize(
+    "data",
+    [
+        {},
+        {"ac_power": 1000, "battery_power": 0},          # no ceiling
+        {"inverter_max_power": 8800, "battery_power": 0},  # no ac reading
+        {"inverter_max_power": 8800, "ac_power": 1000},    # no battery reading
+        {"inverter_max_power": None, "ac_power": 1, "battery_power": 1},
+        {"inverter_max_power": "x", "ac_power": 1, "battery_power": 1},
+    ],
+)
+def test_headroom_is_none_when_inputs_are_missing_or_unusable(data):
+    # None keeps the static envelope; a guess here would silently mis-allocate.
+    assert _driver().dynamic_discharge_limit_w(data) is None
+
+
+def test_headroom_inputs_stay_polled_even_with_entities_disabled():
+    keys = _driver().control_dependency_keys
+    assert {"inverter_max_power", "ac_power", "battery_power"} <= keys
+
+
+@pytest.mark.asyncio
+async def test_inverter_ceiling_is_read_from_the_register_map():
+    data = await _driver(_fake_client({**_LIVE_BLOCKS, 30073: [0, 8000, 0, 8800]})).read_telemetry(
+        ["inverter_rated_power", "inverter_max_power"]
+    )
+    # 30073 is the nameplate, 30075 the ceiling the inverter enforces.
+    assert data["inverter_rated_power"] == 8000
+    assert data["inverter_max_power"] == 8800
+
+
+# ----------------------------------------------------------------------
+# control path
+# ----------------------------------------------------------------------
+def test_ac_batteries_keep_their_static_limit():
+    """Only DC-coupled hybrids report a dynamic limit; everything else opts out."""
+    from custom_components.omnibattery.drivers.base import BatteryDriver
+
+    assert BatteryDriver.dynamic_discharge_limit_w(MagicMock(), {"ac_power": 1}) is None
+
+
+@pytest.mark.parametrize(
+    "reported,expected",
+    [
+        (None, 2500),    # driver has no opinion
+        (5000, 2500),    # headroom above the static limit changes nothing
+        (1800, 1800),    # headroom below it wins
+        (0, 0),          # saturated inverter: no discharge available
+    ],
+)
+def test_control_path_applies_the_narrower_limit(reported, expected):
+    from custom_components.omnibattery import _apply_driver_dynamic_limit
+
+    coordinator = MagicMock(
+        name="Huawei",
+        data={"x": 1},
+        driver=MagicMock(dynamic_discharge_limit_w=MagicMock(return_value=reported)),
+    )
+    assert _apply_driver_dynamic_limit(coordinator, 2500) == expected
+
+
+def test_control_path_survives_a_driver_that_raises():
+    """A broken driver must not take the control cycle down with it."""
+    from custom_components.omnibattery import _apply_driver_dynamic_limit
+
+    coordinator = MagicMock(
+        data={},
+        driver=MagicMock(
+            dynamic_discharge_limit_w=MagicMock(side_effect=RuntimeError("boom"))
+        ),
+    )
+    assert _apply_driver_dynamic_limit(coordinator, 2500) == 2500

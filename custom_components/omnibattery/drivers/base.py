@@ -306,6 +306,26 @@ class BatteryDriver(ABC):
         driver has no control for the key or the write failed.
         """
 
+    def dynamic_discharge_limit_w(self, data: dict) -> Optional[int]:
+        """Live discharge ceiling below the static envelope, or None if there is none.
+
+        The static envelope in :class:`DriverCapabilities` describes what the
+        battery can do in isolation. A DC-coupled hybrid breaks that assumption:
+        its battery and its PV strings share one inverter, so the power actually
+        available for discharge is whatever the inverter's AC rating has left
+        over after PV. That headroom changes with the sun, which a value fixed at
+        setup time cannot express.
+
+        Returning a live value lets the load-sharing logic allocate against real
+        headroom rather than a nameplate figure it can never reach. ``data`` is
+        the coordinator's telemetry cache; return None when the inputs are
+        missing so the caller keeps the static limit rather than guessing.
+
+        Drivers for AC batteries with their own inverter have no such coupling
+        and inherit this default.
+        """
+        return None
+
     @abstractmethod
     def net_power_from_data(self, data: dict) -> Optional[int]:
         """Derive the current commanded net power from coordinator telemetry cache.

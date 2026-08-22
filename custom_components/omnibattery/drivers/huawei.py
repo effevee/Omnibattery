@@ -157,13 +157,19 @@ _BLOCK_FORCIBLE_POWER = (47246, 5, "medium", {
     "set_charge_power": (1, "u32", 1),
     "set_discharge_power": (3, "u32", 1),
 })
+_BLOCK_RATING = (30073, 4, "very_low", {
+    "inverter_rated_power": (0, "u32", 1),
+    # 30075 is the ceiling the inverter actually enforces on its AC side; the
+    # rated value above it is the nameplate and can be lower.
+    "inverter_max_power": (2, "u32", 1),
+})
 _BLOCK_MODEL = (30000, 15, "very_low", {"device_name": (0, "str", 15)})
 _BLOCK_SERIAL = (37052, 10, "very_low", {"serial_number": (0, "str", 10)})
 
 _BLOCKS = (
     _BLOCK_LIVE, _BLOCK_PV, _BLOCK_FORCIBLE_MODE, _BLOCK_FORCIBLE_POWER,
     _BLOCK_DAILY, _BLOCK_LIMITS, _BLOCK_TOTALS, _BLOCK_CONFIG,
-    _BLOCK_CAPACITY, _BLOCK_MODEL, _BLOCK_SERIAL,
+    _BLOCK_CAPACITY, _BLOCK_RATING, _BLOCK_MODEL, _BLOCK_SERIAL,
 )
 
 _DECODERS = {"u16": decode_u16, "i16": decode_i16, "u32": decode_u32, "i32": decode_i32}
@@ -186,6 +192,8 @@ SENSOR_DEFINITIONS = [
     {"key": "discharging_cutoff_capacity", "name": "Discharging Cutoff SOC", "unit": "%", "state_class": "measurement", "scale": 1, "precision": 1, "category": "diagnostic", "scan_interval": "low", "enabled_by_default": False},
     {"key": "inverter_state", "name": "Storage Status", "data_type": "char", "icon": "mdi:state-machine", "category": "diagnostic", "scan_interval": "high", "enabled_by_default": True},
     {"key": "user_work_mode", "name": "Working Mode", "data_type": "char", "icon": "mdi:cog-outline", "category": "diagnostic", "scan_interval": "low", "enabled_by_default": True},
+    {"key": "inverter_max_power", "name": "Inverter Max AC Power", "unit": "W", "device_class": "power", "state_class": "measurement", "scale": 1, "precision": 0, "category": "diagnostic", "scan_interval": "very_low", "enabled_by_default": True},
+    {"key": "inverter_rated_power", "name": "Inverter Rated Power", "unit": "W", "device_class": "power", "state_class": "measurement", "scale": 1, "precision": 0, "category": "diagnostic", "scan_interval": "very_low", "enabled_by_default": False},
     {"key": "device_name", "name": "Device Model", "data_type": "char", "icon": "mdi:information-outline", "category": "diagnostic", "scan_interval": "very_low", "enabled_by_default": True},
     {"key": "serial_number", "name": "Serial Number", "data_type": "char", "icon": "mdi:identifier", "category": "diagnostic", "scan_interval": "very_low", "enabled_by_default": False},
 ]
@@ -485,6 +493,34 @@ class HuaweiSolarDriver(BatteryDriver):
         """No user-facing control entities are exposed by this driver."""
         return False
 
+    def dynamic_discharge_limit_w(self, data: dict) -> Optional[int]:
+        """Discharge headroom left on the inverter's AC side after PV.
+
+        Battery and PV strings share one inverter here, so the nameplate battery
+        limit is only reachable when the sun is down. At 7 kW of PV on an 8.8 kW
+        inverter the battery can contribute 1.8 kW no matter what its BMS allows,
+        and allocating 7 kW to it just starves the other batteries of the share
+        they could have delivered.
+
+        The subtraction deliberately excludes this battery's own contribution:
+        the ceiling has to describe what PV occupies, not what the battery is
+        currently doing, or the limit would chase its own output and oscillate.
+        """
+        ceiling = data.get("inverter_max_power")
+        ac_power = data.get("ac_power")
+        battery_power = data.get("battery_power")
+        if ceiling is None or ac_power is None or battery_power is None:
+            # No guess: the caller keeps the static envelope.
+            return None
+        try:
+            ceiling = int(ceiling)
+            # Only a discharge occupies AC capacity on the battery's behalf.
+            battery_ac = max(0, -int(battery_power))
+            non_battery_ac = max(0, int(ac_power) - battery_ac)
+        except (TypeError, ValueError):
+            return None
+        return max(0, ceiling - non_battery_ac)
+
     def net_power_from_data(self, data: dict) -> Optional[int]:
         mode = data.get("force_mode")
         charge = data.get("set_charge_power")
@@ -503,6 +539,9 @@ class HuaweiSolarDriver(BatteryDriver):
         return frozenset({
             "force_mode", "set_charge_power", "set_discharge_power",
             "max_charge_power", "max_discharge_power",
+            # Inputs of dynamic_discharge_limit_w: the allocator reads them every
+            # cycle, so they must keep being polled even with their entities off.
+            "inverter_max_power", "ac_power", "battery_power",
             "charging_cutoff_capacity", "discharging_cutoff_capacity",
         })
 
