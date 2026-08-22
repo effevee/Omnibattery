@@ -98,8 +98,9 @@ def test_decode_string_stops_at_nul_and_returns_none_when_empty():
 def test_capabilities():
     caps = _driver().capabilities
     assert isinstance(caps, DriverCapabilities)
-    # The inverter enforces 47081/47082 itself, so SOC limits are not software-only.
-    assert caps.hardware_soc_cutoff is True
+    # The cutoff registers are narrower than the configurable SOC window, so the
+    # control layer owns enforcement and the registers stay a backstop.
+    assert caps.hardware_soc_cutoff is False
     assert caps.has_force_mode is True
     assert caps.push_telemetry is False
     assert caps.has_energy_counters is True
@@ -402,6 +403,33 @@ async def test_set_charge_cutoff_without_a_resolvable_entity_returns_false():
 
 
 @pytest.mark.asyncio
+async def test_cutoff_outside_the_register_range_is_skipped_not_clamped():
+    """A clamped write would move the backstop somewhere nobody asked for."""
+    hass = _hass_with_services()
+    driver = _driver(hass=hass)
+    driver._resolve_entity = lambda name: f"number.{name}"
+    # 47081 accepts 90-100 % only.
+    assert await driver.set_charge_cutoff(80) is False
+    hass.services.async_call.assert_not_awaited()
+    assert await driver.set_charge_cutoff(95) is True
+    hass.services.async_call.assert_awaited()
+
+
+@pytest.mark.asyncio
+async def test_apply_config_skips_a_min_soc_the_register_cannot_hold():
+    hass = _hass_with_services()
+    driver = _driver(hass=hass)
+    driver._resolve_entity = lambda name: f"number.{name}"
+    # 47082 accepts 0-20 %; 25 % is enforced in software instead.
+    await driver.apply_config(
+        max_soc_pct=95, min_soc_pct=25,
+        max_charge_power_w=7000, max_discharge_power_w=7000,
+    )
+    written = [c.args[2]["entity_id"] for c in hass.services.async_call.await_args_list]
+    assert written == ["number.storage_charging_cutoff_capacity"]
+
+
+@pytest.mark.asyncio
 async def test_apply_config_writes_both_cutoffs():
     hass = _hass_with_services()
     driver = _driver(hass=hass)
@@ -418,3 +446,38 @@ async def test_apply_config_writes_both_cutoffs():
         "number.storage_charging_cutoff_capacity": 95.0,
         "number.storage_discharging_cutoff_capacity": 10.0,
     }
+
+
+# ----------------------------------------------------------------------
+# config-flow bounds
+#
+# These guard a real setup failure: without a brand branch, Huawei fell through
+# to the Marstek defaults and the limits form rejected the very values the probe
+# had just read from the inverter ("Value 7000.0 is too large").
+# ----------------------------------------------------------------------
+def test_power_ceilings_follow_the_probed_hardware():
+    from custom_components.omnibattery.config_flow import _huawei_power_ceilings
+
+    assert _huawei_power_ceilings(
+        {"device_max_charge_power": 7000, "device_max_discharge_power": 7000}
+    ) == (7000, 7000)
+
+
+def test_power_ceilings_fall_back_and_stay_sane():
+    from custom_components.omnibattery.config_flow import _huawei_power_ceilings
+
+    # No probe data at all.
+    assert _huawei_power_ceilings({}) == (5000, 5000)
+    # A malformed reading must not become the user's slider maximum.
+    charge, _discharge = _huawei_power_ceilings({"device_max_charge_power": 999999})
+    assert charge == 15000
+
+
+def test_soc_window_reaches_the_hardware_discharge_floor():
+    from custom_components.omnibattery.config_flow import _soc_selector_limits
+
+    min_lo, min_hi, min_default, *_ = _soc_selector_limits("huawei")
+    # The reference installation runs a 5 % discharge cutoff; the form must not
+    # reject it the way the Marstek default (12 %) did.
+    assert min_lo <= 5 <= min_hi
+    assert min_lo <= min_default <= min_hi

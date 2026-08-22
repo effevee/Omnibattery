@@ -105,6 +105,12 @@ _WRITE_DEADBAND_W = 250
 _MIN_WRITE_INTERVAL_S = 15.0
 _COMMAND_REFRESH_S = 240.0
 
+# Documented ranges of the inverter's own cutoff registers. They are narrower
+# than the SOC window Omnibattery lets the user pick, which is why the software
+# enforces the window and these writes are only a best-effort backstop.
+_CHARGE_CUTOFF_RANGE = (90.0, 100.0)      # register 47081
+_DISCHARGE_CUTOFF_RANGE = (0.0, 20.0)     # register 47082
+
 # Measured ramp from register write to settled power (7-14 s observed); declared
 # conservatively. Telemetry itself is ~4 ms away, so the readback delay is the
 # physical ramp, not the transport.
@@ -213,8 +219,12 @@ class HuaweiSolarDriver(BatteryDriver):
         max_charge_power_w = max(0, min(int(max_charge_power_w), _HW_MAX_POWER_W))
         max_discharge_power_w = max(0, min(int(max_discharge_power_w), _HW_MAX_POWER_W))
         self._capabilities = DriverCapabilities(
-            # 47081/47082 are real cutoff registers the hardware enforces itself.
-            hardware_soc_cutoff=True,
+            # 47081/47082 are real cutoff registers, but they only accept
+            # 90-100 % and 0-20 % respectively — narrower than the window a user
+            # may configure here. Claiming hardware enforcement would silently
+            # leave an out-of-range limit unenforced, so the control layer owns
+            # the SOC window and the registers are kept as a backstop.
+            hardware_soc_cutoff=False,
             has_force_mode=True,
             push_telemetry=False,
             max_charge_power_w=max_charge_power_w,
@@ -519,7 +529,22 @@ class HuaweiSolarDriver(BatteryDriver):
         return await self._write_cutoff("charging", soc_pct)
 
     async def _write_cutoff(self, which: str, soc_pct: float) -> bool:
-        """Write a cutoff through the huawei_solar number entity for it."""
+        """Write a cutoff through the huawei_solar number entity for it.
+
+        Values the register cannot represent are skipped rather than clamped: a
+        clamped write would move the hardware backstop somewhere the user never
+        asked for. The control layer enforces the real window either way.
+        """
+        low, high = (
+            _CHARGE_CUTOFF_RANGE if which == "charging" else _DISCHARGE_CUTOFF_RANGE
+        )
+        if not low <= float(soc_pct) <= high:
+            _LOGGER.debug(
+                "Huawei driver: %s cutoff %.1f%% is outside the register range "
+                "%.0f-%.0f%%; leaving the hardware backstop untouched",
+                which, float(soc_pct), low, high,
+            )
+            return False
         entity_id = self._resolve_entity(f"storage_{which}_cutoff_capacity")
         if entity_id is None:
             return False

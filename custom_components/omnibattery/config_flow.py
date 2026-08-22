@@ -398,6 +398,10 @@ def _soc_selector_limits(brand: str) -> tuple[int, int, int, int, int, int]:
         min_lo, min_hi, min_default = 0, 30, _SESSY_DEFAULT_MIN_SOC
     elif brand == "hoymiles":
         min_lo, min_hi, min_default = 0, 30, 10
+    elif brand == "huawei":
+        # The inverter keeps its own discharge cutoff as a backstop; this window
+        # is what Omnibattery enforces on top of it.
+        min_lo, min_hi, min_default = 0, 30, 10
     else:
         min_lo, min_hi, min_default = 12, 30, 12
 
@@ -488,6 +492,24 @@ def _anker_apply_probe_caps(battery_data: dict, caps: dict) -> None:
     ):
         if src in caps:
             battery_data[dst] = int(caps[src])
+
+
+_HUAWEI_MAX_POWER_W = 15000
+
+
+def _huawei_power_ceilings(battery_data: dict) -> tuple[int, int]:
+    """Hardware max charge/discharge from the probe (registers 37046/37048).
+
+    Huawei models span a wide power range, so unlike the other brands there is
+    no useful static envelope here — the constant is only a sanity bound against
+    a malformed reading.
+    """
+    charge = int(battery_data.get("device_max_charge_power") or 5000)
+    discharge = int(battery_data.get("device_max_discharge_power") or 5000)
+    return (
+        max(100, min(_HUAWEI_MAX_POWER_W, charge)),
+        max(100, min(_HUAWEI_MAX_POWER_W, discharge)),
+    )
 
 
 def _anker_power_ceilings(battery_data: dict) -> tuple[int, int]:
@@ -1593,6 +1615,8 @@ class MarstekVenusConfigFlow(LegacyDomainMigrationMixin, ConfigFlow, domain=DOMA
             max_discharge_power = _SESSY_MAX_DISCHARGE_POWER_W
         elif brand == "hoymiles":
             max_charge_power, max_discharge_power = _hoymiles_power_ceilings(self._current_battery_data)
+        elif brand == "huawei":
+            max_charge_power, max_discharge_power = _huawei_power_ceilings(self._current_battery_data)
         else:
             battery_version = self._current_battery_data.get(CONF_BATTERY_VERSION, DEFAULT_VERSION)
             max_charge_power = max_discharge_power = MAX_POWER_BY_VERSION.get(battery_version, 2500)
