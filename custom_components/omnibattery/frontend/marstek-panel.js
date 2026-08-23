@@ -55,10 +55,11 @@ const I18N = {
     dailyOperationNotNeeded: "Grid charge not needed", dailyOperationNoAction: "No action", dailyOperationSetpoint: "Until setpoint",
     dailyOperationDelay: "Charge delayed", dailyOperationUnlock: "Estimated unlock: {time}", dailyOperationAxis: "kWh/15 min",
     dailyOperationSolar: "Solar", dailyOperationConsumption: "Consumption", dailyOperationSoc: "Total SOC", dailyOperationLearned: "Learned profile",
-    dailyOperationSinusoidal: "Sinusoidal fallback", dailyOperationFallback: "Fallback: {reason}", dailyOperationPlan: "Plan",
+    dailyOperationSinusoidal: "Sinusoidal fallback", dailyOperationGenericFallback: "Fallback estimate", dailyOperationZeroFallback: "Zero-solar fallback", dailyOperationFallback: "Fallback: {reason}", dailyOperationPlan: "Plan",
     dailyOperationObserved: "Observed", dailyOperationProjected: "Projected", dailyOperationPrevious: "Previous",
     dailyOperationNext: "Next", dailyOperationNow: "Now", dailyOperationCoverage: "Coverage", dailyOperationMode: "Mode",
     dailyOperationSource: "Source", dailyOperationDSTSkipped: "DST interval skipped", dailyOperationDSTRepeated: "Repeated local hour",
+    dailyOperationProvider: "Provider forecast", dailyOperationConsumptionProfile: "Consumption profile", dailyOperationLegacyDaily: "Daily estimate", dailyOperationDynamicSchedule: "Dynamic schedule", dailyOperationTimeSlot: "Time slot", dailyOperationProfileProjection: "Profile projection", dailyOperationUnavailable: "Unavailable",
     dailyOperationRealtimeNoFuture: "Real-time price has no future calendar", dailyOperationUnknown: "Unknown",
     forecastToday: "Solar forecast · 00:05", solarRemaining: "Solar remaining", expectedConsumption: "Expected consumption",
     grid: "Grid", solar: "Solar", home: "Home", battery: "Battery",
@@ -139,10 +140,11 @@ const I18N = {
     dailyOperationNotNeeded: "Carga de red no necesaria", dailyOperationNoAction: "Sin acción", dailyOperationSetpoint: "Hasta el setpoint",
     dailyOperationDelay: "Carga retrasada", dailyOperationUnlock: "Desbloqueo estimado: {time}", dailyOperationAxis: "kWh/15 min",
     dailyOperationSolar: "Solar", dailyOperationConsumption: "Consumo", dailyOperationSoc: "SOC total", dailyOperationLearned: "Perfil aprendido",
-    dailyOperationSinusoidal: "Fallback sinusoidal", dailyOperationFallback: "Fallback: {reason}", dailyOperationPlan: "Plan",
+    dailyOperationSinusoidal: "Curva sinusoidal alternativa", dailyOperationGenericFallback: "Estimación alternativa", dailyOperationZeroFallback: "Previsión solar nula", dailyOperationFallback: "Estimación alternativa: {reason}", dailyOperationPlan: "Plan",
     dailyOperationObserved: "Observado", dailyOperationProjected: "Previsto", dailyOperationPrevious: "Anterior",
     dailyOperationNext: "Siguiente", dailyOperationNow: "Ahora", dailyOperationCoverage: "Cobertura", dailyOperationMode: "Modo",
     dailyOperationSource: "Fuente", dailyOperationDSTSkipped: "Intervalo DST omitido", dailyOperationDSTRepeated: "Hora local repetida",
+    dailyOperationProvider: "Previsión del proveedor", dailyOperationConsumptionProfile: "Perfil de consumo", dailyOperationLegacyDaily: "Estimación diaria", dailyOperationDynamicSchedule: "Plan dinámico", dailyOperationTimeSlot: "Franja horaria", dailyOperationProfileProjection: "Proyección del perfil", dailyOperationUnavailable: "No disponible",
     dailyOperationRealtimeNoFuture: "El precio en tiempo real no tiene calendario futuro", dailyOperationUnknown: "Desconocido",
     forecastToday: "Previsión solar · 00:05", solarRemaining: "Solar restante", expectedConsumption: "Consumo esperado",
     grid: "Red", solar: "Solar", home: "Casa", battery: "Batería",
@@ -223,10 +225,11 @@ const I18N = {
     dailyOperationNotNeeded: "Càrrega de xarxa no necessària", dailyOperationNoAction: "Sense acció", dailyOperationSetpoint: "Fins al setpoint",
     dailyOperationDelay: "Càrrega retardada", dailyOperationUnlock: "Desbloqueig estimat: {time}", dailyOperationAxis: "kWh/15 min",
     dailyOperationSolar: "Solar", dailyOperationConsumption: "Consum", dailyOperationSoc: "SOC total", dailyOperationLearned: "Perfil après",
-    dailyOperationSinusoidal: "Fallback sinusoidal", dailyOperationFallback: "Fallback: {reason}", dailyOperationPlan: "Pla",
+    dailyOperationSinusoidal: "Corba sinusoidal alternativa", dailyOperationGenericFallback: "Estimació alternativa", dailyOperationZeroFallback: "Previsió solar nul·la", dailyOperationFallback: "Estimació alternativa: {reason}", dailyOperationPlan: "Pla",
     dailyOperationObserved: "Observat", dailyOperationProjected: "Previst", dailyOperationPrevious: "Anterior",
     dailyOperationNext: "Següent", dailyOperationNow: "Ara", dailyOperationCoverage: "Cobertura", dailyOperationMode: "Mode",
     dailyOperationSource: "Font", dailyOperationDSTSkipped: "Interval DST omès", dailyOperationDSTRepeated: "Hora local repetida",
+    dailyOperationProvider: "Previsió del proveïdor", dailyOperationConsumptionProfile: "Perfil de consum", dailyOperationLegacyDaily: "Estimació diària", dailyOperationDynamicSchedule: "Pla dinàmic", dailyOperationTimeSlot: "Franja horària", dailyOperationProfileProjection: "Projecció del perfil", dailyOperationUnavailable: "No disponible",
     dailyOperationRealtimeNoFuture: "El preu en temps real no té calendari futur", dailyOperationUnknown: "Desconegut",
     forecastToday: "Previsió solar · 00:05", solarRemaining: "Solar restant", expectedConsumption: "Consum esperat",
     grid: "Xarxa", solar: "Solar", home: "Casa", battery: "Bateria",
@@ -303,10 +306,11 @@ const I18N = {
     dailyOperationNotNeeded: "Keine Netzladung erforderlich", dailyOperationNoAction: "Keine Aktion", dailyOperationSetpoint: "Bis zum Sollwert",
     dailyOperationDelay: "Laden verzögert", dailyOperationUnlock: "Voraussichtliche Freigabe: {time}", dailyOperationAxis: "kWh/15 Min.",
     dailyOperationSolar: "Solar", dailyOperationConsumption: "Verbrauch", dailyOperationSoc: "Gesamt-SOC", dailyOperationLearned: "Gelerntes Profil",
-    dailyOperationSinusoidal: "Sinusförmiger Fallback", dailyOperationFallback: "Fallback: {reason}", dailyOperationPlan: "Plan",
+    dailyOperationSinusoidal: "Sinusförmige Ersatzkurve", dailyOperationGenericFallback: "Ersatzprognose", dailyOperationZeroFallback: "Solarprognose ohne Ertrag", dailyOperationFallback: "Ersatzprognose: {reason}", dailyOperationPlan: "Plan",
     dailyOperationObserved: "Beobachtet", dailyOperationProjected: "Prognostiziert", dailyOperationPrevious: "Zurück",
     dailyOperationNext: "Weiter", dailyOperationNow: "Jetzt", dailyOperationCoverage: "Abdeckung", dailyOperationMode: "Modus",
     dailyOperationSource: "Quelle", dailyOperationDSTSkipped: "DST-Intervall übersprungen", dailyOperationDSTRepeated: "Wiederholte Ortszeit",
+    dailyOperationProvider: "Anbieterprognose", dailyOperationConsumptionProfile: "Verbrauchsprofil", dailyOperationLegacyDaily: "Tagesschätzung", dailyOperationDynamicSchedule: "Dynamischer Zeitplan", dailyOperationTimeSlot: "Zeitfenster", dailyOperationProfileProjection: "Profilprojektion", dailyOperationUnavailable: "Nicht verfügbar",
     dailyOperationRealtimeNoFuture: "Echtzeitpreis hat keinen Zukunftskalender", dailyOperationUnknown: "Unbekannt",
     forecastToday: "Solarprognose · 00:05", solarRemaining: "Verbleibende Solarenergie", expectedConsumption: "Erwarteter Verbrauch",
     grid: "Netz", solar: "Solar", home: "Haus", battery: "Batterie",
@@ -383,10 +387,11 @@ const I18N = {
     dailyOperationNotNeeded: "Charge réseau non nécessaire", dailyOperationNoAction: "Aucune action", dailyOperationSetpoint: "Jusqu'au point de consigne",
     dailyOperationDelay: "Charge retardée", dailyOperationUnlock: "Déblocage estimé : {time}", dailyOperationAxis: "kWh/15 min",
     dailyOperationSolar: "Solaire", dailyOperationConsumption: "Consommation", dailyOperationSoc: "SOC total", dailyOperationLearned: "Profil appris",
-    dailyOperationSinusoidal: "Fallback sinusoïdal", dailyOperationFallback: "Fallback : {reason}", dailyOperationPlan: "Plan",
+    dailyOperationSinusoidal: "Courbe sinusoïdale de secours", dailyOperationGenericFallback: "Estimation de secours", dailyOperationZeroFallback: "Prévision solaire nulle", dailyOperationFallback: "Estimation de secours : {reason}", dailyOperationPlan: "Plan",
     dailyOperationObserved: "Observé", dailyOperationProjected: "Prévu", dailyOperationPrevious: "Précédent",
     dailyOperationNext: "Suivant", dailyOperationNow: "Maintenant", dailyOperationCoverage: "Couverture", dailyOperationMode: "Mode",
     dailyOperationSource: "Source", dailyOperationDSTSkipped: "Intervalle DST ignoré", dailyOperationDSTRepeated: "Heure locale répétée",
+    dailyOperationProvider: "Prévision du fournisseur", dailyOperationConsumptionProfile: "Profil de consommation", dailyOperationLegacyDaily: "Estimation quotidienne", dailyOperationDynamicSchedule: "Plan dynamique", dailyOperationTimeSlot: "Créneau horaire", dailyOperationProfileProjection: "Projection du profil", dailyOperationUnavailable: "Indisponible",
     dailyOperationRealtimeNoFuture: "Le prix en temps réel n'a pas de calendrier futur", dailyOperationUnknown: "Inconnu",
     forecastToday: "Prévision solaire · 00:05", solarRemaining: "Solaire restant", expectedConsumption: "Consommation prévue",
     grid: "Réseau", solar: "Solaire", home: "Maison", battery: "Batterie",
@@ -463,10 +468,11 @@ const I18N = {
     dailyOperationNotNeeded: "Laden vanaf net niet nodig", dailyOperationNoAction: "Geen actie", dailyOperationSetpoint: "Tot setpoint",
     dailyOperationDelay: "Laden vertraagd", dailyOperationUnlock: "Geschatte vrijgave: {time}", dailyOperationAxis: "kWh/15 min",
     dailyOperationSolar: "Zon", dailyOperationConsumption: "Verbruik", dailyOperationSoc: "Totale SOC", dailyOperationLearned: "Geleerd profiel",
-    dailyOperationSinusoidal: "Sinusvormige fallback", dailyOperationFallback: "Fallback: {reason}", dailyOperationPlan: "Plan",
+    dailyOperationSinusoidal: "Alternatieve sinuscurve", dailyOperationGenericFallback: "Alternatieve prognose", dailyOperationZeroFallback: "Zonneprognose zonder opbrengst", dailyOperationFallback: "Alternatieve prognose: {reason}", dailyOperationPlan: "Plan",
     dailyOperationObserved: "Geobserveerd", dailyOperationProjected: "Verwacht", dailyOperationPrevious: "Vorige",
     dailyOperationNext: "Volgende", dailyOperationNow: "Nu", dailyOperationCoverage: "Dekking", dailyOperationMode: "Modus",
     dailyOperationSource: "Bron", dailyOperationDSTSkipped: "DST-interval overgeslagen", dailyOperationDSTRepeated: "Herhaalde lokale tijd",
+    dailyOperationProvider: "Prognose van aanbieder", dailyOperationConsumptionProfile: "Verbruiksprofiel", dailyOperationLegacyDaily: "Dagelijkse schatting", dailyOperationDynamicSchedule: "Dynamische planning", dailyOperationTimeSlot: "Tijdvak", dailyOperationProfileProjection: "Profielprojectie", dailyOperationUnavailable: "Niet beschikbaar",
     dailyOperationRealtimeNoFuture: "Realtimeprijs heeft geen toekomstige kalender", dailyOperationUnknown: "Onbekend",
     forecastToday: "Zonneverwachting · 00:05", solarRemaining: "Resterende zonne-energie", expectedConsumption: "Verwacht verbruik",
     grid: "Net", solar: "Zon", home: "Huis", battery: "Batterij",
@@ -525,6 +531,261 @@ const I18N = {
     slotAllows: "Staat toe", slotChargeWord: "laden", slotDischargeWord: "ontladen", slotNothing: "niets",
     slotSocOverride: "SOC-overschrijving", slotYes: "ja", slotPowerOverride: "Vermogensoverschrijving",
     slotStateLabel: "Status", slotActiveWord: "actief", slotInactiveWord: "inactief",
+  },
+};
+
+// Backend diagnostics stay stable and machine-readable. Translate them only at
+// the presentation boundary so entities and downloaded diagnostics keep their
+// existing contract while the panel never exposes internal reason codes.
+const DAILY_OPERATION_REASON_KEYS = {
+  no_profile_data: "profileNoData",
+  insufficient_days: "profileInsufficientDays",
+  insufficient_weekday_samples: "profileInsufficientWeekday",
+  insufficient_coverage: "profileInsufficientCoverage",
+  stale_profile: "profileStale",
+  profile_not_mature: "profileLearning",
+  empty_range: "emptyRange",
+  empty_horizon: "emptyRange",
+  provider_period_invalid: "providerInvalid",
+  provider_invalid: "providerInvalid",
+  provider_timestamp_naive: "providerNoTimezone",
+  provider_periods_missing: "providerMissing",
+  provider_period_overlap: "providerOverlap",
+  provider_coverage: "providerCoverage",
+  provider_gap: "providerGap",
+  provider_zero_energy: "providerNoEnergy",
+  legacy_shape_missing: "legacyMissing",
+  legacy_shape_length: "legacyInvalid",
+  legacy_shape_invalid: "legacyInvalid",
+  legacy_shape_zero: "legacyInvalid",
+  solar_window_missing: "solarWindowMissing",
+  solar_window_invalid: "solarWindowInvalid",
+  learned_shape_length: "learnedInvalid",
+  learned_shape_invalid: "learnedInvalid",
+  learned_invalid: "learnedInvalid",
+  learned_shape_no_future_energy: "learnedNoFuture",
+  invalid_mode: "invalidMode",
+  sinusoidal_invalid: "sinusoidalInvalid",
+  forecast_invalid: "forecastInvalid",
+  unsafe_temporal_shape: "temporalInvalid",
+};
+
+const DAILY_OPERATION_REASON_I18N = {
+  en: {
+    profileNoData: "No data for the learned profile",
+    profileInsufficientDays: "Not enough learned days",
+    profileInsufficientWeekday: "Not enough samples for this weekday",
+    profileInsufficientCoverage: "Insufficient profile coverage",
+    profileStale: "The learned profile is outdated",
+    profileLearning: "The profile is still learning",
+    emptyRange: "No future intervals are available for the forecast",
+    providerInvalid: "The provider forecast is invalid",
+    providerNoTimezone: "The provider forecast has no time zone",
+    providerMissing: "No provider forecast intervals are available",
+    providerOverlap: "The provider forecast intervals overlap",
+    providerCoverage: "The provider forecast coverage is insufficient",
+    providerGap: "The provider forecast contains a data gap",
+    providerNoEnergy: "The provider forecast contains no solar energy",
+    legacyMissing: "The previous solar curve is unavailable",
+    legacyInvalid: "The previous solar curve is invalid",
+    solarWindowMissing: "The solar window is unavailable",
+    solarWindowInvalid: "The solar window is invalid",
+    learnedInvalid: "The learned solar profile is invalid",
+    learnedNoFuture: "The learned profile contains no future solar energy",
+    invalidMode: "The solar profile mode is invalid",
+    sinusoidalInvalid: "The sinusoidal solar curve could not be generated",
+    forecastInvalid: "The solar forecast is invalid",
+    temporalInvalid: "The solar time distribution could not be validated",
+    normalizationFailed: "The solar forecast could not be distributed",
+    loadFailed: "The profile data could not be loaded",
+    saveFailed: "The profile data could not be saved",
+    historyUnavailable: "The profile history could not be imported",
+    profileReset: "The profile was reset after a configuration change",
+    fallbackUnavailable: "The fallback estimate is unavailable",
+    projectionUnavailable: "The projection is unavailable",
+    projectionFailed: "The projection could not be calculated",
+    runtimeFailed: "The live data could not be updated",
+    updateFailed: "The chart could not be updated",
+  },
+  es: {
+    profileNoData: "Sin datos para el perfil aprendido",
+    profileInsufficientDays: "No hay suficientes días de aprendizaje",
+    profileInsufficientWeekday: "No hay suficientes muestras para este día de la semana",
+    profileInsufficientCoverage: "Cobertura insuficiente del perfil",
+    profileStale: "El perfil aprendido está desactualizado",
+    profileLearning: "El perfil todavía está aprendiendo",
+    emptyRange: "No hay intervalos futuros para la previsión",
+    providerInvalid: "La previsión del proveedor no es válida",
+    providerNoTimezone: "La previsión del proveedor no incluye zona horaria",
+    providerMissing: "No hay intervalos de previsión del proveedor",
+    providerOverlap: "Los intervalos de previsión del proveedor se solapan",
+    providerCoverage: "La cobertura de la previsión del proveedor es insuficiente",
+    providerGap: "La previsión del proveedor contiene un intervalo sin datos",
+    providerNoEnergy: "La previsión del proveedor no contiene energía solar",
+    legacyMissing: "La curva solar anterior no está disponible",
+    legacyInvalid: "La curva solar anterior no es válida",
+    solarWindowMissing: "La ventana solar no está disponible",
+    solarWindowInvalid: "La ventana solar no es válida",
+    learnedInvalid: "El perfil solar aprendido no es válido",
+    learnedNoFuture: "El perfil aprendido no contiene energía solar futura",
+    invalidMode: "El modo del perfil solar no es válido",
+    sinusoidalInvalid: "No se pudo generar la curva solar sinusoidal",
+    forecastInvalid: "La previsión solar no es válida",
+    temporalInvalid: "No se pudo validar la distribución temporal solar",
+    normalizationFailed: "No se pudo distribuir la previsión solar",
+    loadFailed: "No se pudieron cargar los datos del perfil",
+    saveFailed: "No se pudieron guardar los datos del perfil",
+    historyUnavailable: "No se pudo importar el histórico del perfil",
+    profileReset: "El perfil se reinició tras un cambio de configuración",
+    fallbackUnavailable: "La estimación alternativa no está disponible",
+    projectionUnavailable: "La proyección no está disponible",
+    projectionFailed: "No se pudo calcular la proyección",
+    runtimeFailed: "No se pudieron actualizar los datos en tiempo real",
+    updateFailed: "No se pudo actualizar la gráfica",
+  },
+  ca: {
+    profileNoData: "Sense dades per al perfil après",
+    profileInsufficientDays: "No hi ha prou dies d'aprenentatge",
+    profileInsufficientWeekday: "No hi ha prou mostres per a aquest dia de la setmana",
+    profileInsufficientCoverage: "Cobertura insuficient del perfil",
+    profileStale: "El perfil après està desactualitzat",
+    profileLearning: "El perfil encara està aprenent",
+    emptyRange: "No hi ha intervals futurs per a la previsió",
+    providerInvalid: "La previsió del proveïdor no és vàlida",
+    providerNoTimezone: "La previsió del proveïdor no inclou zona horària",
+    providerMissing: "No hi ha intervals de previsió del proveïdor",
+    providerOverlap: "Els intervals de previsió del proveïdor se superposen",
+    providerCoverage: "La cobertura de la previsió del proveïdor és insuficient",
+    providerGap: "La previsió del proveïdor conté un interval sense dades",
+    providerNoEnergy: "La previsió del proveïdor no conté energia solar",
+    legacyMissing: "La corba solar anterior no està disponible",
+    legacyInvalid: "La corba solar anterior no és vàlida",
+    solarWindowMissing: "La finestra solar no està disponible",
+    solarWindowInvalid: "La finestra solar no és vàlida",
+    learnedInvalid: "El perfil solar après no és vàlid",
+    learnedNoFuture: "El perfil après no conté energia solar futura",
+    invalidMode: "El mode del perfil solar no és vàlid",
+    sinusoidalInvalid: "No s'ha pogut generar la corba solar sinusoidal",
+    forecastInvalid: "La previsió solar no és vàlida",
+    temporalInvalid: "No s'ha pogut validar la distribució temporal solar",
+    normalizationFailed: "No s'ha pogut distribuir la previsió solar",
+    loadFailed: "No s'han pogut carregar les dades del perfil",
+    saveFailed: "No s'han pogut desar les dades del perfil",
+    historyUnavailable: "No s'ha pogut importar l'històric del perfil",
+    profileReset: "El perfil s'ha reiniciat després d'un canvi de configuració",
+    fallbackUnavailable: "L'estimació alternativa no està disponible",
+    projectionUnavailable: "La projecció no està disponible",
+    projectionFailed: "No s'ha pogut calcular la projecció",
+    runtimeFailed: "No s'han pogut actualitzar les dades en temps real",
+    updateFailed: "No s'ha pogut actualitzar la gràfica",
+  },
+  de: {
+    profileNoData: "Keine Daten für das gelernte Profil",
+    profileInsufficientDays: "Nicht genügend Lerntage",
+    profileInsufficientWeekday: "Nicht genügend Messwerte für diesen Wochentag",
+    profileInsufficientCoverage: "Unzureichende Profilabdeckung",
+    profileStale: "Das gelernte Profil ist veraltet",
+    profileLearning: "Das Profil wird noch angelernt",
+    emptyRange: "Für die Prognose sind keine zukünftigen Intervalle verfügbar",
+    providerInvalid: "Die Anbieterprognose ist ungültig",
+    providerNoTimezone: "Die Anbieterprognose enthält keine Zeitzone",
+    providerMissing: "Es sind keine Prognoseintervalle des Anbieters verfügbar",
+    providerOverlap: "Die Prognoseintervalle des Anbieters überschneiden sich",
+    providerCoverage: "Die Abdeckung der Anbieterprognose ist unzureichend",
+    providerGap: "Die Anbieterprognose weist eine Datenlücke auf",
+    providerNoEnergy: "Die Anbieterprognose enthält keine Solarenergie",
+    legacyMissing: "Die bisherige Solarkurve ist nicht verfügbar",
+    legacyInvalid: "Die bisherige Solarkurve ist ungültig",
+    solarWindowMissing: "Das Solarzeitfenster ist nicht verfügbar",
+    solarWindowInvalid: "Das Solarzeitfenster ist ungültig",
+    learnedInvalid: "Das gelernte Solarprofil ist ungültig",
+    learnedNoFuture: "Das gelernte Profil enthält keine zukünftige Solarenergie",
+    invalidMode: "Der Solarprofilmodus ist ungültig",
+    sinusoidalInvalid: "Die sinusförmige Solarkurve konnte nicht erstellt werden",
+    forecastInvalid: "Die Solarprognose ist ungültig",
+    temporalInvalid: "Die zeitliche Solarverteilung konnte nicht validiert werden",
+    normalizationFailed: "Die Solarprognose konnte nicht verteilt werden",
+    loadFailed: "Die Profildaten konnten nicht geladen werden",
+    saveFailed: "Die Profildaten konnten nicht gespeichert werden",
+    historyUnavailable: "Der Profilverlauf konnte nicht importiert werden",
+    profileReset: "Das Profil wurde nach einer Konfigurationsänderung zurückgesetzt",
+    fallbackUnavailable: "Die Ersatzprognose ist nicht verfügbar",
+    projectionUnavailable: "Die Projektion ist nicht verfügbar",
+    projectionFailed: "Die Projektion konnte nicht berechnet werden",
+    runtimeFailed: "Die Live-Daten konnten nicht aktualisiert werden",
+    updateFailed: "Das Diagramm konnte nicht aktualisiert werden",
+  },
+  fr: {
+    profileNoData: "Aucune donnée pour le profil appris",
+    profileInsufficientDays: "Pas assez de jours d'apprentissage",
+    profileInsufficientWeekday: "Pas assez d'échantillons pour ce jour de la semaine",
+    profileInsufficientCoverage: "Couverture du profil insuffisante",
+    profileStale: "Le profil appris est obsolète",
+    profileLearning: "Le profil est encore en cours d'apprentissage",
+    emptyRange: "Aucun intervalle futur n'est disponible pour la prévision",
+    providerInvalid: "La prévision du fournisseur n'est pas valide",
+    providerNoTimezone: "La prévision du fournisseur ne contient pas de fuseau horaire",
+    providerMissing: "Aucun intervalle de prévision du fournisseur n'est disponible",
+    providerOverlap: "Les intervalles de prévision du fournisseur se chevauchent",
+    providerCoverage: "La couverture de la prévision du fournisseur est insuffisante",
+    providerGap: "La prévision du fournisseur contient un intervalle sans données",
+    providerNoEnergy: "La prévision du fournisseur ne contient aucune énergie solaire",
+    legacyMissing: "La courbe solaire précédente n'est pas disponible",
+    legacyInvalid: "La courbe solaire précédente n'est pas valide",
+    solarWindowMissing: "La fenêtre solaire n'est pas disponible",
+    solarWindowInvalid: "La fenêtre solaire n'est pas valide",
+    learnedInvalid: "Le profil solaire appris n'est pas valide",
+    learnedNoFuture: "Le profil appris ne contient aucune énergie solaire future",
+    invalidMode: "Le mode du profil solaire n'est pas valide",
+    sinusoidalInvalid: "La courbe solaire sinusoïdale n'a pas pu être générée",
+    forecastInvalid: "La prévision solaire n'est pas valide",
+    temporalInvalid: "La répartition temporelle solaire n'a pas pu être validée",
+    normalizationFailed: "La prévision solaire n'a pas pu être répartie",
+    loadFailed: "Les données du profil n'ont pas pu être chargées",
+    saveFailed: "Les données du profil n'ont pas pu être enregistrées",
+    historyUnavailable: "L'historique du profil n'a pas pu être importé",
+    profileReset: "Le profil a été réinitialisé après un changement de configuration",
+    fallbackUnavailable: "L'estimation de secours n'est pas disponible",
+    projectionUnavailable: "La projection n'est pas disponible",
+    projectionFailed: "La projection n'a pas pu être calculée",
+    runtimeFailed: "Les données en temps réel n'ont pas pu être actualisées",
+    updateFailed: "Le graphique n'a pas pu être actualisé",
+  },
+  nl: {
+    profileNoData: "Geen gegevens voor het geleerde profiel",
+    profileInsufficientDays: "Onvoldoende leerdagen",
+    profileInsufficientWeekday: "Onvoldoende metingen voor deze weekdag",
+    profileInsufficientCoverage: "Onvoldoende profieldekking",
+    profileStale: "Het geleerde profiel is verouderd",
+    profileLearning: "Het profiel is nog aan het leren",
+    emptyRange: "Er zijn geen toekomstige intervallen beschikbaar voor de prognose",
+    providerInvalid: "De prognose van de aanbieder is ongeldig",
+    providerNoTimezone: "De prognose van de aanbieder bevat geen tijdzone",
+    providerMissing: "Er zijn geen prognose-intervallen van de aanbieder beschikbaar",
+    providerOverlap: "De prognose-intervallen van de aanbieder overlappen",
+    providerCoverage: "De dekking van de prognose van de aanbieder is onvoldoende",
+    providerGap: "De prognose van de aanbieder bevat een gegevenshiaat",
+    providerNoEnergy: "De prognose van de aanbieder bevat geen zonne-energie",
+    legacyMissing: "De vorige zonnecurve is niet beschikbaar",
+    legacyInvalid: "De vorige zonnecurve is ongeldig",
+    solarWindowMissing: "Het zonnevenster is niet beschikbaar",
+    solarWindowInvalid: "Het zonnevenster is ongeldig",
+    learnedInvalid: "Het geleerde zonneprofiel is ongeldig",
+    learnedNoFuture: "Het geleerde profiel bevat geen toekomstige zonne-energie",
+    invalidMode: "De zonneprofielmodus is ongeldig",
+    sinusoidalInvalid: "De sinusvormige zonnecurve kon niet worden gegenereerd",
+    forecastInvalid: "De zonneprognose is ongeldig",
+    temporalInvalid: "De verdeling van zonne-energie over de tijd kon niet worden gevalideerd",
+    normalizationFailed: "De zonneprognose kon niet worden verdeeld",
+    loadFailed: "De profielgegevens konden niet worden geladen",
+    saveFailed: "De profielgegevens konden niet worden opgeslagen",
+    historyUnavailable: "De profielgeschiedenis kon niet worden geïmporteerd",
+    profileReset: "Het profiel is opnieuw ingesteld na een configuratiewijziging",
+    fallbackUnavailable: "De alternatieve prognose is niet beschikbaar",
+    projectionUnavailable: "De projectie is niet beschikbaar",
+    projectionFailed: "De projectie kon niet worden berekend",
+    runtimeFailed: "De livegegevens konden niet worden bijgewerkt",
+    updateFailed: "De grafiek kon niet worden bijgewerkt",
   },
 };
 
@@ -2464,9 +2725,52 @@ class MarstekVenusPanel extends HTMLElement {
   _dailyOperationSourceLabel(value) {
     if (!value) return null;
     const normalized = String(value).toLowerCase();
+    const sourceKeys = {
+      provider: "dailyOperationProvider",
+      profile: "dailyOperationConsumptionProfile",
+      legacy_daily: "dailyOperationLegacyDaily",
+      dynamic_schedule: "dailyOperationDynamicSchedule",
+      time_slot: "dailyOperationTimeSlot",
+      profile_projection: "dailyOperationProfileProjection",
+      unavailable: "dailyOperationUnavailable",
+      zero_fallback: "dailyOperationZeroFallback",
+      fallback: "dailyOperationGenericFallback",
+    };
+    if (sourceKeys[normalized]) return this._t(sourceKeys[normalized]);
     if (normalized.includes("learned")) return this._t("dailyOperationLearned");
     if (normalized.includes("sinus")) return this._t("dailyOperationSinusoidal");
     return String(value).replace(/_/g, " ");
+  }
+
+  _dailyOperationReasonDict() {
+    return DAILY_OPERATION_REASON_I18N[this._lang2()] || DAILY_OPERATION_REASON_I18N.en;
+  }
+
+  _dailyOperationFallbackReasonLabel(value) {
+    const dictionary = this._dailyOperationReasonDict();
+    const labels = String(value || "").split(";").map((part) => part.trim()).filter(Boolean)
+      .filter((part) => part.toLowerCase() !== "zero_budget")
+      .map((part) => {
+        const normalized = part.toLowerCase();
+        let key = DAILY_OPERATION_REASON_KEYS[normalized];
+        if (!key && normalized.endsWith("_normalization")) key = "normalizationFailed";
+        else if (!key && normalized.startsWith("load:")) key = "loadFailed";
+        else if (!key && normalized.startsWith("save:")) key = "saveFailed";
+        else if (!key && normalized.startsWith("backfill:")) key = "historyUnavailable";
+        else if (!key && normalized.startsWith("profile invalidated")) key = "profileReset";
+        return dictionary[key || "fallbackUnavailable"];
+      });
+    return [...new Set(labels)].join(" · ");
+  }
+
+  _dailyOperationStaleReasonLabel(value) {
+    if (!value) return "";
+    const normalized = String(value).trim().toLowerCase();
+    const dictionary = this._dailyOperationReasonDict();
+    if (normalized === "projection_unavailable") return dictionary.projectionUnavailable;
+    if (normalized.startsWith("projection:")) return dictionary.projectionFailed;
+    if (normalized.startsWith("runtime:")) return dictionary.runtimeFailed;
+    return dictionary.updateFailed;
   }
 
   _dailyOperationItem(snapshot, index) {
@@ -2640,7 +2944,10 @@ class MarstekVenusPanel extends HTMLElement {
     if (planSource) parts.push(`${this._t("dailyOperationPlan")} · ${this._t("dailyOperationSource")}: ${planSource}`);
     if (snapshot.planEvaluatedAt) parts.push(`${this._t("dailyOperationPlan")}: ${snapshot.planEvaluatedAt}`);
     if (snapshot.generatedAt) parts.push(`${this._t("dailyOperationSource")}: ${snapshot.generatedAt}`);
-    if (snapshot.stale) parts.push(snapshot.staleReason ? `${this._t("dailyOperationStale")}: ${snapshot.staleReason}` : this._t("dailyOperationStale"));
+    if (snapshot.stale) {
+      const staleReason = this._dailyOperationStaleReasonLabel(snapshot.staleReason);
+      parts.push(staleReason ? `${this._t("dailyOperationStale")}: ${staleReason}` : this._t("dailyOperationStale"));
+    }
     return parts.join(". ");
   }
 
@@ -2864,10 +3171,14 @@ class MarstekVenusPanel extends HTMLElement {
     ref.badge.classList.toggle("daily-op-badge-stale", snapshot.stale);
     const notices = [];
     if (snapshot.unavailable || !snapshot.hasValues) notices.push(this._t("dailyOperationNoData"));
-    if (snapshot.stale) notices.push(snapshot.staleReason ? `${this._t("dailyOperationStale")}: ${snapshot.staleReason}` : this._t("dailyOperationStale"));
+    if (snapshot.stale) {
+      const staleReason = this._dailyOperationStaleReasonLabel(snapshot.staleReason);
+      notices.push(staleReason ? `${this._t("dailyOperationStale")}: ${staleReason}` : this._t("dailyOperationStale"));
+    }
     for (const kind of ["solar", "consumption"]) {
       const reason = snapshot.fallbackReason(kind);
-      if (reason) notices.push(this._t("dailyOperationFallback", { reason }));
+      const reasonLabel = this._dailyOperationFallbackReasonLabel(reason);
+      if (reasonLabel) notices.push(this._t("dailyOperationFallback", { reason: reasonLabel }));
       const source = snapshot.source(kind);
       if (!reason && source && /fallback|sinus/i.test(source)) {
         notices.push(this._t("dailyOperationFallback", { reason: this._dailyOperationSourceLabel(source) }));
@@ -6178,7 +6489,7 @@ class MarstekVenusPanel extends HTMLElement {
       .daily-op-yaxis { position: relative; height: 190px; color: var(--ink-dim); font-size: 10px; line-height: 1; white-space: nowrap; }
       .daily-op-yaxis small { position: absolute; top: 7px; right: 8px; font-size: 9px; writing-mode: horizontal-tb; transform: none; }
       .daily-op-yaxis-ticks { position: absolute; top: 32px; right: 8px; bottom: 26px; display: flex; flex-direction: column; align-items: flex-end; justify-content: space-between; }
-      .daily-op-soc-axis { position: relative; height: 190px; color: var(--daily-op-soc); font-size: 10px; line-height: 1; white-space: nowrap; }
+      .daily-op-soc-axis { position: relative; height: 190px; color: var(--ink-dim); font-size: 10px; line-height: 1; white-space: nowrap; }
       .daily-op-soc-axis small { position: absolute; top: 7px; left: 8px; font-size: 9px; }
       .daily-op-soc-axis-ticks { position: absolute; top: 32px; left: 8px; bottom: 26px; display: flex; flex-direction: column; align-items: flex-start; justify-content: space-between; }
       .daily-op-viewport { position: relative; min-width: 0; overflow-x: auto; overflow-y: hidden; scroll-snap-type: x proximity; scrollbar-width: thin; overscroll-behavior-x: contain; outline: none; }
