@@ -552,13 +552,25 @@ class HuaweiSolarDriver(BatteryDriver):
                 applied=self._echo(applied),
             )
 
-        if applied >= 0:
-            # 0 W is a held idle, not a release: a forcible charge at zero keeps
-            # the inverter's own self-consumption control out of the loop.
+        if applied == 0:
+            # Zero means "no work for you", and for a DC-coupled hybrid that has
+            # to mean *released*, not *held*.
+            #
+            # This driver originally pinned a zero with a forcible charge at 0 W,
+            # to keep the inverter's own self-consumption control from
+            # regulating against the PD loop. On real hardware that reasoning
+            # was inverted: a pinned battery cannot absorb its own PV, so the
+            # inverter derates the strings instead, and the control layer's
+            # single idle on entering manual mode left a 13.8 kWh battery frozen
+            # with the panel showing standby. Handing it back costs a second
+            # regulator; keeping it costs the solar yield.
+            service, data = "stop_forcible_charge", {}
+        elif applied > 0:
             service, data = "forcible_charge", {"power": applied}
+            data["duration"] = _COMMAND_DURATION_MIN
         else:
             service, data = "forcible_discharge", {"power": -applied}
-        data["duration"] = _COMMAND_DURATION_MIN
+            data["duration"] = _COMMAND_DURATION_MIN
 
         if not await self._call_service(service, data):
             return SetpointResult(
@@ -576,7 +588,7 @@ class HuaweiSolarDriver(BatteryDriver):
         echo = await self.read_telemetry(
             ["force_mode", "set_charge_power", "set_discharge_power", "battery_power"]
         )
-        expected_mode = _FORCIBLE_CHARGE if applied >= 0 else _FORCIBLE_DISCHARGE
+        expected_mode = self._echo(applied)["force_mode"]
         confirmed = echo.get("force_mode") == expected_mode
         battery_power = echo.get("battery_power")
         applied_echo = self._echo(applied)
@@ -627,8 +639,14 @@ class HuaweiSolarDriver(BatteryDriver):
         return abs(applied - self._last_written_w) >= _WRITE_DEADBAND_W
 
     def _echo(self, applied: int) -> dict:
+        if applied == 0:
+            mode = _FORCIBLE_STOP
+        elif applied > 0:
+            mode = _FORCIBLE_CHARGE
+        else:
+            mode = _FORCIBLE_DISCHARGE
         return {
-            "force_mode": _FORCIBLE_CHARGE if applied >= 0 else _FORCIBLE_DISCHARGE,
+            "force_mode": mode,
             "set_charge_power": applied if applied > 0 else 0,
             "set_discharge_power": -applied if applied < 0 else 0,
         }

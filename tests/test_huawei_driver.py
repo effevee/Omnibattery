@@ -275,17 +275,29 @@ async def test_discharge_sends_a_positive_magnitude():
 
 
 @pytest.mark.asyncio
-async def test_idle_is_a_held_zero_not_a_release():
-    """0 W must keep the inverter's own control out of the loop.
+async def test_idle_releases_the_battery_rather_than_pinning_it():
+    """Zero means "no work for you", which has to mean released, not held.
 
-    stop_forcible_charge would hand the battery back to self-consumption, which
-    is the opposite of idling it.
+    An earlier version pinned zero with a forcible charge at 0 W, to keep the
+    inverter's own self-consumption control out of the loop. On hardware that
+    backfired twice: a pinned battery cannot absorb its own PV, so the inverter
+    derated the strings; and the control layer's single idle on entering manual
+    mode left the battery frozen in standby with nothing to release it.
     """
     hass = _hass_with_services()
     await _driver(hass=hass).apply_setpoint(0, read_back=False)
     _domain, service, data = hass.services.async_call.await_args.args[:3]
-    assert service == "forcible_charge"
-    assert data["power"] == 0
+    assert service == "stop_forcible_charge"
+    # A stop carries no power or duration.
+    assert set(data) == {"device_id"}
+
+
+def test_zero_echoes_the_stopped_mode():
+    """net_power_from_data has to round-trip a release back to 0 W."""
+    driver = _driver()
+    echo = driver._echo(0)
+    assert echo["force_mode"] == 0
+    assert driver.net_power_from_data(echo) == 0
 
 
 @pytest.mark.asyncio
