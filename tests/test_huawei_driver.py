@@ -1024,3 +1024,48 @@ async def test_a_suppressed_reversal_reports_the_standing_command():
     assert result.net_power_w == 0
     assert result.applied["set_discharge_power"] == 0
     assert driver.net_power_from_data(result.applied) == 0
+
+
+# ----------------------------------------------------------------------
+# read-group shape
+#
+# The coordinator counts a group that returns nothing as a failed read, and a
+# cycle where every attempted group fails marks the whole battery unavailable.
+# A block holding one optional value therefore takes the device offline on
+# every poll of that block — which is exactly what a firmware string the
+# inverter leaves empty did on the reference hardware, every three seconds.
+# ----------------------------------------------------------------------
+def test_optional_values_never_sit_alone_in_a_group():
+    for group in _driver().read_groups:
+        assert len(group.keys) > 1, f"{group.keys} would fail as a whole when absent"
+
+
+def test_groups_are_one_per_cadence():
+    groups = _driver().read_groups
+    intervals = [g.scan_interval for g in groups]
+    assert len(intervals) == len(set(intervals))
+    assert set(intervals) == {"high", "medium", "low", "very_low"}
+
+
+def test_every_published_key_belongs_to_a_group():
+    driver = _driver()
+    scheduled = {key for group in driver.read_groups for key in group.keys}
+    for definition in driver.sensor_definitions:
+        # A key in no group is never requested, so its entity stays unknown.
+        assert definition["key"] in scheduled, definition["key"]
+
+
+@pytest.mark.asyncio
+async def test_a_missing_firmware_string_does_not_empty_its_group():
+    """Pack 1 answers with padding on the reference hardware.
+
+    The group has to keep returning its other values, or the coordinator reads
+    the empty result as a dead battery.
+    """
+    blocks = {**_LIVE_BLOCKS, 38210: [0] * 15}
+    driver = _driver(_fake_client(blocks))
+    very_low = next(g for g in driver.read_groups if g.scan_interval == "very_low")
+    data = await driver.read_telemetry(list(very_low.keys))
+    assert "pack1_firmware_version" not in data
+    assert data, "an empty snapshot marks the whole battery unavailable"
+    assert data["battery_total_energy"] == 13.8

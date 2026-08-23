@@ -339,12 +339,24 @@ class HuaweiSolarDriver(BatteryDriver):
             readback_latency_s=_ACTUATOR_LATENCY_S,
             engage_grace_s=_ACTUATOR_LATENCY_S,
         )
-        self._read_groups = [
-            ReadGroup(interval, tuple(keys) + tuple(
+        # One group per cadence, not per register block. The coordinator treats
+        # a group that returns nothing as a failed read, and a cycle in which
+        # every attempted group fails marks the whole battery unavailable. A
+        # block holding a single optional value — a firmware string a given
+        # inverter leaves empty, say — would therefore take the battery offline
+        # on every poll of that block. Grouping by cadence keeps such a value
+        # alongside others that do answer, so its absence stays what it is: one
+        # missing key, not a dead device.
+        grouped: dict[str, list[str]] = {}
+        for _start, _count, interval, keys in _BLOCKS:
+            bucket = grouped.setdefault(interval, [])
+            bucket.extend(keys)
+            bucket.extend(
                 derived for derived, sources in _DERIVED_FROM.items()
                 if sources[0] in keys
-            ))
-            for _start, _count, interval, keys in _BLOCKS
+            )
+        self._read_groups = [
+            ReadGroup(interval, tuple(keys)) for interval, keys in grouped.items()
         ]
 
     # --- identity -----------------------------------------------------------
