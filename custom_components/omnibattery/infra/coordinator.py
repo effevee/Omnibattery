@@ -123,6 +123,7 @@ class MarstekVenusDataUpdateCoordinator(DataUpdateCoordinator):
                  serial_port: str | None = None,
                  esphome_device_id: str | None = None,
                  huawei_battery_device_id: str | None = None,
+                 huawei_direct_write: bool = False,
                  username: str = "",
                  password: str = "",
                  battery_manual_mode_enabled: bool = False,
@@ -304,6 +305,7 @@ class MarstekVenusDataUpdateCoordinator(DataUpdateCoordinator):
                 port=self.port,
                 slave_id=self.slave_id,
                 battery_device_id=huawei_battery_device_id or "",
+                direct_write=huawei_direct_write,
                 max_charge_power_w=self.configured_max_charge_power,
                 max_discharge_power_w=self.configured_max_discharge_power,
             )

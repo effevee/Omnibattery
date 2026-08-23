@@ -1496,6 +1496,7 @@ class MarstekVenusConfigFlow(LegacyDomainMigrationMixin, ConfigFlow, domain=DOMA
                     CONF_SLAVE_ID: slave_id,
                     "brand": "huawei",
                     "huawei_battery_device_id": device_id,
+                    "huawei_direct_write": bool(user_input.get("huawei_direct_write", False)),
                     "huawei_model": model,
                 })
                 if max_charge:
@@ -1525,6 +1526,10 @@ class MarstekVenusConfigFlow(LegacyDomainMigrationMixin, ConfigFlow, domain=DOMA
                 ): DeviceSelector(
                     DeviceSelectorConfig(integration="huawei_solar", model="Batteries")
                 ),
+                vol.Optional(
+                    "huawei_direct_write",
+                    default=current_battery.get("huawei_direct_write", False),
+                ): bool,
             }),
             errors=errors,
             description_placeholders={"battery_num": str(battery_num)},
@@ -3584,6 +3589,7 @@ class OptionsFlowHandler(OptionsFlow):
                     CONF_SLAVE_ID: slave_id,
                     "brand": "huawei",
                     "huawei_battery_device_id": device_id,
+                    "huawei_direct_write": bool(user_input.get("huawei_direct_write", False)),
                     "huawei_model": model,
                 })
                 if max_charge:
@@ -3613,6 +3619,10 @@ class OptionsFlowHandler(OptionsFlow):
                 ): DeviceSelector(
                     DeviceSelectorConfig(integration="huawei_solar", model="Batteries")
                 ),
+                vol.Optional(
+                    "huawei_direct_write",
+                    default=current_battery.get("huawei_direct_write", False),
+                ): bool,
             }),
             errors=errors,
             description_placeholders={"battery_num": str(battery_num)},

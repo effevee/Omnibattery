@@ -68,6 +68,17 @@ _FORCIBLE_STOP = 0
 _FORCIBLE_CHARGE = 1
 _FORCIBLE_DISCHARGE = 2
 
+# Control registers for the direct-write path. The write order is not free: the
+# parameters go first and the mode register acts on the values already in place,
+# which is why each sequence below ends on 47100 — and why the release sequence
+# begins there instead.
+_REG_FORCED_PERIOD = 47083             # u16, minutes
+_REG_FORCIBLE_TARGET_MODE = 47246      # u16, 0 = by time
+_REG_FORCIBLE_CHARGE_POWER = 47247     # u32, W
+_REG_FORCIBLE_DISCHARGE_POWER = 47249  # u32, W
+_REG_FORCIBLE_MODE = 47100             # u16, see the constants above
+_TARGET_MODE_TIME = 0
+
 # Working mode (register 47086), StorageWorkingModesC.
 _WORKING_MODE_LABELS = {
     0: "Adaptive",
@@ -230,6 +241,12 @@ _BLOCKS = (
 
 _DECODERS = {"u16": decode_u16, "i16": decode_i16, "u32": decode_u32, "i32": decode_i32}
 
+
+def _u32(value: int) -> list[int]:
+    """Split an unsigned 32-bit value into two registers, high word first."""
+    value = max(0, int(value))
+    return [(value >> 16) & 0xFFFF, value & 0xFFFF]
+
 # Keys computed from other keys rather than read. They belong to no register
 # block, so both the poll scheduler and the key filter have to be told which
 # raw values they stand on — otherwise asking for them reads nothing.
@@ -303,12 +320,17 @@ class HuaweiSolarDriver(BatteryDriver):
         port: int = 502,
         slave_id: int = 1,
         battery_device_id: str = "",
+        direct_write: bool = False,
         max_charge_power_w: int = 5000,
         max_discharge_power_w: int = 5000,
         client: Optional[HuaweiModbusClient] = None,
     ) -> None:
         self.hass = hass
         self._battery_device_id = battery_device_id
+        # Write set-points as Modbus registers instead of huawei_solar service
+        # calls. Same four-register sequence either way; this path skips the HA
+        # service layer and that integration's communication lock.
+        self._direct_write = bool(direct_write)
         self._client = client if client is not None else HuaweiModbusClient(host, port, slave_id)
         self._shutting_down = False
         self._model: Optional[str] = None
@@ -575,6 +597,9 @@ class HuaweiSolarDriver(BatteryDriver):
                 applied=self._echo(held),
             )
 
+        if self._direct_write:
+            return await self._write_setpoint_registers(applied, read_back=read_back)
+
         if applied == 0:
             # Zero means "no work for you", and for a DC-coupled hybrid that has
             # to mean *released*, not *held*.
@@ -633,6 +658,76 @@ class HuaweiSolarDriver(BatteryDriver):
         if power_w == 0:
             return 0
         return 1 if power_w > 0 else -1
+
+    async def _write_setpoint_registers(self, applied: int, *, read_back: bool) -> SetpointResult:
+        """Write the forcible-charge sequence directly, without huawei_solar.
+
+        Mirrors that integration's own sequence — same registers, same order, same
+        FC16 block writes — so the inverter sees exactly what it would either way.
+        """
+        if applied == 0:
+            # Release, mirroring stop_forcible_charge: stop first, then tidy up.
+            writes = [
+                (_REG_FORCIBLE_MODE, [_FORCIBLE_STOP]),
+                (_REG_FORCIBLE_DISCHARGE_POWER, _u32(0)),
+                (_REG_FORCED_PERIOD, [0]),
+                (_REG_FORCIBLE_TARGET_MODE, [_TARGET_MODE_TIME]),
+            ]
+        else:
+            limit = (
+                self._capabilities.max_charge_power_w if applied > 0
+                else self._capabilities.max_discharge_power_w
+            )
+            magnitude = min(abs(applied), limit)
+            if magnitude != abs(applied):
+                # huawei_solar validates against the register maximum and refuses
+                # an over-range power outright. Clamping keeps the control cycle
+                # alive instead, but the discrepancy is worth a line.
+                _LOGGER.debug(
+                    "Huawei driver: clamped %dW to the %dW register maximum",
+                    abs(applied), limit,
+                )
+            writes = [
+                (
+                    _REG_FORCIBLE_CHARGE_POWER if applied > 0
+                    else _REG_FORCIBLE_DISCHARGE_POWER,
+                    _u32(magnitude),
+                ),
+                (_REG_FORCED_PERIOD, [_COMMAND_DURATION_MIN]),
+                (_REG_FORCIBLE_TARGET_MODE, [_TARGET_MODE_TIME]),
+                (
+                    _REG_FORCIBLE_MODE,
+                    [_FORCIBLE_CHARGE if applied > 0 else _FORCIBLE_DISCHARGE],
+                ),
+            ]
+
+        for address, values in writes:
+            if not await self._client.async_write_registers(address, values):
+                # The mode register is written last, so a sequence that fails
+                # earlier leaves the inverter doing what it did before rather
+                # than acting on half-written parameters.
+                return SetpointResult(
+                    ok=False, net_power_w=applied, confirmed=False,
+                    failure_reason="register_write_failed",
+                )
+
+        self._last_written_w = applied
+        self._last_write_monotonic = asyncio.get_running_loop().time()
+        echo = self._echo(applied)
+        if not read_back:
+            return SetpointResult(ok=True, net_power_w=applied, confirmed=False, applied=echo)
+
+        readback = await self.read_telemetry(
+            ["force_mode", "set_charge_power", "set_discharge_power", "battery_power"]
+        )
+        confirmed = readback.get("force_mode") == echo["force_mode"]
+        battery_power = readback.get("battery_power")
+        echo.update(readback)
+        return SetpointResult(
+            ok=True, net_power_w=applied, confirmed=confirmed, exact=False,
+            battery_power_w=int(battery_power) if battery_power is not None else None,
+            applied=echo,
+        )
 
     def _should_write(self, applied: int) -> bool:
         """Whether this set-point is worth four Modbus writes and a 10 s ramp."""

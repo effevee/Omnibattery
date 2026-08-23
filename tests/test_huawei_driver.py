@@ -1116,3 +1116,106 @@ def test_ac_convention_maths_for_the_reference_case():
     assert contribution == -8000
     # home = grid + contribution + solar, with export counted negative.
     assert -167 + contribution + 8870 == 703
+
+
+# ----------------------------------------------------------------------
+# direct register writes
+#
+# Same four-register sequence huawei_solar performs, written straight to the
+# inverter. The order matters: the mode register acts on the values already in
+# place, so it is written last — and first when releasing.
+# ----------------------------------------------------------------------
+def _direct(hass=None, **kw):
+    client = _fake_client()
+    client.async_write_registers = AsyncMock(return_value=True)
+    driver = _driver(client, hass=hass or _hass_with_services(), direct_write=True, **kw)
+    return driver, client
+
+
+def _written(client):
+    return [(c.args[0], list(c.args[1])) for c in client.async_write_registers.await_args_list]
+
+
+@pytest.mark.asyncio
+async def test_charge_writes_the_parameters_before_the_mode():
+    driver, client = _direct()
+    result = await driver.apply_setpoint(1500, read_back=False)
+    assert result.ok is True
+    assert _written(client) == [
+        (47247, [0, 1500]),   # charge power, u32 high word first
+        (47083, [10]),        # duration in minutes
+        (47246, [0]),         # target mode: by time
+        (47100, [1]),         # mode: charge — triggers on the values above
+    ]
+
+
+@pytest.mark.asyncio
+async def test_discharge_uses_its_own_power_register():
+    driver, client = _direct()
+    await driver.apply_setpoint(-900, read_back=False)
+    assert _written(client) == [
+        (47249, [0, 900]),
+        (47083, [10]),
+        (47246, [0]),
+        (47100, [2]),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_release_stops_before_it_tidies_up():
+    driver, client = _direct()
+    await driver.apply_setpoint(0, read_back=False)
+    written = _written(client)
+    # Stop first: clearing the parameters while a command still runs would act
+    # on the cleared values.
+    assert written[0] == (47100, [0])
+    assert written[1:] == [(47249, [0, 0]), (47083, [0]), (47246, [0])]
+
+
+@pytest.mark.asyncio
+async def test_a_large_value_is_clamped_to_the_register_maximum():
+    """huawei_solar refuses an over-range power; clamping keeps the loop alive."""
+    driver, client = _direct(max_charge_power_w=7000)
+    await driver.apply_setpoint(99000, read_back=False)
+    assert _written(client)[0] == (47247, [0, 7000])
+
+
+@pytest.mark.asyncio
+async def test_a_failed_write_never_reaches_the_mode_register():
+    """A half-written sequence must leave the inverter doing what it did."""
+    driver, client = _direct()
+    client.async_write_registers = AsyncMock(side_effect=[True, False])
+    result = await driver.apply_setpoint(1500, read_back=False)
+    assert result.ok is False
+    assert result.failure_reason == "register_write_failed"
+    assert 47100 not in [addr for addr, _ in _written(client)]
+
+
+@pytest.mark.asyncio
+async def test_direct_mode_calls_no_services_at_all():
+    """The point of the option: no dependency on huawei_solar for control."""
+    hass = _hass_with_services()
+    driver, _client = _direct(hass=hass)
+    await driver.apply_setpoint(1500, read_back=False)
+    await driver.apply_setpoint(0, read_back=False)
+    hass.services.async_call.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_the_throttle_still_applies_in_direct_mode():
+    driver, client = _direct()
+    await driver.apply_setpoint(1500, read_back=False)
+    client.async_write_registers.reset_mock()
+    result = await driver.apply_setpoint(1550, read_back=False)
+    client.async_write_registers.assert_not_awaited()
+    assert result.net_power_w == 1500
+
+
+def test_u32_splits_high_word_first():
+    from custom_components.omnibattery.drivers.huawei import _u32
+
+    assert _u32(0) == [0, 0]
+    assert _u32(1500) == [0, 1500]
+    assert _u32(70000) == [1, 4464]
+    # Negative power never reaches a magnitude register.
+    assert _u32(-5) == [0, 0]

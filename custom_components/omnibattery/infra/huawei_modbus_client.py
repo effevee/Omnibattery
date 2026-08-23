@@ -1,8 +1,8 @@
 """Async Modbus TCP client for Huawei SUN2000 inverters.
 
-Read-only transport. Huawei exposes everything Omnibattery needs through FC03
-holding registers; set-points are not written here (see ``drivers/huawei.py``
-for why control goes through the ``huawei_solar`` integration instead).
+Huawei exposes everything Omnibattery needs through FC03 holding registers, and
+accepts set-points through FC16 — the same function code the reference
+integration uses for every write, single registers included.
 
 Two Huawei-specific traits this client exists for:
 
@@ -182,6 +182,56 @@ class HuaweiModbusClient:
                 )
             return None
         return list(regs[:count])
+
+
+    async def async_write_registers(self, start: int, values: list[int]) -> bool:
+        """FC16: write ``values`` to consecutive holding registers from ``start``.
+
+        One function code covers every write this driver makes, because the
+        reference integration writes even single registers as a block and the
+        inverter is known to accept that shape.
+        """
+        if not (0 <= start <= 0xFFFF) or not (1 <= len(values) <= 123):
+            _LOGGER.error(
+                "Invalid Huawei Modbus write start=%s count=%s", start, len(values)
+            )
+            return False
+        if self._client is None or not self.connected:
+            return False
+
+        kwargs = {self._slave_kwarg: self.unit_id}
+        async with self._lock:
+            try:
+                try:
+                    result = await asyncio.wait_for(
+                        self._client.write_registers(
+                            address=start, values=list(values), **kwargs
+                        ),
+                        timeout=self._timeout,
+                    )
+                finally:
+                    if not self._is_shutting_down:
+                        await asyncio.sleep(_MESSAGE_WAIT_S)
+            except (ConnectionException, ModbusIOException, asyncio.TimeoutError) as err:
+                if not self._is_shutting_down:
+                    _LOGGER.warning(
+                        "Huawei Modbus write to %d failed: %s", start, err
+                    )
+                return False
+            except Exception as err:
+                if not self._is_shutting_down:
+                    _LOGGER.exception(
+                        "Huawei Modbus exception writing %d: %s", start, err
+                    )
+                return False
+
+        if result.isError():
+            if not self._is_shutting_down:
+                _LOGGER.warning(
+                    "Huawei Modbus write rejected at %d (values=%s)", start, values
+                )
+            return False
+        return True
 
 
 async def _close_quietly(client) -> None:
