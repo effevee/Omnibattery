@@ -27,7 +27,9 @@ de hora actual, una carga solar prevista permanece amarilla hasta que se observa
 energía entrando en la batería. Una celda puede contener hasta tres acciones; los
 patrones diagonales y el texto accesible mantienen la diferencia con cualquier
 tema. «Carga hasta el setpoint» es contexto, no otro color. El Retraso de
-Carga usa un reloj y una hora estimada de desbloqueo.
+Carga usa un reloj y una hora estimada de desbloqueo. El tooltip de una franja
+de carga muestra también la energía que ha entrado realmente en la batería o,
+para una franja futura, la energía total proyectada desde solar y red.
 
 ## Contrato de la entidad
 

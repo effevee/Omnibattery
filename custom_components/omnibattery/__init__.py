@@ -1110,6 +1110,8 @@ class ChargeDischargeController:
             or getattr(self, "_realtime_price_charging", False)
         )
         total_power = 0.0
+        charge_power = 0.0
+        discharge_power = 0.0
         measured = False
         positive_batteries = 0
         negative_batteries = 0
@@ -1167,6 +1169,7 @@ class ChargeDischargeController:
             measured = True
             total_power += cell_power
             if cell_power > 10.0:
+                charge_power += cell_power
                 positive_batteries += 1
                 if direct_pv_w > 10.0 or not grid_active:
                     action_mask |= ACTION_SOLAR_CHARGE
@@ -1178,6 +1181,7 @@ class ChargeDischargeController:
                 ):
                     action_mask |= ACTION_GRID_CHARGE
             elif cell_power < -10.0:
+                discharge_power += -cell_power
                 negative_batteries += 1
                 action_mask |= ACTION_DISCHARGE
 
@@ -1187,10 +1191,12 @@ class ChargeDischargeController:
             )
             measured = abs(total_power) > 10.0
             if total_power > 10.0:
+                charge_power = total_power
                 action_mask |= (
                     ACTION_GRID_CHARGE if grid_active else ACTION_SOLAR_CHARGE
                 )
             elif total_power < -10.0:
+                discharge_power = -total_power
                 action_mask |= ACTION_DISCHARGE
 
         charge_delay_enabled = bool(getattr(self, "charge_delay_enabled", False))
@@ -1255,8 +1261,8 @@ class ChargeDischargeController:
             "action_mask": action_mask,
             "context_mask": context_mask,
             "grid_charge_decision": grid_decision,
-            "charge_power_w": max(0.0, total_power),
-            "discharge_power_w": max(0.0, -total_power),
+            "charge_power_w": charge_power,
+            "discharge_power_w": discharge_power,
             "delay_active": delay_active,
             "setpoint_active": setpoint_active,
             "delay_until": status.get("estimated_unlock_time"),

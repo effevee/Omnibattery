@@ -51,7 +51,7 @@ const I18N = {
     dailyOperationTitle: "Daily operation", dailyOperationDescription: "Observed and projected energy · 15 min",
     dailyOperationReal: "Real", dailyOperationCurrent: "Current", dailyOperationForecast: "Forecast",
     dailyOperationStale: "Data may be outdated", dailyOperationNoData: "No daily operation data",
-    dailyOperationSolarWindow: "Solar window", dailyOperationSolarCharge: "Solar charge", dailyOperationGridCharge: "Grid charge", dailyOperationDischarge: "Battery discharge",
+    dailyOperationSolarWindow: "Solar window", dailyOperationSolarCharge: "Solar charge", dailyOperationGridCharge: "Grid charge", dailyOperationDischarge: "Battery discharge", dailyOperationEnergyToBattery: "Energy to battery",
     dailyOperationNotNeeded: "Grid charge not needed", dailyOperationNoAction: "No action", dailyOperationSetpoint: "Until setpoint",
     dailyOperationDelay: "Charge delayed", dailyOperationUnlock: "Estimated unlock: {time}", dailyOperationAxis: "kWh/15 min",
     dailyOperationSolar: "Solar", dailyOperationConsumption: "Consumption", dailyOperationLearned: "Learned profile",
@@ -135,7 +135,7 @@ const I18N = {
     dailyOperationTitle: "Operación diaria", dailyOperationDescription: "Energía real y prevista · 15 min",
     dailyOperationReal: "Real", dailyOperationCurrent: "Actual", dailyOperationForecast: "Previsto",
     dailyOperationStale: "Datos posiblemente obsoletos", dailyOperationNoData: "Sin datos de operación diaria",
-    dailyOperationSolarWindow: "Ventana solar", dailyOperationSolarCharge: "Carga solar", dailyOperationGridCharge: "Carga de red", dailyOperationDischarge: "Descarga de batería",
+    dailyOperationSolarWindow: "Ventana solar", dailyOperationSolarCharge: "Carga solar", dailyOperationGridCharge: "Carga de red", dailyOperationDischarge: "Descarga de batería", dailyOperationEnergyToBattery: "Energía a batería",
     dailyOperationNotNeeded: "Carga de red no necesaria", dailyOperationNoAction: "Sin acción", dailyOperationSetpoint: "Hasta el setpoint",
     dailyOperationDelay: "Carga retrasada", dailyOperationUnlock: "Desbloqueo estimado: {time}", dailyOperationAxis: "kWh/15 min",
     dailyOperationSolar: "Solar", dailyOperationConsumption: "Consumo", dailyOperationLearned: "Perfil aprendido",
@@ -219,7 +219,7 @@ const I18N = {
     dailyOperationTitle: "Operació diària", dailyOperationDescription: "Energia observada i prevista · 15 min",
     dailyOperationReal: "Real", dailyOperationCurrent: "Actual", dailyOperationForecast: "Previst",
     dailyOperationStale: "Dades possiblement obsoletes", dailyOperationNoData: "Sense dades d'operació diària",
-    dailyOperationSolarWindow: "Finestra solar", dailyOperationSolarCharge: "Càrrega solar", dailyOperationGridCharge: "Càrrega de xarxa", dailyOperationDischarge: "Descàrrega de bateria",
+    dailyOperationSolarWindow: "Finestra solar", dailyOperationSolarCharge: "Càrrega solar", dailyOperationGridCharge: "Càrrega de xarxa", dailyOperationDischarge: "Descàrrega de bateria", dailyOperationEnergyToBattery: "Energia a la bateria",
     dailyOperationNotNeeded: "Càrrega de xarxa no necessària", dailyOperationNoAction: "Sense acció", dailyOperationSetpoint: "Fins al setpoint",
     dailyOperationDelay: "Càrrega retardada", dailyOperationUnlock: "Desbloqueig estimat: {time}", dailyOperationAxis: "kWh/15 min",
     dailyOperationSolar: "Solar", dailyOperationConsumption: "Consum", dailyOperationLearned: "Perfil après",
@@ -299,7 +299,7 @@ const I18N = {
     dailyOperationTitle: "Tagesbetrieb", dailyOperationDescription: "Beobachtete und prognostizierte Energie · 15 Min.",
     dailyOperationReal: "Ist", dailyOperationCurrent: "Aktuell", dailyOperationForecast: "Prognose",
     dailyOperationStale: "Daten möglicherweise veraltet", dailyOperationNoData: "Keine Tagesbetriebsdaten",
-    dailyOperationSolarWindow: "Solarfenster", dailyOperationSolarCharge: "Solarladung", dailyOperationGridCharge: "Netzladung", dailyOperationDischarge: "Batterieentladung",
+    dailyOperationSolarWindow: "Solarfenster", dailyOperationSolarCharge: "Solarladung", dailyOperationGridCharge: "Netzladung", dailyOperationDischarge: "Batterieentladung", dailyOperationEnergyToBattery: "Energie zur Batterie",
     dailyOperationNotNeeded: "Keine Netzladung erforderlich", dailyOperationNoAction: "Keine Aktion", dailyOperationSetpoint: "Bis zum Sollwert",
     dailyOperationDelay: "Laden verzögert", dailyOperationUnlock: "Voraussichtliche Freigabe: {time}", dailyOperationAxis: "kWh/15 Min.",
     dailyOperationSolar: "Solar", dailyOperationConsumption: "Verbrauch", dailyOperationLearned: "Gelerntes Profil",
@@ -379,7 +379,7 @@ const I18N = {
     dailyOperationTitle: "Opération quotidienne", dailyOperationDescription: "Énergie observée et prévue · 15 min",
     dailyOperationReal: "Réel", dailyOperationCurrent: "Actuel", dailyOperationForecast: "Prévision",
     dailyOperationStale: "Données potentiellement obsolètes", dailyOperationNoData: "Aucune donnée d'opération quotidienne",
-    dailyOperationSolarWindow: "Fenêtre solaire", dailyOperationSolarCharge: "Charge solaire", dailyOperationGridCharge: "Charge réseau", dailyOperationDischarge: "Décharge batterie",
+    dailyOperationSolarWindow: "Fenêtre solaire", dailyOperationSolarCharge: "Charge solaire", dailyOperationGridCharge: "Charge réseau", dailyOperationDischarge: "Décharge batterie", dailyOperationEnergyToBattery: "Énergie vers la batterie",
     dailyOperationNotNeeded: "Charge réseau non nécessaire", dailyOperationNoAction: "Aucune action", dailyOperationSetpoint: "Jusqu'au point de consigne",
     dailyOperationDelay: "Charge retardée", dailyOperationUnlock: "Déblocage estimé : {time}", dailyOperationAxis: "kWh/15 min",
     dailyOperationSolar: "Solaire", dailyOperationConsumption: "Consommation", dailyOperationLearned: "Profil appris",
@@ -459,7 +459,7 @@ const I18N = {
     dailyOperationTitle: "Dagelijkse werking", dailyOperationDescription: "Geobserveerde en verwachte energie · 15 min",
     dailyOperationReal: "Werkelijk", dailyOperationCurrent: "Huidig", dailyOperationForecast: "Verwachting",
     dailyOperationStale: "Gegevens zijn mogelijk verouderd", dailyOperationNoData: "Geen gegevens voor dagelijkse werking",
-    dailyOperationSolarWindow: "Zonnevenster", dailyOperationSolarCharge: "Laden met zonne-energie", dailyOperationGridCharge: "Laden vanaf net", dailyOperationDischarge: "Batterij ontladen",
+    dailyOperationSolarWindow: "Zonnevenster", dailyOperationSolarCharge: "Laden met zonne-energie", dailyOperationGridCharge: "Laden vanaf net", dailyOperationDischarge: "Batterij ontladen", dailyOperationEnergyToBattery: "Energie naar batterij",
     dailyOperationNotNeeded: "Laden vanaf net niet nodig", dailyOperationNoAction: "Geen actie", dailyOperationSetpoint: "Tot setpoint",
     dailyOperationDelay: "Laden vertraagd", dailyOperationUnlock: "Geschatte vrijgave: {time}", dailyOperationAxis: "kWh/15 min",
     dailyOperationSolar: "Zon", dailyOperationConsumption: "Verbruik", dailyOperationLearned: "Geleerd profiel",
@@ -2371,6 +2371,7 @@ class MarstekVenusPanel extends HTMLElement {
       consumptionCoverage: pickSeries(["consumption_actual_coverage_s", "actual_coverage_s", "coverage_s"]),
       solarToBattery: pickOperation(["solar_to_battery_kwh"]),
       gridToBattery: pickOperation(["grid_to_battery_kwh"]),
+      chargeToBattery: pickOperation(["charge_to_battery_kwh"]),
       batteryToHome: pickOperation(["battery_to_home_kwh"]),
       storedEnergyEnd: pickOperation(["stored_energy_end_kwh"]),
       socEnd: pickOperation(["soc_end_pct", "stored_soc_end_pct"]),
@@ -2512,6 +2513,7 @@ class MarstekVenusPanel extends HTMLElement {
       dischargePower: this._dailyOperationValueAt(snapshot.dischargePower, index),
       solarToBattery: this._dailyOperationValueAt(snapshot.solarToBattery, index),
       gridToBattery: this._dailyOperationValueAt(snapshot.gridToBattery, index),
+      chargeToBattery: this._dailyOperationValueAt(snapshot.chargeToBattery, index),
       batteryToHome: this._dailyOperationValueAt(snapshot.batteryToHome, index),
       storedEnergyEnd: this._dailyOperationValueAt(snapshot.storedEnergyEnd, index),
       socEnd: this._dailyOperationValueAt(snapshot.socEnd, index),
@@ -2558,6 +2560,9 @@ class MarstekVenusPanel extends HTMLElement {
     if (item.dischargePower != null) parts.push(`${this._t("dailyOperationDischarge")}: ${this._dailyOperationFormatPower(item.dischargePower)}`);
     if (item.solarToBattery != null) parts.push(`${this._t("dailyOperationSolarCharge")}: ${this._dailyOperationFormatKwh(item.solarToBattery)}`);
     if (item.gridToBattery != null) parts.push(`${this._t("dailyOperationGridCharge")}: ${this._dailyOperationFormatKwh(item.gridToBattery)}`);
+    if (item.chargeToBattery != null && item.actions.some((action) => action === "solar" || action === "grid")) {
+      parts.push(`${this._t("dailyOperationEnergyToBattery")}: ${this._dailyOperationFormatKwh(item.chargeToBattery)}`);
+    }
     if (item.batteryToHome != null) parts.push(`${this._t("dailyOperationDischarge")}: ${this._dailyOperationFormatKwh(item.batteryToHome)}`);
     for (const action of item.actions) {
       if (item.actionSeconds[action] != null) parts.push(`${this._t("dailyOperationObserved")} · ${this._dailyOperationActionLabel(action === "solar" ? 1 : action === "grid" ? 2 : 4)}: ${Math.round(item.actionSeconds[action])} s`);
@@ -2594,6 +2599,9 @@ class MarstekVenusPanel extends HTMLElement {
       : item.solarWindow ? this._t("dailyOperationSolarWindow")
         : item.decision === "not_needed" ? this._t("dailyOperationNotNeeded") : this._t("dailyOperationNoAction");
     rows.push(row(useForecast ? this._t("dailyOperationPlan") : this._t("dailyOperationObserved"), actionLabels));
+    if (item.chargeToBattery != null && item.actions.some((action) => action === "solar" || action === "grid")) {
+      rows.push(row(this._t("dailyOperationEnergyToBattery"), this._dailyOperationFormatKwh(item.chargeToBattery)));
+    }
     if (item.setpoint) rows.push(row(this._t("dailyOperationMode"), this._t("dailyOperationSetpoint")));
     if (item.delay) rows.push(row(this._t("dailyOperationDelay"), item.delayUntil ? this._t("dailyOperationUnlock", { time: item.delayUntil }) : this._t("dailyOperationDelay")));
     if (item.repeated) rows.push(row(this._t("dailyOperationDSTRepeated"), this._t("dailyOperationDSTRepeated")));
