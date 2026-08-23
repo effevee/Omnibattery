@@ -12,6 +12,7 @@
 - **Predictive demand protection could ignore a sustained overload when consecutive grid readings stayed numerically unchanged**: fresh meter publications now advance the three-sample hard-limit confirmation independently from incremental P/D updates, while timer-only watchdog passes break the confirmation streak and unchanged normal readings still avoid duplicate control calculations.
 - **Zendure SolarFlow Mix discharge power could remain capped at 2400 W**: the user-facing `inverse_max_power` control and its reported device value now synchronize and persist the canonical discharge limit. Existing 4000 Mix AC+ and Mix Pro installations whose hardware already reports 4000 W recover automatically after startup, while new control changes still take effect immediately.
 - **Combined system power caps could assume a fixed 2500 W per battery**: charge and discharge cap sliders now derive their maxima dynamically from the sum of the configured effective battery limits in each direction, so higher-power batteries are no longer artificially capped.
+- **Active Cell Balance could miss Cell Delta when the BMS cut below 3.60 V**: a confirmed charge rejection in the upper cell-voltage window now enters the same 60-second settled measurement used at the configured stop voltage before continuing with adaptive discharge. Rejections below that window remain retry diagnostics and do not contaminate the formal balance history.
 
 ## [1.4.0b4] - 2026-08-21
 
