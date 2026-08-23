@@ -1,7 +1,14 @@
 """Sensor platform for the Omnibattery integration."""
 from __future__ import annotations
 
+import inspect
 import logging
+import math
+import time
+from collections.abc import Mapping
+from datetime import date, datetime
+from enum import Enum
+from typing import Any
 
 from homeassistant.components.sensor import (
     SensorEntity,
@@ -122,6 +129,12 @@ async def async_setup_entry(
     # _select_batteries_for_operation), so this reflects charging/discharging/idle
     # instead of staying unavailable.
     controller = hass.data[DOMAIN][entry.entry_id].get("controller")
+    # The timeline is deliberately registered whenever the controller exists.
+    # Its manager is optional during startup and the entity reads it lazily, so
+    # adding this sensor cannot make older controllers fail setup.
+    if controller is not None:
+        entities.append(DailyOperationTimelineSensor(controller))
+
     if controller:
         entities.append(ActiveBatteriesSensor(hass, entry, controller, coordinators))
 
@@ -1074,6 +1087,834 @@ class NonResponsiveBatteriesSensor(SensorEntity):
     @property
     def device_info(self):
         """Return device information for the system."""
+        return {
+            "identifiers": {(DOMAIN, "marstek_venus_system")},
+            "name": "Omnibattery System",
+            "manufacturer": "Omnibattery",
+            "model": "Multi-Battery System",
+        }
+
+
+_DAILY_OPERATION_INTERVAL_COUNT = 96
+_DAILY_OPERATION_INTERVAL_MINUTES = 15
+_DAILY_OPERATION_EVENT_THROTTLE_S = 5.0
+_TIMELINE_MISSING = object()
+
+
+def _timeline_read(source: object, name: str, default: object = None) -> object:
+    """Read a timeline field from either a mapping or a duck-typed object."""
+    if source is None:
+        return default
+    if isinstance(source, Mapping):
+        return source.get(name, default)
+    try:
+        return getattr(source, name)
+    except Exception:  # noqa: BLE001 - optional manager fields must be best-effort
+        return default
+
+
+def _daily_operation_timeline_source(controller: object) -> object | None:
+    """Return the public or legacy timeline manager without requiring either."""
+    for name in ("daily_operation_timeline", "_daily_operation_timeline"):
+        source = _timeline_read(controller, name, _TIMELINE_MISSING)
+        if source is not _TIMELINE_MISSING and source is not None:
+            return source
+    return None
+
+
+def _daily_operation_timeline_snapshot(controller: object) -> object | None:
+    """Return a synchronous snapshot from an optional timeline manager.
+
+    The manager is intentionally not part of this adapter's hard dependency
+    surface. During startup it can be absent, and older controllers may expose
+    a mapping or a dataclass directly instead of a ``snapshot()`` method.
+    """
+    source = _daily_operation_timeline_source(controller)
+    if source is None:
+        return None
+
+    if isinstance(source, Mapping):
+        nested = source.get("snapshot", _TIMELINE_MISSING)
+        if (
+            isinstance(nested, Mapping)
+            and not any(
+                key in source
+                for key in ("schema_version", "local_date", "series", "operations")
+            )
+        ):
+            return nested
+        return source
+
+    for name in (
+        "snapshot",
+        "get_snapshot",
+        "current_snapshot",
+        "as_snapshot",
+        "to_dict",
+        "build_public_snapshot",
+        "build_public_dto",
+        "public_snapshot",
+    ):
+        candidate = _timeline_read(source, name, _TIMELINE_MISSING)
+        if candidate is _TIMELINE_MISSING or candidate is None:
+            continue
+        if callable(candidate):
+            try:
+                candidate = candidate()
+            except Exception:
+                _LOGGER.debug("Optional timeline snapshot provider failed", exc_info=True)
+                continue
+        if inspect.isawaitable(candidate):
+            # Entity properties are synchronous. Do not leak an un-awaited
+            # coroutine if an implementation accidentally exposes async data.
+            close = getattr(candidate, "close", None)
+            if callable(close):
+                close()
+            continue
+        if candidate is not None:
+            return candidate
+
+    data = _timeline_read(source, "data", _TIMELINE_MISSING)
+    if isinstance(data, Mapping):
+        return data
+    return source
+
+
+def _timeline_find(
+    snapshot: object,
+    names: tuple[str, ...],
+    *sections: object,
+) -> object:
+    """Find a field in nested sections first and the snapshot second."""
+    for section in (*sections, snapshot):
+        if section is None:
+            continue
+        for name in names:
+            value = _timeline_read(section, name, _TIMELINE_MISSING)
+            if value is not _TIMELINE_MISSING and value is not None:
+                return value
+    return None
+
+
+def _timeline_scalar(value: object, max_length: int = 160) -> object:
+    """Return a bounded scalar that Home Assistant can serialise as JSON."""
+    if value is None:
+        return None
+    if isinstance(value, Enum):
+        value = value.value
+    if isinstance(value, (datetime, date)):
+        return value.isoformat()
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
+    if isinstance(value, str):
+        return value[:max_length]
+    isoformat = getattr(value, "isoformat", None)
+    if callable(isoformat):
+        try:
+            return str(isoformat())[:max_length]
+        except (AttributeError, TypeError, ValueError):
+            pass
+    return str(value)[:max_length]
+
+
+def _timeline_number(value: object, digits: int = 6) -> float | None:
+    """Return a finite rounded number, never NaN or infinity."""
+    if isinstance(value, bool):
+        return float(value)
+    if isinstance(value, Enum):
+        value = value.value
+    try:
+        number = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if not math.isfinite(number):
+        return None
+    return round(number, digits)
+
+
+def _timeline_bool(value: object, default: bool | None = None) -> bool | None:
+    """Read common boolean representations without exposing arbitrary values."""
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)) and math.isfinite(float(value)):
+        return bool(value)
+    if isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered in {"true", "yes", "on", "1", "fresh", "restored"}:
+            return True
+        if lowered in {"false", "no", "off", "0", "stale", "failed"}:
+            return False
+    return default
+
+
+def _timeline_date_string(value: object) -> str | None:
+    """Normalise a snapshot date to an ISO local-date string."""
+    if isinstance(value, datetime):
+        return value.date().isoformat()
+    if isinstance(value, date):
+        return value.isoformat()
+    if isinstance(value, str):
+        candidate = value.strip()
+        try:
+            return date.fromisoformat(candidate[:10]).isoformat()
+        except ValueError:
+            return candidate[:32] or None
+    return None
+
+
+def _timeline_array(
+    value: object,
+    converter,
+    default: object,
+) -> list[object]:
+    """Convert an optional interval iterable to exactly 96 safe values."""
+    result: list[object] = []
+    if value is not None and not isinstance(value, (str, bytes, Mapping)):
+        try:
+            iterator = iter(value)
+        except TypeError:
+            iterator = iter(())
+        for item in iterator:
+            if len(result) >= _DAILY_OPERATION_INTERVAL_COUNT:
+                break
+            try:
+                result.append(converter(item))
+            except (AttributeError, TypeError, ValueError, OverflowError):
+                result.append(default)
+    result.extend([default] * (_DAILY_OPERATION_INTERVAL_COUNT - len(result)))
+    return result
+
+
+def _timeline_energy(value: object) -> float | None:
+    return _timeline_number(value)
+
+
+def _timeline_mask(value: object) -> int:
+    number = _timeline_number(value, 0)
+    return max(0, int(number)) if number is not None else 0
+
+
+def _timeline_power(value: object) -> float:
+    number = _timeline_number(value)
+    return number if number is not None else 0.0
+
+
+def _timeline_text(value: object) -> str | None:
+    safe = _timeline_scalar(value, 64)
+    return None if safe is None else str(safe)
+
+
+def _timeline_small_mapping(value: object, max_items: int = 16) -> dict[str, object]:
+    """Copy only a small scalar mapping; never copy a manager/store object."""
+    if not isinstance(value, Mapping):
+        return {}
+    result: dict[str, object] = {}
+    for index, (key, item) in enumerate(value.items()):
+        if index >= max_items:
+            break
+        safe_key = str(key)[:64]
+        if isinstance(item, (list, tuple, set, Mapping)):
+            continue
+        safe_value = _timeline_scalar(item, 128)
+        if safe_value is not None:
+            result[safe_key] = safe_value
+    return result
+
+
+def _timeline_duration_series(value: object) -> list[dict[str, float]]:
+    """Copy per-interval action durations into a bounded 96-cell series."""
+    result: list[dict[str, float]] = []
+
+    def safe_mapping(raw: object) -> dict[str, float]:
+        if not isinstance(raw, Mapping):
+            return {}
+        copied: dict[str, float] = {}
+        for index, (key, item) in enumerate(raw.items()):
+            if index >= 8:
+                break
+            seconds = _timeline_number(item, 3)
+            if seconds is not None and seconds >= 0.0:
+                copied[str(key)[:32]] = seconds
+        return copied
+
+    if isinstance(value, Mapping):
+        # Accept both {action: [seconds × 96]} and {index: {action: seconds}}.
+        list_values = {
+            str(key): item
+            for key, item in value.items()
+            if isinstance(item, (list, tuple))
+        }
+        if list_values:
+            result = [dict() for _ in range(_DAILY_OPERATION_INTERVAL_COUNT)]
+            for key, values in list_values.items():
+                for index, item in enumerate(values[:_DAILY_OPERATION_INTERVAL_COUNT]):
+                    seconds = _timeline_number(item, 3)
+                    if seconds is not None and seconds >= 0.0:
+                        result[index][key[:32]] = seconds
+        else:
+            result = [
+                safe_mapping(value.get(index, value.get(str(index))))
+                for index in range(_DAILY_OPERATION_INTERVAL_COUNT)
+            ]
+    elif isinstance(value, (list, tuple)):
+        result = [safe_mapping(item) for item in value[:_DAILY_OPERATION_INTERVAL_COUNT]]
+
+    result.extend({} for _ in range(_DAILY_OPERATION_INTERVAL_COUNT - len(result)))
+    return result[:_DAILY_OPERATION_INTERVAL_COUNT]
+
+
+def _timeline_sources(snapshot: object, metadata: object) -> dict[str, object]:
+    """Return the bounded source and maturity metadata used by the panel."""
+    source_section = _timeline_find(snapshot, ("sources", "source"))
+    fields = {
+        "solar_actual": (
+            "solar_actual",
+            "solar_actual_source",
+            "solar_source",
+        ),
+        "solar_forecast": (
+            "solar_forecast",
+            "solar_forecast_source",
+            "solar_timeline_source",
+        ),
+        "solar_fallback_reason": (
+            "solar_fallback_reason",
+            "solar_forecast_fallback_reason",
+        ),
+        "consumption_actual": (
+            "consumption_actual",
+            "consumption_actual_source",
+        ),
+        "consumption_forecast": (
+            "consumption_forecast",
+            "consumption_forecast_source",
+            "consumption_profile_source",
+        ),
+        "consumption_fallback_reason": (
+            "consumption_fallback_reason",
+            "consumption_forecast_fallback_reason",
+        ),
+        "operation_plan": (
+            "operation_plan",
+            "operation_plan_source",
+            "plan_source",
+        ),
+        "solar_forecast_mature": (
+            "solar_forecast_mature",
+            "solar_mature",
+            "solar_profile_mature",
+        ),
+        "consumption_forecast_mature": (
+            "consumption_forecast_mature",
+            "consumption_mature",
+            "consumption_profile_mature",
+        ),
+        "solar_forecast_coverage": ("solar_forecast_coverage", "solar_coverage"),
+        "consumption_forecast_coverage": (
+            "consumption_forecast_coverage",
+            "consumption_coverage",
+        ),
+    }
+    result: dict[str, object] = {}
+    for field, aliases in fields.items():
+        value = _timeline_find(snapshot, aliases, source_section, metadata)
+        if field.endswith("_mature"):
+            result[field] = _timeline_bool(value)
+        elif field.endswith("_coverage"):
+            result[field] = _timeline_number(value)
+        else:
+            result[field] = _timeline_text(value)
+    return result
+
+
+def _timeline_status_info(
+    snapshot: object,
+    names: tuple[str, ...],
+    aliases: dict[str, tuple[str, ...]],
+) -> dict[str, object]:
+    """Extract a small status object such as setpoint or charge delay."""
+    section = _timeline_find(snapshot, names)
+    result: dict[str, object] = {}
+    for field, field_names in aliases.items():
+        value = _timeline_find(snapshot, field_names, section)
+        if field in {"target_soc", "target_soc_pct"}:
+            value = _timeline_number(value, 3)
+        elif field in {"reached", "enabled"}:
+            value = _timeline_bool(value)
+        else:
+            value = _timeline_text(value)
+        if value is not None:
+            result[field] = value
+    return result
+
+
+def _daily_operation_timeline_attributes(controller: object) -> dict[str, object]:
+    """Build the bounded, JSON-safe entity DTO for the daily timeline."""
+    snapshot = _daily_operation_timeline_snapshot(controller)
+    source = snapshot if snapshot is not None else {}
+    metadata = _timeline_find(source, ("metadata", "meta"))
+
+    local_date = _timeline_date_string(
+        _timeline_find(source, ("local_date", "date", "snapshot_date"), metadata)
+    )
+    if local_date is None and snapshot is not None:
+        local_date = dt_util.now().date().isoformat()
+
+    timezone = _timeline_find(source, ("timezone", "tz"), metadata)
+    timezone_value = _timeline_text(timezone)
+    if timezone_value is None:
+        try:
+            local_zone = dt_util.get_time_zone()
+            timezone_value = str(getattr(local_zone, "key", local_zone))
+        except (AttributeError, TypeError, ValueError):
+            timezone_value = "UTC"
+
+    series = _timeline_find(source, ("series", "energy"))
+    operations = _timeline_find(source, ("operations", "operation"))
+    interval_grid = _timeline_find(source, ("interval_grid", "grid"))
+
+    actual_action = _timeline_find(
+        source, ("actual_action_mask", "actual_action_masks"), operations
+    )
+    planned_action = _timeline_find(
+        source, ("planned_action_mask", "planned_action_masks"), operations
+    )
+    actual_coexistence = _timeline_find(
+        source, ("actual_coexistence_mask",), operations
+    )
+    planned_coexistence = _timeline_find(
+        source, ("planned_coexistence_mask",), operations
+    )
+    if actual_coexistence is None:
+        actual_coexistence = actual_action
+    if planned_coexistence is None:
+        planned_coexistence = planned_action
+    actual_context = _timeline_find(
+        source, ("actual_context_mask", "actual_context_masks"), operations
+    )
+    planned_context = _timeline_find(
+        source, ("planned_context_mask", "planned_context_masks"), operations
+    )
+
+    restored = _timeline_status_info(
+        source,
+        ("restoration", "restore", "restore_status"),
+        {
+            "status": ("status", "state"),
+            "restored": ("restored", "loaded", "store_restored"),
+            "date": ("date", "restored_date", "restore_date"),
+            "error": ("error", "restore_error"),
+            "at": ("at", "restored_at", "last_restored_at"),
+        },
+    )
+    setpoint = _timeline_status_info(
+        source,
+        ("setpoint", "charge_to_setpoint", "setpoint_status"),
+        {
+            "state": ("state", "status"),
+            "estimated_completion": (
+                "estimated_completion",
+                "estimated_completion_at",
+                "estimated_setpoint_time",
+                "setpoint_estimated_at",
+                "setpoint_completion_at",
+                "setpoint_eta",
+            ),
+            "target_soc": ("target_soc", "target_soc_pct", "setpoint_soc"),
+            "reached": ("reached", "setpoint_reached"),
+        },
+    )
+    delay = _timeline_status_info(
+        source,
+        ("delay", "charge_delay", "charge_delay_status"),
+        {
+            "state": ("state", "status"),
+            "estimated_unlock_time": (
+                "estimated_unlock_time",
+                "unlock_time",
+                "delay_until",
+                "estimated_delay_until",
+            ),
+            "reason": ("reason", "unlock_reason", "delay_reason"),
+        },
+    )
+
+    raw_observed = _timeline_find(
+        source, ("observed_seconds_by_action", "observed_duration_by_action"), operations
+    )
+    raw_observed_by_interval = _timeline_find(
+        source,
+        (
+            "observed_seconds_by_action_by_interval",
+            "observed_duration_by_action_by_interval",
+        ),
+        operations,
+    )
+    observed = {}
+    if isinstance(raw_observed, Mapping):
+        for index, (key, value) in enumerate(raw_observed.items()):
+            if index >= 16:
+                break
+            seconds = _timeline_number(value, 3)
+            if seconds is not None:
+                observed[str(key)[:32]] = max(0.0, seconds)
+
+    raw_grid_decision = _timeline_find(
+        source, ("grid_charge_decision", "grid_charge_decisions"), operations
+    )
+    actual_grid_decision = _timeline_find(
+        source, ("actual_grid_charge_decision", "actual_grid_charge_decisions"), operations
+    )
+    planned_grid_decision = _timeline_find(
+        source,
+        ("planned_grid_charge_decision", "planned_grid_charge_decisions"),
+        operations,
+    )
+    if isinstance(raw_grid_decision, Mapping):
+        if actual_grid_decision is None:
+            actual_grid_decision = raw_grid_decision.get("actual")
+        if planned_grid_decision is None:
+            planned_grid_decision = raw_grid_decision.get("planned")
+        raw_grid_decision = (
+            raw_grid_decision.get("values")
+            or raw_grid_decision.get("planned")
+            or raw_grid_decision.get("actual")
+        )
+
+    stale_value = _timeline_bool(_timeline_find(source, ("stale",), metadata))
+    last_error = _timeline_text(
+        _timeline_find(source, ("last_error", "error", "timeline_error"), metadata)
+    )
+    if last_error is None:
+        last_error = _timeline_text(restored.get("error"))
+    freshness = _timeline_small_mapping(
+        _timeline_find(source, ("freshness", "freshness_info"), metadata)
+    )
+    counts = _timeline_small_mapping(
+        _timeline_find(source, ("counts", "diagnostic_counts"), metadata)
+    )
+
+    return {
+        "timeline_available": snapshot is not None,
+        "schema_version": int(
+            _timeline_number(
+                _timeline_find(source, ("schema_version", "version"), metadata), 0
+            )
+            or 1
+        ),
+        "local_date": local_date,
+        "timezone": timezone_value,
+        "interval_minutes": _DAILY_OPERATION_INTERVAL_MINUTES,
+        "interval_count": _DAILY_OPERATION_INTERVAL_COUNT,
+        "generated_at": _timeline_scalar(
+            _timeline_find(source, ("generated_at", "updated_at", "last_updated"), metadata)
+        ),
+        "plan_evaluated_at": _timeline_scalar(
+            _timeline_find(
+                source,
+                ("plan_evaluated_at", "plan_evaluated", "evaluated_at"),
+                metadata,
+            )
+        ),
+        "current_index": (
+            max(
+                0,
+                min(
+                    _DAILY_OPERATION_INTERVAL_COUNT - 1,
+                    int(
+                        _timeline_number(
+                            _timeline_find(source, ("current_index", "index"), metadata),
+                            0,
+                        )
+                        or 0
+                    ),
+                ),
+            )
+            if _timeline_find(source, ("current_index", "index"), metadata) is not None
+            else None
+        ),
+        "current_progress": (
+            max(
+                0.0,
+                min(
+                    1.0,
+                    _timeline_number(
+                        _timeline_find(source, ("current_progress", "progress"), metadata),
+                        6,
+                    )
+                    or 0.0,
+                ),
+            )
+            if _timeline_find(source, ("current_progress", "progress"), metadata) is not None
+            else None
+        ),
+        "mode": _timeline_text(
+            _timeline_find(source, ("mode", "operation_mode", "charging_mode"), metadata)
+        ),
+        "stale": stale_value,
+        "stale_reason": _timeline_text(
+            _timeline_find(source, ("stale_reason", "freshness_reason"), metadata)
+        ),
+        "last_error": last_error,
+        "freshness": freshness,
+        "series": {
+            "solar_actual_kwh": _timeline_array(
+                _timeline_find(source, ("solar_actual_kwh", "solar_actual"), series),
+                _timeline_energy,
+                None,
+            ),
+            "solar_forecast_kwh": _timeline_array(
+                _timeline_find(source, ("solar_forecast_kwh", "solar_forecast"), series),
+                _timeline_energy,
+                None,
+            ),
+            "consumption_actual_kwh": _timeline_array(
+                _timeline_find(
+                    source,
+                    ("consumption_actual_kwh", "home_consumption_actual_kwh"),
+                    series,
+                ),
+                _timeline_energy,
+                None,
+            ),
+            "consumption_forecast_kwh": _timeline_array(
+                _timeline_find(
+                    source,
+                    ("consumption_forecast_kwh", "home_consumption_forecast_kwh"),
+                    series,
+                ),
+                _timeline_energy,
+                None,
+            ),
+            "actual_coverage_s": _timeline_array(
+                _timeline_find(source, ("actual_coverage_s", "coverage_s"), series),
+                _timeline_energy,
+                None,
+            ),
+        },
+        "operations": {
+            "actual_action_mask": _timeline_array(actual_action, _timeline_mask, 0),
+            "planned_action_mask": _timeline_array(planned_action, _timeline_mask, 0),
+            "actual_coexistence_mask": _timeline_array(
+                actual_coexistence,
+                _timeline_mask,
+                0,
+            ),
+            "planned_coexistence_mask": _timeline_array(
+                planned_coexistence,
+                _timeline_mask,
+                0,
+            ),
+            "actual_context_mask": _timeline_array(actual_context, _timeline_mask, 0),
+            "planned_context_mask": _timeline_array(planned_context, _timeline_mask, 0),
+            "grid_charge_decision": _timeline_array(
+                raw_grid_decision,
+                _timeline_text,
+                None,
+            ),
+            "actual_grid_charge_decision": _timeline_array(
+                actual_grid_decision, _timeline_text, None
+            ),
+            "planned_grid_charge_decision": _timeline_array(
+                planned_grid_decision, _timeline_text, None
+            ),
+            "delay_until": _timeline_array(
+                _timeline_find(source, ("delay_until", "delays_until"), operations),
+                _timeline_text,
+                None,
+            ),
+            "planned_delay_until": _timeline_array(
+                _timeline_find(
+                    source, ("planned_delay_until", "planned_delays_until"), operations
+                ),
+                _timeline_text,
+                None,
+            ),
+            "charge_power_w": _timeline_array(
+                _timeline_find(source, ("charge_power_w", "charge_power"), operations),
+                _timeline_power,
+                0.0,
+            ),
+            "discharge_power_w": _timeline_array(
+                _timeline_find(
+                    source, ("discharge_power_w", "discharge_power"), operations
+                ),
+                _timeline_power,
+                0.0,
+            ),
+            "solar_to_battery_kwh": _timeline_array(
+                _timeline_find(source, ("solar_to_battery_kwh",), operations),
+                _timeline_energy,
+                None,
+            ),
+            "grid_to_battery_kwh": _timeline_array(
+                _timeline_find(source, ("grid_to_battery_kwh",), operations),
+                _timeline_energy,
+                None,
+            ),
+            "battery_to_home_kwh": _timeline_array(
+                _timeline_find(source, ("battery_to_home_kwh",), operations),
+                _timeline_energy,
+                None,
+            ),
+            "grid_to_home_kwh": _timeline_array(
+                _timeline_find(source, ("grid_to_home_kwh",), operations),
+                _timeline_energy,
+                None,
+            ),
+            "stored_energy_end_kwh": _timeline_array(
+                _timeline_find(source, ("stored_energy_end_kwh",), operations),
+                _timeline_energy,
+                None,
+            ),
+            "soc_end_pct": _timeline_array(
+                _timeline_find(
+                    source, ("soc_end_pct", "stored_soc_end_pct"), operations
+                ),
+                _timeline_energy,
+                None,
+            ),
+            "observed_seconds_by_action": observed,
+            "observed_seconds_by_action_by_interval": _timeline_duration_series(
+                raw_observed_by_interval
+            ),
+        },
+        "dst_skipped": _timeline_array(
+            _timeline_find(source, ("dst_skipped",), interval_grid, metadata),
+            _timeline_bool,
+            None,
+        ),
+        "dst_repeated": _timeline_array(
+            _timeline_find(source, ("dst_repeated",), interval_grid, metadata),
+            _timeline_bool,
+            None,
+        ),
+        "dst_flags": _timeline_array(
+            _timeline_find(
+                source,
+                ("dst_flags", "local_time_flags", "dst_status"),
+                interval_grid,
+                metadata,
+            ),
+            _timeline_text,
+            None,
+        ),
+        "sources": _timeline_sources(source, metadata),
+        "restoration": restored,
+        "setpoint": setpoint,
+        "delay": delay,
+        "counts": counts,
+    }
+
+
+class DailyOperationTimelineSensor(SensorEntity):
+    """Diagnostic-only, renderable snapshot of the current local day."""
+
+    _attr_has_entity_name = True
+    _attr_translation_key = "daily_operation_timeline"
+    _attr_unique_id = f"{SYSTEM_UNIQUE_ID_PREFIX}daily_operation_timeline"
+    _attr_device_class = SensorDeviceClass.DATE
+    _attr_state_class = None
+    _attr_icon = "mdi:chart-timeline-variant"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
+    _attr_should_poll = True
+    _unrecorded_attributes = frozenset(
+        {"series", "operations", "dst_skipped", "dst_repeated", "dst_flags"}
+    )
+
+    def __init__(self, controller) -> None:
+        """Initialize the timeline sensor without requiring a manager yet."""
+        self._controller = controller
+        self.entity_id = system_entity_id("sensor", "daily_operation_timeline")
+        self._timeline_listener_unsub = None
+        self._last_event_update_at = 0.0
+
+    @property
+    def native_value(self) -> date | None:
+        """Return the local date represented by the current snapshot."""
+        value = _daily_operation_timeline_attributes(self._controller).get("local_date")
+        if not isinstance(value, str):
+            return None
+        try:
+            return date.fromisoformat(value)
+        except ValueError:
+            return None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, object]:
+        """Return the bounded JSON-safe DTO consumed by the frontend."""
+        return _daily_operation_timeline_attributes(self._controller)
+
+    async def async_added_to_hass(self) -> None:
+        """Subscribe to an optional manager/controller listener."""
+        await super().async_added_to_hass()
+        await self._async_subscribe_to_timeline()
+
+    async def _async_subscribe_to_timeline(self) -> None:
+        """Register against whichever listener spelling the manager provides."""
+        manager = _daily_operation_timeline_source(self._controller)
+        owners = [manager] if manager is not None else []
+        if self._controller is not manager:
+            owners.append(self._controller)
+
+        for owner in owners:
+            if owner is None:
+                continue
+            for name in (
+                "async_add_listener",
+                "add_listener",
+                "async_add_update_listener",
+                "add_update_listener",
+                "register_listener",
+                "subscribe",
+            ):
+                listener = _timeline_read(owner, name, _TIMELINE_MISSING)
+                if listener is _TIMELINE_MISSING or not callable(listener):
+                    continue
+                try:
+                    unsubscribe = listener(self._handle_timeline_update)
+                    if inspect.isawaitable(unsubscribe):
+                        unsubscribe = await unsubscribe
+                except Exception:
+                    _LOGGER.debug(
+                        "Daily operation timeline listener is not available on %s",
+                        type(owner).__name__,
+                        exc_info=True,
+                    )
+                    continue
+                if callable(unsubscribe):
+                    self._timeline_listener_unsub = unsubscribe
+                    self.async_on_remove(unsubscribe)
+                return
+
+    def _handle_timeline_update(self, *_args: Any, **_kwargs: Any) -> None:
+        """Safely request a state publication after a manager event."""
+        if getattr(self, "hass", None) is None:
+            return
+        now = time.monotonic()
+        if now - self._last_event_update_at < _DAILY_OPERATION_EVENT_THROTTLE_S:
+            return
+        self._last_event_update_at = now
+        try:
+            # schedule_update_ha_state is safe when a manager callback happens
+            # from a worker thread; HA reads the DTO later on its event loop.
+            self.schedule_update_ha_state()
+        except (AttributeError, RuntimeError, TypeError):
+            # Lightweight test doubles and an entity being removed may not have
+            # a complete HA runtime. Never let that break the controller event.
+            try:
+                self.async_write_ha_state()
+            except (AttributeError, RuntimeError, TypeError):
+                _LOGGER.debug("Unable to publish daily operation timeline update")
+
+    @property
+    def device_info(self):
         return {
             "identifiers": {(DOMAIN, "marstek_venus_system")},
             "name": "Omnibattery System",
