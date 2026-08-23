@@ -1093,8 +1093,10 @@ class HuaweiSolarDriver(BatteryDriver):
     @classmethod
     async def probe(
         cls, hass: HomeAssistant, host: str, port: int = 502, slave_id: int = 1
-    ) -> tuple[bool, Optional[str], Optional[int], Optional[int], Optional[str]]:
-        """Check the read path and report model, power caps and the serial.
+    ) -> tuple[
+        bool, Optional[str], Optional[int], Optional[int], Optional[str], Optional[int]
+    ]:
+        """Check the read path and report model, power caps, serial and rating.
 
         The serial is what lets a caller confirm that a device picked in the UI
         and a Modbus address point at the same inverter.
@@ -1102,22 +1104,27 @@ class HuaweiSolarDriver(BatteryDriver):
         driver = cls(hass, host, port=port, slave_id=slave_id)
         try:
             if not await driver.connect():
-                return False, None, None, None, None
+                return False, None, None, None, None, None
             data = await driver.read_telemetry([
                 "device_name", "battery_soc", "max_charge_power",
                 "max_discharge_power", "inverter_serial_number",
+                "inverter_max_power",
             ])
             serial = data.get("inverter_serial_number")
+            # What the battery reports moves with the pack count; what the
+            # inverter can push through does not, so both are worth having.
+            inverter_max = data.get("inverter_max_power")
             # SOC proves a battery is actually attached; the model alone would
             # also match an inverter running without storage.
             if "battery_soc" not in data:
-                return False, data.get("device_name"), None, None, serial
+                return False, data.get("device_name"), None, None, serial, inverter_max
             return (
                 True,
                 data.get("device_name"),
                 data.get("max_charge_power"),
                 data.get("max_discharge_power"),
                 serial,
+                inverter_max,
             )
         finally:
             await driver.close()

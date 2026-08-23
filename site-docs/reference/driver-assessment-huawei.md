@@ -189,6 +189,13 @@ the address answers as `SmartHEMS` (an EMMA-A02, serial NS24A1211290) on slave 0
 with the inverter behind it on slave 4. That is the gateway, not the battery, and
 it appears nowhere in the telemetry.
 
+**The battery's reported power caps are a starting value, not a ceiling.**
+37046/37048 say what the battery permits right now, and that moves with the pack
+count — a third pack raises it. The limits form therefore opens on that figure
+but allows up to the inverter's maximum active power (30075), which is what the
+installation genuinely cannot exceed: charge and discharge both pass through it.
+On the tested unit that is 7000 W reported against an 8800 W inverter.
+
 **The setup names the battery twice.** On the service path a Modbus address
 identifies the inverter and a registry device identifies the battery, and
 nothing forces those to be the same unit — Huawei inverters cascade, so a

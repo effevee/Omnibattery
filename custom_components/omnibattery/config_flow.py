@@ -498,17 +498,24 @@ _HUAWEI_MAX_POWER_W = 15000
 
 
 def _huawei_power_ceilings(battery_data: dict) -> tuple[int, int]:
-    """Hardware max charge/discharge from the probe (registers 37046/37048).
+    """Upper bound the limits form allows for a Huawei battery.
 
-    Huawei models span a wide power range, so unlike the other brands there is
-    no useful static envelope here — the constant is only a sanity bound against
-    a malformed reading.
+    Registers 37046/37048 report what the battery permits *right now*, and that
+    moves with the pack count — a third pack raises it. Treating a momentary
+    reading as a hard ceiling locks the user out of a figure their installation
+    can genuinely reach, so it serves as the starting value instead.
+
+    What the installation cannot exceed is the inverter's own maximum active
+    power (30075): everything, charge and discharge alike, passes through it.
+    Where that is unknown the probe's own figure stands in, and the constant is
+    only a sanity bound against a malformed reading.
     """
+    inverter_max = int(battery_data.get("device_inverter_max_power") or 0)
     charge = int(battery_data.get("device_max_charge_power") or 5000)
     discharge = int(battery_data.get("device_max_discharge_power") or 5000)
     return (
-        max(100, min(_HUAWEI_MAX_POWER_W, charge)),
-        max(100, min(_HUAWEI_MAX_POWER_W, discharge)),
+        max(100, min(_HUAWEI_MAX_POWER_W, inverter_max or charge, _HUAWEI_MAX_POWER_W)),
+        max(100, min(_HUAWEI_MAX_POWER_W, inverter_max or discharge, _HUAWEI_MAX_POWER_W)),
     )
 
 
@@ -1529,12 +1536,13 @@ class MarstekVenusConfigFlow(LegacyDomainMigrationMixin, ConfigFlow, domain=DOMA
                 _LOGGER.info(
                     "Probing Huawei inverter at %s:%s (slave %s)", host, port, slave_id
                 )
-                ok, model, max_charge, max_discharge, serial = await HuaweiSolarDriver.probe(
+                ok, model, max_charge, max_discharge, serial, inverter_max = await HuaweiSolarDriver.probe(
                     self.hass, host, port, slave_id
                 )
                 if ok:
                     result = await self._huawei_store(
-                        slave_id, model, max_charge, max_discharge, serial, errors
+                        slave_id, model, max_charge, max_discharge, serial,
+                        inverter_max, errors,
                     )
                     if result is not None:
                         return result
@@ -1567,7 +1575,7 @@ class MarstekVenusConfigFlow(LegacyDomainMigrationMixin, ConfigFlow, domain=DOMA
         with_battery = [candidate for candidate in found if candidate[2]]
         if len(with_battery) == 1:
             sid = with_battery[0][0]
-            ok, model, max_charge, max_discharge, serial = await HuaweiSolarDriver.probe(
+            ok, model, max_charge, max_discharge, serial, inverter_max = await HuaweiSolarDriver.probe(
                 self.hass, host, port, sid
             )
             if ok:
@@ -1575,7 +1583,7 @@ class MarstekVenusConfigFlow(LegacyDomainMigrationMixin, ConfigFlow, domain=DOMA
                 # A mismatch leaves its own error behind and must not be
                 # papered over by the scan verdict below.
                 return await self._huawei_store(
-                    sid, model, max_charge, max_discharge, serial, errors
+                    sid, model, max_charge, max_discharge, serial, inverter_max, errors
                 )
         if len(with_battery) > 1:
             self._huawei_candidates = with_battery
@@ -1593,13 +1601,14 @@ class MarstekVenusConfigFlow(LegacyDomainMigrationMixin, ConfigFlow, domain=DOMA
         if user_input is not None:
             slave_id = int(user_input[CONF_SLAVE_ID])
             pending = self._huawei_pending
-            ok, model, max_charge, max_discharge, serial = await HuaweiSolarDriver.probe(
+            ok, model, max_charge, max_discharge, serial, inverter_max = await HuaweiSolarDriver.probe(
                 self.hass, pending[CONF_HOST], pending[CONF_PORT], slave_id
             )
             errors: dict[str, str] = {}
             if ok:
                 result = await self._huawei_store(
-                    slave_id, model, max_charge, max_discharge, serial, errors, "base"
+                    slave_id, model, max_charge, max_discharge, serial, inverter_max,
+                    errors, "base",
                 )
                 if result is not None:
                     return result
@@ -1617,8 +1626,8 @@ class MarstekVenusConfigFlow(LegacyDomainMigrationMixin, ConfigFlow, domain=DOMA
         )
 
     async def _huawei_store(
-        self, slave_id, model, max_charge, max_discharge, serial, errors,
-        error_key: str = "huawei_battery_device",
+        self, slave_id, model, max_charge, max_discharge, serial, inverter_max,
+        errors, error_key: str = "huawei_battery_device",
     ) -> FlowResult | None:
         """Commit a validated Huawei battery, or refuse a mismatched pairing.
 
@@ -1652,6 +1661,16 @@ class MarstekVenusConfigFlow(LegacyDomainMigrationMixin, ConfigFlow, domain=DOMA
             self._current_battery_data["device_max_charge_power"] = int(max_charge)
         if max_discharge:
             self._current_battery_data["device_max_discharge_power"] = int(max_discharge)
+        if inverter_max:
+            self._current_battery_data["device_inverter_max_power"] = int(inverter_max)
+        # What the battery reports today is the sensible starting value; the
+        # form's ceiling is wider, because adding a pack raises it.
+        for key, probed in (
+            ("max_charge_power", max_charge),
+            ("max_discharge_power", max_discharge),
+        ):
+            if probed and not self._current_battery_data.get(key):
+                self._current_battery_data[key] = int(probed)
         return await self.async_step_battery_limits()
 
     @staticmethod
@@ -3770,12 +3789,13 @@ class OptionsFlowHandler(OptionsFlow):
                 _LOGGER.info(
                     "Probing Huawei inverter at %s:%s (slave %s)", host, port, slave_id
                 )
-                ok, model, max_charge, max_discharge, serial = await HuaweiSolarDriver.probe(
+                ok, model, max_charge, max_discharge, serial, inverter_max = await HuaweiSolarDriver.probe(
                     self.hass, host, port, slave_id
                 )
                 if ok:
                     result = await self._huawei_store(
-                        slave_id, model, max_charge, max_discharge, serial, errors
+                        slave_id, model, max_charge, max_discharge, serial,
+                        inverter_max, errors,
                     )
                     if result is not None:
                         return result
@@ -3808,7 +3828,7 @@ class OptionsFlowHandler(OptionsFlow):
         with_battery = [candidate for candidate in found if candidate[2]]
         if len(with_battery) == 1:
             sid = with_battery[0][0]
-            ok, model, max_charge, max_discharge, serial = await HuaweiSolarDriver.probe(
+            ok, model, max_charge, max_discharge, serial, inverter_max = await HuaweiSolarDriver.probe(
                 self.hass, host, port, sid
             )
             if ok:
@@ -3816,7 +3836,7 @@ class OptionsFlowHandler(OptionsFlow):
                 # A mismatch leaves its own error behind and must not be
                 # papered over by the scan verdict below.
                 return await self._huawei_store(
-                    sid, model, max_charge, max_discharge, serial, errors
+                    sid, model, max_charge, max_discharge, serial, inverter_max, errors
                 )
         if len(with_battery) > 1:
             self._huawei_candidates = with_battery
@@ -3834,13 +3854,14 @@ class OptionsFlowHandler(OptionsFlow):
         if user_input is not None:
             slave_id = int(user_input[CONF_SLAVE_ID])
             pending = self._huawei_pending
-            ok, model, max_charge, max_discharge, serial = await HuaweiSolarDriver.probe(
+            ok, model, max_charge, max_discharge, serial, inverter_max = await HuaweiSolarDriver.probe(
                 self.hass, pending[CONF_HOST], pending[CONF_PORT], slave_id
             )
             errors: dict[str, str] = {}
             if ok:
                 result = await self._huawei_store(
-                    slave_id, model, max_charge, max_discharge, serial, errors, "base"
+                    slave_id, model, max_charge, max_discharge, serial, inverter_max,
+                    errors, "base",
                 )
                 if result is not None:
                     return result
@@ -3858,8 +3879,8 @@ class OptionsFlowHandler(OptionsFlow):
         )
 
     async def _huawei_store(
-        self, slave_id, model, max_charge, max_discharge, serial, errors,
-        error_key: str = "huawei_battery_device",
+        self, slave_id, model, max_charge, max_discharge, serial, inverter_max,
+        errors, error_key: str = "huawei_battery_device",
     ) -> FlowResult | None:
         """Commit a validated Huawei battery, or refuse a mismatched pairing.
 
@@ -3893,6 +3914,16 @@ class OptionsFlowHandler(OptionsFlow):
             self._current_battery_data["device_max_charge_power"] = int(max_charge)
         if max_discharge:
             self._current_battery_data["device_max_discharge_power"] = int(max_discharge)
+        if inverter_max:
+            self._current_battery_data["device_inverter_max_power"] = int(inverter_max)
+        # What the battery reports today is the sensible starting value; the
+        # form's ceiling is wider, because adding a pack raises it.
+        for key, probed in (
+            ("max_charge_power", max_charge),
+            ("max_discharge_power", max_discharge),
+        ):
+            if probed and not self._current_battery_data.get(key):
+                self._current_battery_data[key] = int(probed)
         return await self.async_step_battery_limits()
 
     @staticmethod

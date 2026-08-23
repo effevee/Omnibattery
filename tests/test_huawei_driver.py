@@ -1564,7 +1564,7 @@ async def test_a_battery_from_another_inverter_is_refused(monkeypatch):
     """Cascade: the device hangs off inverter B, the address points at A."""
     flow = _huawei_flow(
         monkeypatch,
-        probe=(True, "SUN2000-8K-MAP0", 7000, 7000, "BT24B1457565"),
+        probe=(True, "SUN2000-8K-MAP0", 7000, 7000, "BT24B1457565", 8800),
         devices={
             "dev-batt": _huawei_device(identifier="battery-2", via="dev-inv-2"),
             "dev-inv-2": _huawei_device(serial="BT24B9999999"),
@@ -1582,7 +1582,7 @@ async def test_a_battery_from_another_inverter_is_refused(monkeypatch):
 async def test_a_battery_on_the_probed_inverter_is_accepted(monkeypatch):
     flow = _huawei_flow(
         monkeypatch,
-        probe=(True, "SUN2000-8K-MAP0", 7000, 7000, "BT24B1457565"),
+        probe=(True, "SUN2000-8K-MAP0", 7000, 7000, "BT24B1457565", 8800),
         devices={
             "dev-batt": _huawei_device(identifier="battery", via="dev-inv"),
             "dev-inv": _huawei_device(serial="bt24b1457565"),  # registries vary in case
@@ -1604,7 +1604,7 @@ async def test_a_device_whose_inverter_is_unknown_is_not_blocked(monkeypatch):
     """
     flow = _huawei_flow(
         monkeypatch,
-        probe=(True, "SUN2000-8K-MAP0", 7000, 7000, "BT24B1457565"),
+        probe=(True, "SUN2000-8K-MAP0", 7000, 7000, "BT24B1457565", 8800),
         devices={"dev-batt": _huawei_device()},
     )
     assert (await flow.async_step_battery_connection_huawei(dict(_HUAWEI_INPUT)))[
@@ -1613,7 +1613,7 @@ async def test_a_device_whose_inverter_is_unknown_is_not_blocked(monkeypatch):
 
     flow = _huawei_flow(
         monkeypatch,
-        probe=(True, "SUN2000-8K-MAP0", 7000, 7000, None),
+        probe=(True, "SUN2000-8K-MAP0", 7000, 7000, None, 8800),
         devices={"dev-batt": _huawei_device(serial="BT24B9999999")},
     )
     assert (await flow.async_step_battery_connection_huawei(dict(_HUAWEI_INPUT)))[
@@ -1626,7 +1626,7 @@ async def test_the_serial_identifies_the_inverter_even_without_a_parent(monkeypa
     """huawei_solar names the inverter device itself by serial."""
     flow = _huawei_flow(
         monkeypatch,
-        probe=(True, "SUN2000-8K-MAP0", 7000, 7000, "BT24B1457565"),
+        probe=(True, "SUN2000-8K-MAP0", 7000, 7000, "BT24B1457565", 8800),
         devices={"dev-batt": _huawei_device(identifier="BT24B9999999")},
     )
     form = await flow.async_step_battery_connection_huawei(dict(_HUAWEI_INPUT))
@@ -1638,12 +1638,12 @@ async def test_a_missing_huawei_solar_integration_is_named_as_such(monkeypatch):
     """"Pick a device" is unhelpful advice when there are no devices to pick."""
     payload = dict(_HUAWEI_INPUT, huawei_battery_device="")
 
-    flow = _huawei_flow(monkeypatch, probe=(False, None, None, None, None))
+    flow = _huawei_flow(monkeypatch, probe=(False, None, None, None, None, None))
     form = await flow.async_step_battery_connection_huawei(dict(payload))
     assert form["errors"] == {"huawei_battery_device": "huawei_device_required"}
 
     flow = _huawei_flow(
-        monkeypatch, probe=(False, None, None, None, None), huawei_solar_installed=False
+        monkeypatch, probe=(False, None, None, None, None, None), huawei_solar_installed=False
     )
     form = await flow.async_step_battery_connection_huawei(dict(payload))
     assert form["errors"] == {"huawei_battery_device": "huawei_solar_missing"}
@@ -1654,7 +1654,7 @@ async def test_direct_writes_need_no_device_at_all(monkeypatch):
     """The whole point of the direct path is not depending on that integration."""
     flow = _huawei_flow(
         monkeypatch,
-        probe=(True, "SUN2000-8K-MAP0", 7000, 7000, "BT24B1457565"),
+        probe=(True, "SUN2000-8K-MAP0", 7000, 7000, "BT24B1457565", 8800),
         huawei_solar_installed=False,
     )
     form = await flow.async_step_battery_connection_huawei(
@@ -1707,7 +1707,7 @@ async def test_a_serial_carried_with_a_suffix_still_counts_as_a_match(monkeypatc
     """huawei_solar derives child identifiers from the inverter serial."""
     flow = _huawei_flow(
         monkeypatch,
-        probe=(True, "SUN2000-8K-MAP0", 7000, 7000, "BT24B1457565"),
+        probe=(True, "SUN2000-8K-MAP0", 7000, 7000, "BT24B1457565", 8800),
         devices={"dev-batt": _huawei_device(identifier="BT24B1457565_batteries")},
     )
     form = await flow.async_step_battery_connection_huawei(dict(_HUAWEI_INPUT))
@@ -1771,7 +1771,7 @@ def test_every_huawei_form_can_be_sent_to_the_frontend():
 @pytest.mark.asyncio
 async def test_the_rendered_connection_form_survives_serialisation(monkeypatch):
     """The step's own output, not just the schema helper it happens to call."""
-    flow = _huawei_flow(monkeypatch, probe=(False, None, None, None, None))
+    flow = _huawei_flow(monkeypatch, probe=(False, None, None, None, None, None))
     form = await flow.async_step_battery_connection_huawei()
     fields = {field["name"]: field for field in _serialise(form["data_schema"])}
 
@@ -1782,3 +1782,52 @@ async def test_the_rendered_connection_form_survives_serialisation(monkeypatch):
     # Optional and unprefilled: empty means "go and find it".
     assert fields["slave_id"]["optional"] is True
     assert "default" not in fields["slave_id"]
+
+
+# ----------------------------------------------------------------------
+# power ceilings in the limits form
+#
+# Registers 37046/37048 report what the battery permits right now, and a third
+# pack raises that. Using the momentary reading as the form's hard ceiling
+# locked the user out of a figure the installation can genuinely reach.
+# ----------------------------------------------------------------------
+def test_the_form_allows_more_than_the_battery_reports_today():
+    from custom_components.omnibattery.config_flow import _huawei_power_ceilings
+
+    probed = {
+        "device_max_charge_power": 7000,
+        "device_max_discharge_power": 7000,
+        "device_inverter_max_power": 8800,
+    }
+    # Everything passes through the inverter, so its rating is the real bound.
+    assert _huawei_power_ceilings(probed) == (8800, 8800)
+
+
+def test_without_an_inverter_rating_the_battery_figure_stands_in():
+    from custom_components.omnibattery.config_flow import _huawei_power_ceilings
+
+    assert _huawei_power_ceilings({
+        "device_max_charge_power": 7000, "device_max_discharge_power": 5000,
+    }) == (7000, 5000)
+    # Nothing probed at all: a usable form beats an empty one.
+    assert _huawei_power_ceilings({}) == (5000, 5000)
+
+
+def test_a_malformed_reading_cannot_open_the_form_to_anything():
+    from custom_components.omnibattery.config_flow import _huawei_power_ceilings
+
+    assert _huawei_power_ceilings({"device_inverter_max_power": 900000}) == (15000, 15000)
+
+
+@pytest.mark.asyncio
+async def test_the_probed_figure_becomes_the_starting_value(monkeypatch):
+    """Wider ceiling, but the form still opens on what the hardware reports."""
+    flow = _huawei_flow(
+        monkeypatch,
+        probe=(True, "SUN2000-8K-MAP0", 7000, 7000, "BT24B1457565", 8800),
+        devices={"dev-batt": _huawei_device(identifier="BT24B1457565")},
+    )
+    await flow.async_step_battery_connection_huawei(dict(_HUAWEI_INPUT))
+
+    assert flow._current_battery_data["max_charge_power"] == 7000
+    assert flow._current_battery_data["device_inverter_max_power"] == 8800
