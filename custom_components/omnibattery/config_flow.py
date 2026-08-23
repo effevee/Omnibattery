@@ -1481,7 +1481,18 @@ class MarstekVenusConfigFlow(LegacyDomainMigrationMixin, ConfigFlow, domain=DOMA
             host = (user_input[CONF_HOST] or "").strip()
             port = int(user_input.get(CONF_PORT, 502))
             slave_id = int(user_input.get(CONF_SLAVE_ID, 1))
-            device_id = user_input["huawei_battery_device"]
+            device_id = user_input.get("huawei_battery_device") or ""
+            direct_write = bool(user_input.get("huawei_direct_write", False))
+            if not direct_write and not device_id:
+                # Without direct writes every set-point is a huawei_solar service
+                # call, and those address the battery by device.
+                errors["huawei_battery_device"] = "huawei_device_required"
+                return self.async_show_form(
+                    step_id="battery_connection_huawei",
+                    data_schema=self._huawei_schema(current_battery, battery_num),
+                    errors=errors,
+                    description_placeholders={"battery_num": str(battery_num)},
+                )
             _LOGGER.info(
                 "Probing Huawei inverter at %s:%s (slave %s)", host, port, slave_id
             )
@@ -1496,7 +1507,7 @@ class MarstekVenusConfigFlow(LegacyDomainMigrationMixin, ConfigFlow, domain=DOMA
                     CONF_SLAVE_ID: slave_id,
                     "brand": "huawei",
                     "huawei_battery_device_id": device_id,
-                    "huawei_direct_write": bool(user_input.get("huawei_direct_write", False)),
+                    "huawei_direct_write": direct_write,
                     "huawei_model": model,
                 })
                 if max_charge:
@@ -1510,30 +1521,42 @@ class MarstekVenusConfigFlow(LegacyDomainMigrationMixin, ConfigFlow, domain=DOMA
 
         return self.async_show_form(
             step_id="battery_connection_huawei",
-            data_schema=vol.Schema({
-                vol.Required(
-                    CONF_NAME,
-                    default=current_battery.get(CONF_NAME, f"Huawei LUNA2000 {battery_num}"),
-                ): str,
-                vol.Required(CONF_HOST, default=current_battery.get(CONF_HOST, "")): str,
-                vol.Optional(CONF_PORT, default=current_battery.get(CONF_PORT, 502)): int,
-                vol.Optional(CONF_SLAVE_ID, default=current_battery.get(CONF_SLAVE_ID, 1)): int,
-                vol.Required(
-                    "huawei_battery_device",
-                    description={
-                        "suggested_value": current_battery.get("huawei_battery_device_id")
-                    },
-                ): DeviceSelector(
-                    DeviceSelectorConfig(integration="huawei_solar", model="Batteries")
-                ),
-                vol.Optional(
-                    "huawei_direct_write",
-                    default=current_battery.get("huawei_direct_write", False),
-                ): bool,
-            }),
+            data_schema=self._huawei_schema(current_battery, battery_num),
             errors=errors,
             description_placeholders={"battery_num": str(battery_num)},
         )
+
+    @staticmethod
+    def _huawei_schema(current_battery: dict, battery_num: int) -> vol.Schema:
+        """Form for a Huawei battery.
+
+        The battery device is optional because it is only needed for the service
+        control path; with direct writes the driver addresses the inverter over
+        Modbus and needs nothing from huawei_solar. Requiring it there would make
+        the form impossible to submit on an installation that does not run that
+        integration at all. Which of the two is missing is checked on submit.
+        """
+        return vol.Schema({
+            vol.Required(
+                CONF_NAME,
+                default=current_battery.get(CONF_NAME, f"Huawei LUNA2000 {battery_num}"),
+            ): str,
+            vol.Required(CONF_HOST, default=current_battery.get(CONF_HOST, "")): str,
+            vol.Optional(CONF_PORT, default=current_battery.get(CONF_PORT, 502)): int,
+            vol.Optional(CONF_SLAVE_ID, default=current_battery.get(CONF_SLAVE_ID, 1)): int,
+            vol.Optional(
+                "huawei_direct_write",
+                default=current_battery.get("huawei_direct_write", False),
+            ): bool,
+            vol.Optional(
+                "huawei_battery_device",
+                description={
+                    "suggested_value": current_battery.get("huawei_battery_device_id")
+                },
+            ): DeviceSelector(
+                DeviceSelectorConfig(integration="huawei_solar", model="Batteries")
+            ),
+        })
 
     async def async_step_battery_connection_hoymiles(self, user_input: dict[str, Any] | None = None) -> FlowResult:
         """Configure a Hoymiles battery through Home Assistant's MQTT broker."""
@@ -3574,7 +3597,18 @@ class OptionsFlowHandler(OptionsFlow):
             host = (user_input[CONF_HOST] or "").strip()
             port = int(user_input.get(CONF_PORT, 502))
             slave_id = int(user_input.get(CONF_SLAVE_ID, 1))
-            device_id = user_input["huawei_battery_device"]
+            device_id = user_input.get("huawei_battery_device") or ""
+            direct_write = bool(user_input.get("huawei_direct_write", False))
+            if not direct_write and not device_id:
+                # Without direct writes every set-point is a huawei_solar service
+                # call, and those address the battery by device.
+                errors["huawei_battery_device"] = "huawei_device_required"
+                return self.async_show_form(
+                    step_id="battery_connection_huawei",
+                    data_schema=self._huawei_schema(current_battery, battery_num),
+                    errors=errors,
+                    description_placeholders={"battery_num": str(battery_num)},
+                )
             _LOGGER.info(
                 "Probing Huawei inverter at %s:%s (slave %s)", host, port, slave_id
             )
@@ -3589,7 +3623,7 @@ class OptionsFlowHandler(OptionsFlow):
                     CONF_SLAVE_ID: slave_id,
                     "brand": "huawei",
                     "huawei_battery_device_id": device_id,
-                    "huawei_direct_write": bool(user_input.get("huawei_direct_write", False)),
+                    "huawei_direct_write": direct_write,
                     "huawei_model": model,
                 })
                 if max_charge:
@@ -3603,30 +3637,42 @@ class OptionsFlowHandler(OptionsFlow):
 
         return self.async_show_form(
             step_id="battery_connection_huawei",
-            data_schema=vol.Schema({
-                vol.Required(
-                    CONF_NAME,
-                    default=current_battery.get(CONF_NAME, f"Huawei LUNA2000 {battery_num}"),
-                ): str,
-                vol.Required(CONF_HOST, default=current_battery.get(CONF_HOST, "")): str,
-                vol.Optional(CONF_PORT, default=current_battery.get(CONF_PORT, 502)): int,
-                vol.Optional(CONF_SLAVE_ID, default=current_battery.get(CONF_SLAVE_ID, 1)): int,
-                vol.Required(
-                    "huawei_battery_device",
-                    description={
-                        "suggested_value": current_battery.get("huawei_battery_device_id")
-                    },
-                ): DeviceSelector(
-                    DeviceSelectorConfig(integration="huawei_solar", model="Batteries")
-                ),
-                vol.Optional(
-                    "huawei_direct_write",
-                    default=current_battery.get("huawei_direct_write", False),
-                ): bool,
-            }),
+            data_schema=self._huawei_schema(current_battery, battery_num),
             errors=errors,
             description_placeholders={"battery_num": str(battery_num)},
         )
+
+    @staticmethod
+    def _huawei_schema(current_battery: dict, battery_num: int) -> vol.Schema:
+        """Form for a Huawei battery.
+
+        The battery device is optional because it is only needed for the service
+        control path; with direct writes the driver addresses the inverter over
+        Modbus and needs nothing from huawei_solar. Requiring it there would make
+        the form impossible to submit on an installation that does not run that
+        integration at all. Which of the two is missing is checked on submit.
+        """
+        return vol.Schema({
+            vol.Required(
+                CONF_NAME,
+                default=current_battery.get(CONF_NAME, f"Huawei LUNA2000 {battery_num}"),
+            ): str,
+            vol.Required(CONF_HOST, default=current_battery.get(CONF_HOST, "")): str,
+            vol.Optional(CONF_PORT, default=current_battery.get(CONF_PORT, 502)): int,
+            vol.Optional(CONF_SLAVE_ID, default=current_battery.get(CONF_SLAVE_ID, 1)): int,
+            vol.Optional(
+                "huawei_direct_write",
+                default=current_battery.get("huawei_direct_write", False),
+            ): bool,
+            vol.Optional(
+                "huawei_battery_device",
+                description={
+                    "suggested_value": current_battery.get("huawei_battery_device_id")
+                },
+            ): DeviceSelector(
+                DeviceSelectorConfig(integration="huawei_solar", model="Batteries")
+            ),
+        })
 
     async def async_step_battery_connection_hoymiles(self, user_input: dict[str, Any] | None = None) -> FlowResult:
         """Configure a Hoymiles MQTT device id in the options flow."""

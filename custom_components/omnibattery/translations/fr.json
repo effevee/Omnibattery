@@ -621,7 +621,7 @@
         "title": "Configure battery {battery_num} — Connection (Huawei)",
         "description": "Omnibattery reads this battery over Modbus and sends its set-points through the Huawei Solar integration, so it needs both: a Modbus endpoint and the battery device. Point the Modbus address at a Modbus proxy rather than straight at the inverter — the Huawei Solar integration already holds a connection to it.",
         "data": {"name": "Name", "host": "IP Address", "port": "Modbus Port", "slave_id": "Modbus Slave ID", "huawei_battery_device": "Huawei Solar battery device", "huawei_direct_write": "Direct Modbus writes"},
-        "data_description": {"name": "Descriptive name to identify this battery", "host": "Address of the Modbus proxy or inverter Omnibattery reads from", "port": "Modbus TCP port (default 502)", "slave_id": "Unit ID of the inverter, not of the EMMA or a charger", "huawei_battery_device": "The 'Batteries' device of the Huawei Solar integration; set-points are sent through its services", "huawei_direct_write": "Write set-points as Modbus registers instead of calling the Huawei Solar integration's services. Same register sequence, but without the detour through the service layer or the wait on that integration's communication lock. Off by default — enable it once the proven path is working."}
+        "data_description": {"name": "Descriptive name to identify this battery", "host": "Address of the Modbus proxy or inverter Omnibattery reads from", "port": "Modbus TCP port (default 502)", "slave_id": "Unit ID of the inverter, not of the EMMA or a charger", "huawei_battery_device": "Only needed when direct Modbus writes are off, in which case set-points go through the Huawei Solar integration's services. With direct writes, leave it empty.", "huawei_direct_write": "Write set-points as Modbus registers instead of calling the Huawei Solar integration's services. Same register sequence, but without the detour through the service layer or the wait on that integration's communication lock. Off by default — enable it once the proven path is working."}
       },
       "battery_connection_anker": {
         "title": "Configure battery {battery_num} — Connection (Anker)",
@@ -644,6 +644,7 @@
       "invalid_mac": "Cela ne ressemble pas à une adresse MAC. Six paires de chiffres hexadécimaux sont attendues, par exemple dc:04:5a:14:6b:33.",
       "cannot_connect": "Impossible de se connecter à la batterie. Vérifiez l'adresse IP et que la batterie est accessible sur le réseau.",
       "no_battery": "Inverter reached, but it reports no battery. Check that the LUNA2000 is attached and the Modbus slave ID points at the inverter.",
+      "huawei_device_required": "Without direct Modbus writes, Omnibattery controls the battery through the Huawei Solar integration's services, and those address it by device. Either pick the device or enable direct writes.",
       "esphome_entities_missing": "Il manque des entités requises à l'appareil ESPHome sélectionné : {missing}. Vérifiez qu'il exécute le firmware marstek-lilygo-rs485 avec les noms d'entités d'origine.",
       "sensor_not_found": "Le capteur de prévision solaire n'existe pas. Vérifiez que le capteur est disponible.",
       "invalid_unit": "Le capteur de prévision solaire doit avoir 'kWh' ou 'Wh' comme unité.",
@@ -1208,7 +1209,7 @@
         "title": "Configure battery {battery_num} — Connection (Huawei)",
         "description": "Modify the Modbus endpoint and the Huawei Solar battery device used for battery {battery_num}.",
         "data": {"name": "Name", "host": "IP Address", "port": "Modbus Port", "slave_id": "Modbus Slave ID", "huawei_battery_device": "Huawei Solar battery device", "huawei_direct_write": "Direct Modbus writes"},
-        "data_description": {"name": "Descriptive name to identify this battery", "host": "Address of the Modbus proxy or inverter Omnibattery reads from", "port": "Modbus TCP port (default 502)", "slave_id": "Unit ID of the inverter, not of the EMMA or a charger", "huawei_battery_device": "The 'Batteries' device of the Huawei Solar integration; set-points are sent through its services", "huawei_direct_write": "Write set-points as Modbus registers instead of calling the Huawei Solar integration's services. Same register sequence, but without the detour through the service layer or the wait on that integration's communication lock. Off by default — enable it once the proven path is working."}
+        "data_description": {"name": "Descriptive name to identify this battery", "host": "Address of the Modbus proxy or inverter Omnibattery reads from", "port": "Modbus TCP port (default 502)", "slave_id": "Unit ID of the inverter, not of the EMMA or a charger", "huawei_battery_device": "Only needed when direct Modbus writes are off, in which case set-points go through the Huawei Solar integration's services. With direct writes, leave it empty.", "huawei_direct_write": "Write set-points as Modbus registers instead of calling the Huawei Solar integration's services. Same register sequence, but without the detour through the service layer or the wait on that integration's communication lock. Off by default — enable it once the proven path is working."}
       },
       "battery_connection_anker": {
         "title": "Configure battery {battery_num} — Connection (Anker)",
@@ -1231,6 +1232,7 @@
       "invalid_mac": "Cela ne ressemble pas à une adresse MAC. Six paires de chiffres hexadécimaux sont attendues, par exemple dc:04:5a:14:6b:33.",
       "cannot_connect": "Impossible de se connecter à la batterie. Vérifiez l'adresse IP et que la batterie est accessible sur le réseau.",
       "no_battery": "Inverter reached, but it reports no battery. Check that the LUNA2000 is attached and the Modbus slave ID points at the inverter.",
+      "huawei_device_required": "Without direct Modbus writes, Omnibattery controls the battery through the Huawei Solar integration's services, and those address it by device. Either pick the device or enable direct writes.",
       "esphome_entities_missing": "Il manque des entités requises à l'appareil ESPHome sélectionné : {missing}. Vérifiez qu'il exécute le firmware marstek-lilygo-rs485 avec les noms d'entités d'origine.",
       "sensor_not_found": "Le capteur de prévision solaire n'existe pas. Vérifiez que le capteur est disponible.",
       "invalid_unit": "Le capteur de prévision solaire doit avoir 'kWh' ou 'Wh' comme unité.",
