@@ -127,6 +127,7 @@ All registers FC03 holding, unit id 4, verified against the corresponding
 | `ac_offgrid_power` | O | — | — | derived (§13.5) | medium | D | [x] |
 | `device_name` | O | 30000 | str(15) | — | very_low | N | [x] |
 | `serial_number` | O | 37052 | str(10) | — | very_low | N | [x] |
+| `inverter_serial_number` | O | 30015 | str(10) | — | very_low | N | [x] |
 | `software_version` | O | 37814 | str(15) | — | very_low | N | [x] |
 | `pack1..3_firmware_version` | O | 38210/38252/38294 | str(15) | — | very_low | N | [x] |
 | `max_cell_voltage` / `min_cell_voltage` | O | — | — | **X** | — | X | — |
@@ -167,6 +168,16 @@ last so a sequence failing earlier leaves the inverter untouched.
 **The service validates power against the register maximum** and raises
 `ValueError: Power cannot be more than 7000W`. Configuring a limit above the
 BMS figure produces failing writes, not clamped ones.
+
+**The setup names the battery twice.** On the service path a Modbus address
+identifies the inverter and a registry device identifies the battery, and
+nothing forces those to be the same unit — Huawei inverters cascade, so a
+two-inverter bus can readily have telemetry coming from one while the commands
+land on the other. Register 30015 carries the inverter serial, which is also
+what `huawei_solar` builds its device identifiers from, so the config flow
+compares the two and refuses a pairing that contradicts itself. A serial that
+is simply absent — older `huawei_solar` releases leave `serial_number` unset —
+never blocks the setup; only a contradiction does.
 
 **The cutoff entities live on two different devices.** `huawei_solar` puts the
 charge cutoff on the inverter and the discharge cutoff on the battery, so

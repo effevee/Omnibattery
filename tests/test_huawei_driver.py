@@ -1355,3 +1355,249 @@ def test_the_candidate_list_covers_the_known_layouts():
     # reference installation's inverter sits behind its energy manager.
     assert _SLAVE_ID_CANDIDATES[0] == 1
     assert 4 in _SLAVE_ID_CANDIDATES
+
+
+def test_the_slave_id_field_is_empty_by_default():
+    """Empty means "go and find it", so nothing may be prefilled on a new entry.
+
+    A prefilled guess would invite the user to accept a wrong one — the id is
+    not derivable, and a wrong one reads a charger or an energy manager.
+    """
+    import voluptuous as vol
+    from custom_components.omnibattery.config_flow import MarstekVenusConfigFlow
+
+    schema = MarstekVenusConfigFlow._huawei_schema({}, 1)
+    marker = next(m for m in schema.schema if m.schema == "slave_id")
+    assert marker.default is vol.UNDEFINED
+    assert (marker.description or {}).get("suggested_value") is None
+
+
+def test_an_existing_slave_id_is_offered_again_on_reconfigure():
+    from custom_components.omnibattery.config_flow import MarstekVenusConfigFlow
+
+    schema = MarstekVenusConfigFlow._huawei_schema({"slave_id": 4}, 1)
+    marker = next(m for m in schema.schema if m.schema == "slave_id")
+    assert marker.description["suggested_value"] == 4
+
+
+def test_the_empty_field_is_explained_in_every_language():
+    """A field that does something when left blank has to say so."""
+    import glob
+    import json
+
+    for path in ["custom_components/omnibattery/strings.json"] + sorted(
+        glob.glob("custom_components/omnibattery/translations/*.json")
+    ):
+        step = json.load(open(path, encoding="utf-8"))["config"]["step"]
+        data = step["battery_connection_huawei"]["data"]
+        hint = step["battery_connection_huawei"]["data_description"]["slave_id"]
+        assert "empty" in data["slave_id"].lower() or "leer" in data["slave_id"].lower(), path
+        assert "empty" in hint.lower() or "leer" in hint.lower(), path
+
+
+# ----------------------------------------------------------------------
+# pairing the Modbus address with the huawei_solar device
+#
+# On the service path the battery is named twice: once as a Modbus address and
+# once as a device in the registry. Nothing forces those to be the same
+# inverter — and Huawei inverters can be cascaded, so on a two-inverter bus the
+# wrong pairing reads one unit and commands the other. The inverter serial
+# appears on both sides (register 30015, and huawei_solar's device identifier),
+# so the pairing is checkable. On the reference installation both read
+# BT24B1457565.
+# ----------------------------------------------------------------------
+def _huawei_flow(monkeypatch, *, probe, devices=None, huawei_solar_installed=True):
+    """A config flow whose Huawei probe and device registry are faked."""
+    from types import SimpleNamespace
+
+    from custom_components.omnibattery import config_flow as mod
+
+    flow = mod.MarstekVenusConfigFlow()
+    flow.battery_index = 0
+    flow.config_data = {"num_batteries": 1}
+    flow._current_battery_data = {"brand": "huawei"}
+    flow.hass = SimpleNamespace(
+        config_entries=SimpleNamespace(
+            async_entries=lambda domain: [object()] if huawei_solar_installed else []
+        )
+    )
+    monkeypatch.setattr(mod.HuaweiSolarDriver, "probe", AsyncMock(return_value=probe))
+    registry = MagicMock()
+    registry.async_get.side_effect = (devices or {}).get
+    monkeypatch.setattr(mod.dr, "async_get", lambda hass: registry)
+    return flow
+
+
+def _huawei_device(serial=None, identifier=None, via=None):
+    from types import SimpleNamespace
+
+    return SimpleNamespace(
+        serial_number=serial,
+        identifiers={("huawei_solar", identifier)} if identifier else set(),
+        via_device_id=via,
+    )
+
+
+_HUAWEI_INPUT = {
+    "name": "Huawei LUNA2000",
+    "host": "192.168.1.5",
+    "port": 502,
+    "slave_id": 4,
+    "huawei_battery_device": "dev-batt",
+    "huawei_direct_write": False,
+}
+
+
+@pytest.mark.asyncio
+async def test_a_battery_from_another_inverter_is_refused(monkeypatch):
+    """Cascade: the device hangs off inverter B, the address points at A."""
+    flow = _huawei_flow(
+        monkeypatch,
+        probe=(True, "SUN2000-8K-MAP0", 7000, 7000, "BT24B1457565"),
+        devices={
+            "dev-batt": _huawei_device(identifier="battery-2", via="dev-inv-2"),
+            "dev-inv-2": _huawei_device(serial="BT24B9999999"),
+        },
+    )
+    form = await flow.async_step_battery_connection_huawei(dict(_HUAWEI_INPUT))
+
+    assert form["errors"] == {"huawei_battery_device": "huawei_device_mismatch"}
+    assert form["step_id"] == "battery_connection_huawei"
+    # Nothing was committed, so the user lands back on the same form.
+    assert "slave_id" not in flow._current_battery_data
+
+
+@pytest.mark.asyncio
+async def test_a_battery_on_the_probed_inverter_is_accepted(monkeypatch):
+    flow = _huawei_flow(
+        monkeypatch,
+        probe=(True, "SUN2000-8K-MAP0", 7000, 7000, "BT24B1457565"),
+        devices={
+            "dev-batt": _huawei_device(identifier="battery", via="dev-inv"),
+            "dev-inv": _huawei_device(serial="bt24b1457565"),  # registries vary in case
+        },
+    )
+    form = await flow.async_step_battery_connection_huawei(dict(_HUAWEI_INPUT))
+
+    assert form["step_id"] == "battery_limits"
+    assert flow._current_battery_data["slave_id"] == 4
+    assert flow._current_battery_data["device_max_charge_power"] == 7000
+
+
+@pytest.mark.asyncio
+async def test_a_device_whose_inverter_is_unknown_is_not_blocked(monkeypatch):
+    """Only a contradiction may stop the flow, never a missing serial.
+
+    Older huawei_solar releases do not fill serial_number, and a firmware that
+    leaves register 30015 empty is not a reason to refuse a working setup.
+    """
+    flow = _huawei_flow(
+        monkeypatch,
+        probe=(True, "SUN2000-8K-MAP0", 7000, 7000, "BT24B1457565"),
+        devices={"dev-batt": _huawei_device()},
+    )
+    assert (await flow.async_step_battery_connection_huawei(dict(_HUAWEI_INPUT)))[
+        "step_id"
+    ] == "battery_limits"
+
+    flow = _huawei_flow(
+        monkeypatch,
+        probe=(True, "SUN2000-8K-MAP0", 7000, 7000, None),
+        devices={"dev-batt": _huawei_device(serial="BT24B9999999")},
+    )
+    assert (await flow.async_step_battery_connection_huawei(dict(_HUAWEI_INPUT)))[
+        "step_id"
+    ] == "battery_limits"
+
+
+@pytest.mark.asyncio
+async def test_the_serial_identifies_the_inverter_even_without_a_parent(monkeypatch):
+    """huawei_solar names the inverter device itself by serial."""
+    flow = _huawei_flow(
+        monkeypatch,
+        probe=(True, "SUN2000-8K-MAP0", 7000, 7000, "BT24B1457565"),
+        devices={"dev-batt": _huawei_device(identifier="BT24B9999999")},
+    )
+    form = await flow.async_step_battery_connection_huawei(dict(_HUAWEI_INPUT))
+    assert form["errors"] == {"huawei_battery_device": "huawei_device_mismatch"}
+
+
+@pytest.mark.asyncio
+async def test_a_missing_huawei_solar_integration_is_named_as_such(monkeypatch):
+    """"Pick a device" is unhelpful advice when there are no devices to pick."""
+    payload = dict(_HUAWEI_INPUT, huawei_battery_device="")
+
+    flow = _huawei_flow(monkeypatch, probe=(False, None, None, None, None))
+    form = await flow.async_step_battery_connection_huawei(dict(payload))
+    assert form["errors"] == {"huawei_battery_device": "huawei_device_required"}
+
+    flow = _huawei_flow(
+        monkeypatch, probe=(False, None, None, None, None), huawei_solar_installed=False
+    )
+    form = await flow.async_step_battery_connection_huawei(dict(payload))
+    assert form["errors"] == {"huawei_battery_device": "huawei_solar_missing"}
+
+
+@pytest.mark.asyncio
+async def test_direct_writes_need_no_device_at_all(monkeypatch):
+    """The whole point of the direct path is not depending on that integration."""
+    flow = _huawei_flow(
+        monkeypatch,
+        probe=(True, "SUN2000-8K-MAP0", 7000, 7000, "BT24B1457565"),
+        huawei_solar_installed=False,
+    )
+    form = await flow.async_step_battery_connection_huawei(
+        dict(_HUAWEI_INPUT, huawei_battery_device="", huawei_direct_write=True)
+    )
+    assert form["step_id"] == "battery_limits"
+    assert flow._current_battery_data["huawei_direct_write"] is True
+
+
+def test_both_new_errors_are_explained_in_every_language():
+    import glob
+    import json
+
+    for path in ["custom_components/omnibattery/strings.json"] + sorted(
+        glob.glob("custom_components/omnibattery/translations/*.json")
+    ):
+        content = json.load(open(path, encoding="utf-8"))
+        for section in ("config", "options"):
+            errors = content[section]["error"]
+            for key in ("huawei_solar_missing", "huawei_device_mismatch"):
+                assert errors.get(key), (path, section, key)
+
+
+def test_the_options_flow_carries_the_same_huawei_logic():
+    """Both flows hold their own copy of these steps; they must not drift.
+
+    Setup and reconfiguration reach the same hardware, so a check added to one
+    and forgotten in the other would only be found by the user it fails on.
+    """
+    import inspect
+
+    from custom_components.omnibattery.config_flow import (
+        MarstekVenusConfigFlow,
+        OptionsFlowHandler,
+    )
+
+    for name in (
+        "async_step_battery_connection_huawei",
+        "async_step_battery_connection_huawei_slave",
+        "_huawei_store",
+        "_huawei_search",
+    ):
+        setup = inspect.getsource(getattr(MarstekVenusConfigFlow, name))
+        options = inspect.getsource(getattr(OptionsFlowHandler, name))
+        assert setup == options, name
+
+
+@pytest.mark.asyncio
+async def test_a_serial_carried_with_a_suffix_still_counts_as_a_match(monkeypatch):
+    """huawei_solar derives child identifiers from the inverter serial."""
+    flow = _huawei_flow(
+        monkeypatch,
+        probe=(True, "SUN2000-8K-MAP0", 7000, 7000, "BT24B1457565"),
+        devices={"dev-batt": _huawei_device(identifier="BT24B1457565_batteries")},
+    )
+    form = await flow.async_step_battery_connection_huawei(dict(_HUAWEI_INPUT))
+    assert form["step_id"] == "battery_limits"

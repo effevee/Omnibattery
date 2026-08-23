@@ -238,7 +238,12 @@ _BLOCK_RATING = (30073, 4, "very_low", {
     # rated value above it is the nameplate and can be lower.
     "inverter_max_power": (2, "u32", 1),
 })
-_BLOCK_MODEL = (30000, 15, "very_low", {"device_name": (0, "str", 15)})
+_BLOCK_MODEL = (30000, 25, "very_low", {
+    "device_name": (0, "str", 15),
+    # The inverter's own serial, which huawei_solar also uses as its device
+    # identifier — so it ties a Modbus address to a device in the registry.
+    "inverter_serial_number": (15, "str", 10),
+})
 _BLOCK_SERIAL = (37052, 10, "very_low", {"serial_number": (0, "str", 10)})
 _BLOCK_STORAGE_SW = (37814, 15, "very_low", {"software_version": (0, "str", 15)})
 _BLOCK_INVERTER_SW = (30050, 15, "very_low", {"inverter_software_version": (0, "str", 15)})
@@ -1024,24 +1029,31 @@ class HuaweiSolarDriver(BatteryDriver):
     @classmethod
     async def probe(
         cls, hass: HomeAssistant, host: str, port: int = 502, slave_id: int = 1
-    ) -> tuple[bool, Optional[str], Optional[int], Optional[int]]:
-        """Check the read path and report model plus the hardware power caps."""
+    ) -> tuple[bool, Optional[str], Optional[int], Optional[int], Optional[str]]:
+        """Check the read path and report model, power caps and the serial.
+
+        The serial is what lets a caller confirm that a device picked in the UI
+        and a Modbus address point at the same inverter.
+        """
         driver = cls(hass, host, port=port, slave_id=slave_id)
         try:
             if not await driver.connect():
-                return False, None, None, None
-            data = await driver.read_telemetry(
-                ["device_name", "battery_soc", "max_charge_power", "max_discharge_power"]
-            )
+                return False, None, None, None, None
+            data = await driver.read_telemetry([
+                "device_name", "battery_soc", "max_charge_power",
+                "max_discharge_power", "inverter_serial_number",
+            ])
+            serial = data.get("inverter_serial_number")
             # SOC proves a battery is actually attached; the model alone would
             # also match an inverter running without storage.
             if "battery_soc" not in data:
-                return False, data.get("device_name"), None, None
+                return False, data.get("device_name"), None, None, serial
             return (
                 True,
                 data.get("device_name"),
                 data.get("max_charge_power"),
                 data.get("max_discharge_power"),
+                serial,
             )
         finally:
             await driver.close()
