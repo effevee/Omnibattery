@@ -1687,10 +1687,15 @@ class MarstekVenusConfigFlow(LegacyDomainMigrationMixin, ConfigFlow, domain=DOMA
             # No default: an empty field means "go and find it". The id is not
             # derivable, so prefilling a guess would only invite the user to
             # accept a wrong one.
+            # A selector, not a bare vol.Any: the frontend is handed a
+            # serialised schema, and vol.Any has no serialised form — a form
+            # containing one cannot be drawn at all.
             vol.Optional(
                 CONF_SLAVE_ID,
                 description={"suggested_value": current_battery.get(CONF_SLAVE_ID)},
-            ): vol.Any(None, "", vol.Coerce(int)),
+            ): NumberSelector(
+                NumberSelectorConfig(min=0, max=247, step=1, mode=NumberSelectorMode.BOX)
+            ),
             vol.Optional(
                 "huawei_direct_write",
                 default=current_battery.get("huawei_direct_write", False),
@@ -3923,10 +3928,15 @@ class OptionsFlowHandler(OptionsFlow):
             # No default: an empty field means "go and find it". The id is not
             # derivable, so prefilling a guess would only invite the user to
             # accept a wrong one.
+            # A selector, not a bare vol.Any: the frontend is handed a
+            # serialised schema, and vol.Any has no serialised form — a form
+            # containing one cannot be drawn at all.
             vol.Optional(
                 CONF_SLAVE_ID,
                 description={"suggested_value": current_battery.get(CONF_SLAVE_ID)},
-            ): vol.Any(None, "", vol.Coerce(int)),
+            ): NumberSelector(
+                NumberSelectorConfig(min=0, max=247, step=1, mode=NumberSelectorMode.BOX)
+            ),
             vol.Optional(
                 "huawei_direct_write",
                 default=current_battery.get("huawei_direct_write", False),

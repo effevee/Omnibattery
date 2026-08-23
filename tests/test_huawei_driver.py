@@ -1738,3 +1738,47 @@ async def test_an_unknown_storage_falls_back_to_the_inverter_model():
     driver = _driver(_fake_client({**_LIVE_BLOCKS, 47000: [7]}))
     await driver.connect()
     assert driver.model_label == "SUN2000-8K-MAP0"
+
+
+# ----------------------------------------------------------------------
+# form serialisation
+#
+# Home Assistant hands the frontend a serialised copy of every form schema.
+# Anything voluptuous_serialize cannot convert makes the whole step fail with
+# "Unknown error occurred" before it is ever drawn — which is what a bare
+# vol.Any in the slave-id field did: the Huawei setup could not be opened at
+# all, and no test noticed because inspecting markers never serialises them.
+# ----------------------------------------------------------------------
+def _serialise(schema):
+    import voluptuous_serialize
+    from homeassistant.helpers import config_validation as cv
+
+    return voluptuous_serialize.convert(schema, custom_serializer=cv.custom_serializer)
+
+
+def test_every_huawei_form_can_be_sent_to_the_frontend():
+    from custom_components.omnibattery.config_flow import (
+        MarstekVenusConfigFlow,
+        OptionsFlowHandler,
+    )
+
+    for flow in (MarstekVenusConfigFlow, OptionsFlowHandler):
+        assert _serialise(flow._huawei_schema({}, 1))
+        assert _serialise(flow._huawei_schema({"slave_id": 4, "host": "1.2.3.4"}, 2))
+        assert _serialise(flow._huawei_slave_schema([(4, "SUN2000-8K-MAP0", True)]))
+
+
+@pytest.mark.asyncio
+async def test_the_rendered_connection_form_survives_serialisation(monkeypatch):
+    """The step's own output, not just the schema helper it happens to call."""
+    flow = _huawei_flow(monkeypatch, probe=(False, None, None, None, None))
+    form = await flow.async_step_battery_connection_huawei()
+    fields = {field["name"]: field for field in _serialise(form["data_schema"])}
+
+    assert set(fields) == {
+        "name", "host", "port", "slave_id", "huawei_direct_write",
+        "huawei_battery_device",
+    }
+    # Optional and unprefilled: empty means "go and find it".
+    assert fields["slave_id"]["optional"] is True
+    assert "default" not in fields["slave_id"]
