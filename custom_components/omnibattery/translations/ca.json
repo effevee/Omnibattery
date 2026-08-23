@@ -1703,6 +1703,9 @@
       "inverter_software_version": {
         "name": "Microprogramari de l'Inversor"
       },
+      "grid_power": {
+        "name": "Potència de Xarxa"
+      },
       "inverter_ac_power": {
         "name": "Potència CA de l'Inversor"
       },

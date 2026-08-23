@@ -1517,7 +1517,7 @@ def test_the_empty_field_is_explained_in_every_language():
 # so the pairing is checkable. On the reference installation both read
 # BT24B1457565.
 # ----------------------------------------------------------------------
-def _huawei_flow(monkeypatch, *, probe, devices=None, huawei_solar_installed=True):
+def _huawei_flow(monkeypatch, *, probe, devices=None, huawei_solar_installed=True, emma=None):
     """A config flow whose Huawei probe and device registry are faked."""
     from types import SimpleNamespace
 
@@ -1533,6 +1533,11 @@ def _huawei_flow(monkeypatch, *, probe, devices=None, huawei_solar_installed=Tru
         )
     )
     monkeypatch.setattr(mod.HuaweiSolarDriver, "probe", AsyncMock(return_value=probe))
+    # Never let a flow test reach for the network: the EMMA scan would sit on
+    # connection timeouts for every candidate id.
+    monkeypatch.setattr(
+        mod.HuaweiSolarDriver, "find_emma_slave_id", AsyncMock(return_value=emma)
+    )
     registry = MagicMock()
     registry.async_get.side_effect = (devices or {}).get
     monkeypatch.setattr(mod.dr, "async_get", lambda hass: registry)
@@ -1869,3 +1874,88 @@ async def test_an_unread_register_leaves_the_configured_limit_in_charge():
     hass = _hass_with_services()
     driver = _driver(_fake_client({}), hass=hass, max_charge_power_w=7500, max_discharge_power_w=7500)
     assert (await driver.apply_setpoint(7500, read_back=False)).net_power_w == 7500
+
+
+# ----------------------------------------------------------------------
+# the EMMA's grid meter
+#
+# An installation with an EMMA is metered by it, and may well have no other
+# meter at all. huawei_solar publishes the same value on a 30 s coordinator —
+# measured on the reference installation — which is far too slow to control
+# against. Read here it is live on every request, at 25 ms per read.
+# ----------------------------------------------------------------------
+@pytest.mark.asyncio
+async def test_the_grid_meter_is_read_from_the_emmas_own_unit():
+    meter = _fake_client({31657: [0xFFFF, 0xFFE5]})   # -27 W, exporting
+    driver = _driver(_fake_client(_LIVE_BLOCKS), meter_client=meter)
+    data = await driver.read_telemetry(["grid_power"])
+    # Sign matches the Omnibattery convention: positive imports, negative exports.
+    assert data["grid_power"] == -27
+
+
+@pytest.mark.asyncio
+async def test_no_emma_means_no_grid_entity():
+    """An entity that could only ever read unknown is worse than none."""
+    driver = _driver(_fake_client(_LIVE_BLOCKS))
+    assert "grid_power" not in {row["key"] for row in driver.sensor_definitions}
+    assert "grid_power" not in {k for g in driver.read_groups for k in g.keys}
+
+
+@pytest.mark.asyncio
+async def test_the_meter_joins_the_fast_group():
+    """A grid reading is only worth having if it arrives at control speed."""
+    driver = _driver(_fake_client(_LIVE_BLOCKS), meter_client=_fake_client({31657: [0, 0]}))
+    fast = next(g for g in driver.read_groups if g.scan_interval == "high")
+    assert "grid_power" in fast.keys
+    assert "grid_power" in {row["key"] for row in driver.sensor_definitions}
+
+
+@pytest.mark.asyncio
+async def test_a_silent_meter_costs_the_reading_and_nothing_else():
+    meter = _fake_client({})
+    driver = _driver(_fake_client(_LIVE_BLOCKS), meter_client=meter)
+    data = await driver.read_telemetry()
+    assert "grid_power" not in data
+    assert data["battery_soc"] == 61.0
+
+
+@pytest.mark.asyncio
+async def test_the_emma_is_found_by_its_model_name(monkeypatch):
+    """Users should not have to know their energy manager's unit id."""
+    inverter = {30000: _text("SUN2000-8K-MAP0", 15)}
+    emma = {30000: _text("SmartHEMS", 15)}
+    mod = _bus(monkeypatch, **{"1": {}, "0": emma, "4": inverter})
+    monkeypatch.setattr(mod, "_SLAVE_ID_CANDIDATES", (1, 0, 4))
+
+    found = await mod.HuaweiSolarDriver.find_emma_slave_id(MagicMock(), "1.2.3.4", 502)
+    assert found == 0
+
+
+@pytest.mark.asyncio
+async def test_a_bus_without_an_emma_reports_none(monkeypatch):
+    mod = _bus(monkeypatch, **{"4": {30000: _text("SUN2000-8K-MAP0", 15)}})
+    monkeypatch.setattr(mod, "_SLAVE_ID_CANDIDATES", (1, 4))
+    assert await mod.HuaweiSolarDriver.find_emma_slave_id(MagicMock(), "1.2.3.4", 502) is None
+
+
+@pytest.mark.asyncio
+async def test_a_discovered_emma_is_stored_with_the_battery(monkeypatch):
+    flow = _huawei_flow(
+        monkeypatch,
+        probe=(True, "SUN2000-8K-MAP0", 7000, 7000, "BT24B1457565", 8800),
+        devices={"dev-batt": _huawei_device(identifier="BT24B1457565")},
+        emma=0,
+    )
+    await flow.async_step_battery_connection_huawei(dict(_HUAWEI_INPUT))
+    assert flow._current_battery_data["huawei_emma_slave_id"] == 0
+
+
+def test_the_grid_sensor_is_named_in_every_language():
+    import glob
+    import json
+
+    for path in ["custom_components/omnibattery/strings.json"] + sorted(
+        glob.glob("custom_components/omnibattery/translations/*.json")
+    ):
+        entity = json.load(open(path, encoding="utf-8"))["entity"]["sensor"]
+        assert entity["grid_power"]["name"], path

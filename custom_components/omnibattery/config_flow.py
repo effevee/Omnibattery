@@ -1663,6 +1663,14 @@ class MarstekVenusConfigFlow(LegacyDomainMigrationMixin, ConfigFlow, domain=DOMA
             self._current_battery_data["device_max_discharge_power"] = int(max_discharge)
         if inverter_max:
             self._current_battery_data["device_inverter_max_power"] = int(inverter_max)
+        # An EMMA on the same bus carries the installation's grid meter. Finding
+        # it here means a user with one gets a grid reading fast enough to
+        # control against without configuring anything.
+        emma = await HuaweiSolarDriver.find_emma_slave_id(
+            self.hass, self._huawei_pending[CONF_HOST], self._huawei_pending[CONF_PORT]
+        )
+        if emma is not None:
+            self._current_battery_data["huawei_emma_slave_id"] = emma
         # What the battery reports today is the sensible starting value; the
         # form's ceiling is wider, because adding a pack raises it.
         for key, probed in (
@@ -3916,6 +3924,14 @@ class OptionsFlowHandler(OptionsFlow):
             self._current_battery_data["device_max_discharge_power"] = int(max_discharge)
         if inverter_max:
             self._current_battery_data["device_inverter_max_power"] = int(inverter_max)
+        # An EMMA on the same bus carries the installation's grid meter. Finding
+        # it here means a user with one gets a grid reading fast enough to
+        # control against without configuring anything.
+        emma = await HuaweiSolarDriver.find_emma_slave_id(
+            self.hass, self._huawei_pending[CONF_HOST], self._huawei_pending[CONF_PORT]
+        )
+        if emma is not None:
+            self._current_battery_data["huawei_emma_slave_id"] = emma
         # What the battery reports today is the sensible starting value; the
         # form's ceiling is wider, because adding a pack raises it.
         for key, probed in (

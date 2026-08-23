@@ -1703,6 +1703,9 @@
       "inverter_software_version": {
         "name": "Firmware del Inversor"
       },
+      "grid_power": {
+        "name": "Potencia de Red"
+      },
       "inverter_ac_power": {
         "name": "Potencia CA del Inversor"
       },

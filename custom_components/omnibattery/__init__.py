@@ -7341,6 +7341,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             esphome_device_id=battery_config.get("esphome_device_id"),
             huawei_battery_device_id=battery_config.get("huawei_battery_device_id"),
             huawei_direct_write=battery_config.get("huawei_direct_write", False),
+            huawei_emma_slave_id=battery_config.get("huawei_emma_slave_id"),
             username=battery_config.get(CONF_USERNAME, ""),
             password=battery_config.get(CONF_PASSWORD, ""),
             battery_manual_mode_enabled=battery_config.get(
