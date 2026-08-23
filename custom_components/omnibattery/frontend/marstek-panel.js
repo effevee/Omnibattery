@@ -2360,6 +2360,8 @@ class MarstekVenusPanel extends HTMLElement {
       actualSolar, forecastSolar, actualConsumption, forecastConsumption,
       actualMask: pickOperation(["actual_action_mask"]),
       plannedMask: plannedActions,
+      actualCoexistence: pickOperation(["actual_coexistence_mask"]),
+      plannedCoexistence: pickOperation(["planned_coexistence_mask"]),
       actualContext: pickOperation(["actual_context_mask"]),
       plannedContext: pickOperation(["planned_context_mask"]),
       gridDecision, actualDecision, plannedDecision,
@@ -2446,18 +2448,50 @@ class MarstekVenusPanel extends HTMLElement {
     const plannedMask = this._dailyOperationMaskAt(snapshot.plannedMask, index);
     let mask = status === "forecast" ? plannedMask : actualMask;
     if (status === "current") {
-      // The open interval contains observed history and a projection for its
-      // remaining minutes. Do not present a projected solar charge as already
-      // active: until it is observed, it is only a solar opportunity.
-      mask = (actualMask || 0) | ((plannedMask || 0) & ~1);
+      // The tooltip labels this interval as observed, so never merge actions
+      // projected for its remaining minutes into the observed mask.
+      mask = actualMask || 0;
     }
     if (snapshot.isSkipped[index]) mask = 0;
     const contextActual = this._dailyOperationMaskAt(snapshot.actualContext, index);
     const contextPlanned = this._dailyOperationMaskAt(snapshot.plannedContext, index);
     let context = status === "forecast" ? contextPlanned : contextActual;
-    if (status === "current") context = contextActual == null ? contextPlanned : contextPlanned == null ? contextActual : contextActual | contextPlanned;
+    if (status === "current") context = contextActual || 0;
     const decision = this._dailyOperationChoiceAt(snapshot.gridDecision, index) ||
       (status === "forecast" ? this._dailyOperationChoiceAt(snapshot.plannedDecision, index) : this._dailyOperationChoiceAt(snapshot.actualDecision, index));
+    const actionSeconds = {};
+    if (snapshot.observedSeconds && typeof snapshot.observedSeconds === "object") {
+      for (const bit of [1, 2, 4]) {
+        const key = this._dailyOperationActionKey(bit);
+        if (Array.isArray(snapshot.observedSeconds)) {
+          const cellDurations = snapshot.observedSeconds[index] || {};
+          const canonical = key === "solar" ? "solar_charge" : key === "grid" ? "grid_charge" : "discharge";
+          actionSeconds[key] = this._dailyOperationNumber(
+            cellDurations[key] ?? cellDurations[canonical] ?? cellDurations[String(bit)]
+          );
+        } else {
+          const source = snapshot.observedSeconds[key]
+            || snapshot.observedSeconds[`${key}_charge`]
+            || snapshot.observedSeconds[String(bit)];
+          actionSeconds[key] = this._dailyOperationValueAt(source, index);
+        }
+      }
+    }
+    const coexistence = status === "forecast"
+      ? this._dailyOperationMaskAt(snapshot.plannedCoexistence, index)
+      : this._dailyOperationMaskAt(snapshot.actualCoexistence, index);
+    if (status !== "forecast" && this._dailyOperationActionBits(mask).length > 1
+      && this._dailyOperationActionBits((coexistence || 0) & mask).length < 2) {
+      // A quarter-hour mask is a union of every transition. If those actions
+      // were sequential, render the one observed for longest instead of
+      // implying that contradictory flows happened at the same time.
+      const dominant = this._dailyOperationActionBits(mask).reduce((best, bit) => {
+        const key = this._dailyOperationActionKey(bit);
+        const bestKey = this._dailyOperationActionKey(best);
+        return (actionSeconds[key] || 0) > (actionSeconds[bestKey] || 0) ? bit : best;
+      });
+      mask = dominant;
+    }
     const actions = this._dailyOperationActionBits(mask).map((bit) => this._dailyOperationActionKey(bit));
     const solar = status === "forecast"
       ? this._dailyOperationValueAt(snapshot.forecastSolar, index)
@@ -2479,24 +2513,6 @@ class MarstekVenusPanel extends HTMLElement {
     const delay = (delayUntil != null && delayUntil !== "") || (context & 2) !== 0 || topLevelDelay;
     const setpointState = snapshot.setpointInfo && String(snapshot.setpointInfo.state || snapshot.setpointInfo.status || "").toLowerCase();
     const topLevelSetpoint = index === snapshot.currentIndex && ["charging_to_setpoint", "to_setpoint", "charging"].includes(setpointState);
-    const actionSeconds = {};
-    if (snapshot.observedSeconds && typeof snapshot.observedSeconds === "object") {
-      for (const bit of [1, 2, 4]) {
-        const key = this._dailyOperationActionKey(bit);
-        if (Array.isArray(snapshot.observedSeconds)) {
-          const cellDurations = snapshot.observedSeconds[index] || {};
-          const canonical = key === "solar" ? "solar_charge" : key === "grid" ? "grid_charge" : "discharge";
-          actionSeconds[key] = this._dailyOperationNumber(
-            cellDurations[key] ?? cellDurations[canonical] ?? cellDurations[String(bit)]
-          );
-        } else {
-          const source = snapshot.observedSeconds[key]
-            || snapshot.observedSeconds[`${key}_charge`]
-            || snapshot.observedSeconds[String(bit)];
-          actionSeconds[key] = this._dailyOperationValueAt(source, index);
-        }
-      }
-    }
     return {
       index, status, statusLabel: this._dailyOperationStatusLabel(status),
       timeRange: this._dailyOperationTimeRange(index),

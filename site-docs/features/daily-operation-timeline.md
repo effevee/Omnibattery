@@ -25,7 +25,11 @@ charge, without presenting that opportunity as an effective charge. In the
 current quarter, a projected solar charge remains yellow until energy entering
 the battery is observed. A cell can contain up to three actions; diagonal
 patterns and the accessible text preserve the distinction in light and dark
-themes. “Charging to setpoint” is context, not another color. Charge Delay uses
+themes. Actions are combined visually only when they were simultaneous; if the
+battery changed direction within the quarter-hour, the action observed for the
+longest time is shown. The current interval never presents an action projected
+for its remaining minutes as observed. “Charging to setpoint” is context, not
+another color. Charge Delay uses
 a clock marker and an estimated unlock time. A charging interval's tooltip also
 shows the energy that actually entered the battery or, for a future interval,
 the total energy projected from solar and grid.

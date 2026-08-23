@@ -26,7 +26,11 @@ cargar, pero sin mostrar esa posibilidad como una carga efectiva. En el cuarto
 de hora actual, una carga solar prevista permanece amarilla hasta que se observa
 energía entrando en la batería. Una celda puede contener hasta tres acciones; los
 patrones diagonales y el texto accesible mantienen la diferencia con cualquier
-tema. «Carga hasta el setpoint» es contexto, no otro color. El Retraso de
+tema. Solo se combinan visualmente cuando fueron simultáneas; si la batería
+cambió de sentido dentro del cuarto de hora, se muestra la acción observada
+durante más tiempo. El intervalo actual nunca presenta como observada una acción
+que solo está proyectada para sus minutos restantes. «Carga hasta el setpoint»
+es contexto, no otro color. El Retraso de
 Carga usa un reloj y una hora estimada de desbloqueo. El tooltip de una franja
 de carga muestra también la energía que ha entrado realmente en la batería o,
 para una franja futura, la energía total proyectada desde solar y red.
