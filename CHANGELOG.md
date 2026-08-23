@@ -2,6 +2,10 @@
 
 ## [1.4.0b5] - 2026-08-21
 
+### Added
+
+- **Daily operation timeline in the dashboard**: the Summary tab now shows a 24-hour, 15-minute resolution chart with observed and projected battery actions, solar and household energy curves, and total SOC.
+
 ### Changed
 
 - **Multi-battery control was limited to six batteries**: configuration now supports up to ten independently controllable batteries, with per-battery time-slot fields and a responsive dashboard grid that keeps larger fleets' cards usable.
