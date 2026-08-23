@@ -155,7 +155,7 @@ async def test_read_telemetry_decodes_the_reference_installation():
     assert data["total_daily_charging_energy"] == pytest.approx(14.92)
     assert data["charging_cutoff_capacity"] == pytest.approx(100.0)
     assert data["discharging_cutoff_capacity"] == pytest.approx(5.0)
-    assert data["ac_power"] == 758
+    assert data["inverter_ac_power"] == 758
     assert data["solar_power"] == 0
 
 
@@ -668,7 +668,7 @@ def test_device_info_reports_huawei_as_the_manufacturer():
 def _headroom(ceiling, ac_power, battery_power):
     return _driver().dynamic_discharge_limit_w({
         "inverter_max_power": ceiling,
-        "ac_power": ac_power,
+        "inverter_ac_power": ac_power,
         "battery_power": battery_power,
     })
 
@@ -718,11 +718,11 @@ def test_large_system_headroom():
     "data",
     [
         {},
-        {"ac_power": 1000, "battery_power": 0},          # no ceiling
+        {"inverter_ac_power": 1000, "battery_power": 0},          # no ceiling
         {"inverter_max_power": 8800, "battery_power": 0},  # no ac reading
-        {"inverter_max_power": 8800, "ac_power": 1000},    # no battery reading
-        {"inverter_max_power": None, "ac_power": 1, "battery_power": 1},
-        {"inverter_max_power": "x", "ac_power": 1, "battery_power": 1},
+        {"inverter_max_power": 8800, "inverter_ac_power": 1000},    # no battery reading
+        {"inverter_max_power": None, "inverter_ac_power": 1, "battery_power": 1},
+        {"inverter_max_power": "x", "inverter_ac_power": 1, "battery_power": 1},
     ],
 )
 def test_headroom_is_none_when_inputs_are_missing_or_unusable(data):
@@ -732,7 +732,7 @@ def test_headroom_is_none_when_inputs_are_missing_or_unusable(data):
 
 def test_headroom_inputs_stay_polled_even_with_entities_disabled():
     keys = _driver().control_dependency_keys
-    assert {"inverter_max_power", "ac_power", "battery_power"} <= keys
+    assert {"inverter_max_power", "inverter_ac_power", "battery_power"} <= keys
 
 
 @pytest.mark.asyncio
@@ -752,7 +752,7 @@ def test_ac_batteries_keep_their_static_limit():
     """Only DC-coupled hybrids report a dynamic limit; everything else opts out."""
     from custom_components.omnibattery.drivers.base import BatteryDriver
 
-    assert BatteryDriver.dynamic_discharge_limit_w(MagicMock(), {"ac_power": 1}) is None
+    assert BatteryDriver.dynamic_discharge_limit_w(MagicMock(), {"inverter_ac_power": 1}) is None
 
 
 @pytest.mark.parametrize(
@@ -868,7 +868,7 @@ async def test_on_grid_reports_no_backup_output():
     assert data["ac_offgrid_power"] == 0
     assert data["backup_function"] == "Disabled"
     # The AC reading itself is untouched.
-    assert data["ac_power"] == 994
+    assert data["inverter_ac_power"] == 994
 
 
 @pytest.mark.asyncio
@@ -1069,3 +1069,50 @@ async def test_a_missing_firmware_string_does_not_empty_its_group():
     assert "pack1_firmware_version" not in data
     assert data, "an empty snapshot marks the whole battery unavailable"
     assert data["battery_total_energy"] == 13.8
+
+
+# ----------------------------------------------------------------------
+# house-consumption balance
+#
+# The system aggregates derive household load as
+#     home = grid + sum(ac_power) + external_solar
+# treating ac_power as the battery's own AC port, with DC-coupled PV already
+# netted into it. Register 32080 is the whole inverter's AC output on this
+# hybrid — PV included — so publishing it under that key counted the roof array
+# twice: once inside ac_power, once in the external solar sensor.
+# ----------------------------------------------------------------------
+def test_inverter_ac_output_is_not_published_as_the_batterys_ac_port():
+    keys = {d["key"] for d in _driver().sensor_definitions}
+    assert "ac_power" not in keys
+    assert "inverter_ac_power" in keys
+
+
+@pytest.mark.asyncio
+async def test_the_aggregates_fall_back_to_battery_power():
+    """No ac_power means -battery_power is used, which is the real contribution.
+
+    Worked example from the reference installation: 8.87 kW of PV, 8.0 kW of it
+    into the battery, 167 W exported. House load is ~0.7 kW; counting the
+    inverter's AC total as a battery AC port made it read 8.4 kW.
+    """
+    from custom_components.omnibattery.sensors.aggregate_sensors import (
+        MarstekVenusAggregateSensor as Aggregate,
+    )
+
+    data = await _driver().read_telemetry()
+    assert "ac_power" not in data
+    ac_convention = Aggregate._ac_convention_power(data)
+    assert ac_convention == -data["battery_power"]
+
+
+def test_ac_convention_maths_for_the_reference_case():
+    from custom_components.omnibattery.sensors.aggregate_sensors import (
+        MarstekVenusAggregateSensor as Aggregate,
+    )
+
+    # Charging 8000 W: the battery is a load on the AC bus, so its contribution
+    # is negative in the ac_power convention.
+    contribution = Aggregate._ac_convention_power({"battery_power": 8000})
+    assert contribution == -8000
+    # home = grid + contribution + solar, with export counted negative.
+    assert -167 + contribution + 8870 == 703

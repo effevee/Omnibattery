@@ -162,7 +162,14 @@ _BLOCK_PV = (32064, 18, "high", {
     # The panel reads the DC total under "solar_power"; "pv_power" is not a key
     # it knows, so this brand would show an empty solar card under that name.
     "solar_power": (0, "i32", 1),
-    "ac_power": (16, "i32", 1),
+    # Deliberately NOT published as "ac_power". The system aggregates read that
+    # key as the battery's own AC port and add it to grid and external solar to
+    # derive house consumption. On this hybrid, 32080 is the whole inverter's AC
+    # output — PV included — so publishing it there counted the roof array twice
+    # and inflated house consumption by the full PV production. Without the key
+    # the aggregates fall back to -battery_power, which is what a battery with
+    # no AC port of its own actually contributes.
+    "inverter_ac_power": (16, "i32", 1),
 })
 # Per-string DC. Huawei publishes voltage and current separately, so the power
 # the panel wants is derived below rather than read.
@@ -233,7 +240,7 @@ _DERIVED_FROM = {
         f"mppt{index}_power": (f"pv{index}_voltage", f"pv{index}_current")
         for index in range(1, _MAX_PV_STRINGS + 1)
     },
-    "ac_offgrid_power": ("off_grid_state", "ac_power"),
+    "ac_offgrid_power": ("off_grid_state", "inverter_ac_power"),
     "backup_function": ("off_grid_state",),
 }
 
@@ -266,7 +273,7 @@ SENSOR_DEFINITIONS = [
         {"key": f"pack{index}_firmware_version", "name": f"Battery Pack {index} Firmware", "data_type": "char", "icon": "mdi:ticket-confirmation-outline", "category": "diagnostic", "scan_interval": "very_low", "enabled_by_default": True}
         for index in (1, 2, 3)
     ],
-    {"key": "ac_power", "name": "Inverter Active Power", "unit": "W", "device_class": "power", "state_class": "measurement", "scale": 1, "precision": 0, "scan_interval": "high", "enabled_by_default": True},
+    {"key": "inverter_ac_power", "name": "Inverter AC Power", "unit": "W", "device_class": "power", "state_class": "measurement", "scale": 1, "precision": 0, "scan_interval": "high", "enabled_by_default": True},
     {"key": "internal_temperature", "name": "Battery Temperature", "unit": "°C", "device_class": "temperature", "state_class": "measurement", "scale": 1, "precision": 1, "scan_interval": "low", "enabled_by_default": True},
     {"key": "total_charging_energy", "name": "Total Charging Energy", "unit": "kWh", "device_class": "energy", "state_class": "total_increasing", "scale": 1, "precision": 2, "scan_interval": "low", "enabled_by_default": True},
     {"key": "total_discharging_energy", "name": "Total Discharging Energy", "unit": "kWh", "device_class": "energy", "state_class": "total_increasing", "scale": 1, "precision": 2, "scan_interval": "low", "enabled_by_default": True},
@@ -508,7 +515,7 @@ class HuaweiSolarDriver(BatteryDriver):
                 else "Ready" if bits & _STATE3_OFF_GRID_SWITCH_ENABLED
                 else "Disabled"
             )
-            ac_power = snapshot.get("ac_power")
+            ac_power = snapshot.get("inverter_ac_power")
             if ac_power is not None:
                 snapshot["ac_offgrid_power"] = max(0, int(ac_power)) if off_grid else 0
 
@@ -701,7 +708,7 @@ class HuaweiSolarDriver(BatteryDriver):
         currently doing, or the limit would chase its own output and oscillate.
         """
         ceiling = data.get("inverter_max_power")
-        ac_power = data.get("ac_power")
+        ac_power = data.get("inverter_ac_power")
         battery_power = data.get("battery_power")
         if ceiling is None or ac_power is None or battery_power is None:
             # No guess: the caller keeps the static envelope.
@@ -735,7 +742,7 @@ class HuaweiSolarDriver(BatteryDriver):
             "max_charge_power", "max_discharge_power",
             # Inputs of dynamic_discharge_limit_w: the allocator reads them every
             # cycle, so they must keep being polled even with their entities off.
-            "inverter_max_power", "ac_power", "battery_power",
+            "inverter_max_power", "inverter_ac_power", "battery_power",
             "charging_cutoff_capacity", "discharging_cutoff_capacity",
         })
 
