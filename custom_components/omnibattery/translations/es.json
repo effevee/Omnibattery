@@ -1667,6 +1667,63 @@
       "software_version": {
         "name": "Versión de Software"
       },
+      "pv1_voltage": {
+        "name": "Tensión PV1"
+      },
+      "pv2_voltage": {
+        "name": "Tensión PV2"
+      },
+      "pv3_voltage": {
+        "name": "Tensión PV3"
+      },
+      "pv4_voltage": {
+        "name": "Tensión PV4"
+      },
+      "pack1_firmware_version": {
+        "name": "Firmware del Paquete de Baterías 1"
+      },
+      "pack2_firmware_version": {
+        "name": "Firmware del Paquete de Baterías 2"
+      },
+      "pack3_firmware_version": {
+        "name": "Firmware del Paquete de Baterías 3"
+      },
+      "pack1_serial_number": {
+        "name": "Número de Serie del Paquete 1"
+      },
+      "pack2_serial_number": {
+        "name": "Número de Serie del Paquete 2"
+      },
+      "pack3_serial_number": {
+        "name": "Número de Serie del Paquete 3"
+      },
+      "backup_function": {
+        "name": "Función de Respaldo"
+      },
+      "inverter_software_version": {
+        "name": "Firmware del Inversor"
+      },
+      "inverter_ac_power": {
+        "name": "Potencia CA del Inversor"
+      },
+      "charging_cutoff_capacity": {
+        "name": "Límite de Fin de Carga"
+      },
+      "discharging_cutoff_capacity": {
+        "name": "Límite de Fin de Descarga"
+      },
+      "user_work_mode": {
+        "name": "Modo de Funcionamiento"
+      },
+      "inverter_max_power": {
+        "name": "Potencia Máxima del Inversor"
+      },
+      "inverter_rated_power": {
+        "name": "Potencia Nominal del Inversor"
+      },
+      "serial_number": {
+        "name": "Número de Serie"
+      },
       "battery_runtime_estimate": {
         "name": "Estimación de Autonomía de Batería"
       },

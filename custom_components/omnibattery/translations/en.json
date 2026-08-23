@@ -1676,6 +1676,63 @@
       "software_version": {
         "name": "Software Version"
       },
+      "pv1_voltage": {
+        "name": "PV1 Voltage"
+      },
+      "pv2_voltage": {
+        "name": "PV2 Voltage"
+      },
+      "pv3_voltage": {
+        "name": "PV3 Voltage"
+      },
+      "pv4_voltage": {
+        "name": "PV4 Voltage"
+      },
+      "pack1_firmware_version": {
+        "name": "Battery Pack 1 Firmware"
+      },
+      "pack2_firmware_version": {
+        "name": "Battery Pack 2 Firmware"
+      },
+      "pack3_firmware_version": {
+        "name": "Battery Pack 3 Firmware"
+      },
+      "pack1_serial_number": {
+        "name": "Battery Pack 1 Serial Number"
+      },
+      "pack2_serial_number": {
+        "name": "Battery Pack 2 Serial Number"
+      },
+      "pack3_serial_number": {
+        "name": "Battery Pack 3 Serial Number"
+      },
+      "backup_function": {
+        "name": "Backup Function"
+      },
+      "inverter_software_version": {
+        "name": "Inverter Firmware"
+      },
+      "inverter_ac_power": {
+        "name": "Inverter AC Power"
+      },
+      "charging_cutoff_capacity": {
+        "name": "Charging Cutoff"
+      },
+      "discharging_cutoff_capacity": {
+        "name": "Discharging Cutoff"
+      },
+      "user_work_mode": {
+        "name": "Work Mode"
+      },
+      "inverter_max_power": {
+        "name": "Inverter Max Power"
+      },
+      "inverter_rated_power": {
+        "name": "Inverter Rated Power"
+      },
+      "serial_number": {
+        "name": "Serial Number"
+      },
       "battery_runtime_estimate": {
         "name": "Battery Runtime Estimate"
       },

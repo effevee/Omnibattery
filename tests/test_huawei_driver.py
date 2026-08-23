@@ -1028,6 +1028,35 @@ def test_every_pack_serial_has_an_entity():
 
 
 @pytest.mark.asyncio
+async def test_an_empty_pack_slot_gets_no_entity():
+    """An entity that can only ever read "unknown" is worse than none.
+
+    The reference LUNA2000 has packs 2 and 3; its pack 1 slot is empty, and
+    listing it under diagnostics only invites the question what is wrong with it.
+    """
+    driver = _driver(_fake_client({
+        **_LIVE_BLOCKS,
+        38200: [0] * 25,
+        38242: _pack("EX24A0056894", "V200"),
+        38284: _pack("EX2480065597", "V200"),
+    }))
+    await driver.connect()
+
+    keys = {row["key"] for row in driver.sensor_definitions}
+    assert "pack1_serial_number" not in keys
+    assert "pack1_firmware_version" not in keys
+    assert {"pack2_serial_number", "pack3_serial_number"} <= keys
+
+
+@pytest.mark.asyncio
+async def test_packs_that_have_not_answered_yet_are_not_hidden():
+    """No answer means "not asked", which is not the same as "not there"."""
+    driver = _driver(_fake_client({}))
+    keys = {row["key"] for row in driver.sensor_definitions}
+    assert {f"pack{index}_serial_number" for index in (1, 2, 3)} <= keys
+
+
+@pytest.mark.asyncio
 async def test_an_empty_pack_slot_is_omitted_entirely():
     """Pack 1 answers with nothing but padding on the reference hardware.
 

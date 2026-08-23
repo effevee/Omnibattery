@@ -373,6 +373,9 @@ class HuaweiSolarDriver(BatteryDriver):
         # Refined from register 30071 on the first poll; two is the common case
         # and keeps the entity list sane until the inverter has answered.
         self._pv_strings = 2
+        # Which pack slots are populated, learned from the packs that answer.
+        # Empty until one has, so a failed read never hides a pack that exists.
+        self._packs: set[int] = set()
         self._serial: Optional[str] = None
         # Last command actually written, so the deadband can compare against what
         # the hardware was told rather than against what it currently delivers.
@@ -454,6 +457,17 @@ class HuaweiSolarDriver(BatteryDriver):
             for index in range(self._pv_strings + 1, _MAX_PV_STRINGS + 1)
             for key in (f"mppt{index}_power", f"pv{index}_voltage")
         }
+        # A LUNA2000 holds one to three packs. An unpopulated slot answers with
+        # padding, and an entity that can only ever read "unknown" is worse than
+        # no entity at all. While no pack has answered yet nothing is hidden —
+        # that state means "not asked", not "not there".
+        if self._packs:
+            unused.update(
+                key
+                for index in (1, 2, 3)
+                if index not in self._packs
+                for key in (f"pack{index}_firmware_version", f"pack{index}_serial_number")
+            )
         return [d for d in SENSOR_DEFINITIONS if d["key"] not in unused]
 
     @property
@@ -487,8 +501,11 @@ class HuaweiSolarDriver(BatteryDriver):
             return False
         # Identity is cheap and only read here; it also proves the slave id
         # points at an inverter rather than at the EMMA or a charger.
+        # The pack serials come along because the entity list depends on which
+        # slots are populated, and that has to be known before setup.
         identity = await self.read_telemetry(
             ["device_name", "serial_number", "pv_string_count"]
+            + [f"pack{index}_serial_number" for index in (1, 2, 3)]
         )
         self._model = identity.get("device_name") or self._model
         self._serial = identity.get("serial_number") or self._serial
@@ -544,6 +561,12 @@ class HuaweiSolarDriver(BatteryDriver):
         # The read covers every string the map defines; only the ones this
         # inverter actually has are published, so an unused pair does not become
         # a permanent 0 W entity.
+        for index in (1, 2, 3):
+            if snapshot.get(f"pack{index}_serial_number") or snapshot.get(
+                f"pack{index}_firmware_version"
+            ):
+                self._packs.add(index)
+
         if snapshot.get("pv_string_count") is not None:
             self._pv_strings = max(0, min(_MAX_PV_STRINGS, int(snapshot["pv_string_count"])))
         for index in range(1, _MAX_PV_STRINGS + 1):

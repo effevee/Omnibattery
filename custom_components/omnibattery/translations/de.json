@@ -1667,6 +1667,63 @@
       "software_version": {
         "name": "Softwareversion"
       },
+      "pv1_voltage": {
+        "name": "PV1 Spannung"
+      },
+      "pv2_voltage": {
+        "name": "PV2 Spannung"
+      },
+      "pv3_voltage": {
+        "name": "PV3 Spannung"
+      },
+      "pv4_voltage": {
+        "name": "PV4 Spannung"
+      },
+      "pack1_firmware_version": {
+        "name": "Batteriepack 1 Firmware"
+      },
+      "pack2_firmware_version": {
+        "name": "Batteriepack 2 Firmware"
+      },
+      "pack3_firmware_version": {
+        "name": "Batteriepack 3 Firmware"
+      },
+      "pack1_serial_number": {
+        "name": "Batteriepack 1 Seriennummer"
+      },
+      "pack2_serial_number": {
+        "name": "Batteriepack 2 Seriennummer"
+      },
+      "pack3_serial_number": {
+        "name": "Batteriepack 3 Seriennummer"
+      },
+      "backup_function": {
+        "name": "Notstromfunktion"
+      },
+      "inverter_software_version": {
+        "name": "Wechselrichter-Firmware"
+      },
+      "inverter_ac_power": {
+        "name": "Wechselrichter-AC-Leistung"
+      },
+      "charging_cutoff_capacity": {
+        "name": "Ladeschlussgrenze"
+      },
+      "discharging_cutoff_capacity": {
+        "name": "Entladeschlussgrenze"
+      },
+      "user_work_mode": {
+        "name": "Betriebsmodus"
+      },
+      "inverter_max_power": {
+        "name": "Max. Wechselrichterleistung"
+      },
+      "inverter_rated_power": {
+        "name": "Nennleistung Wechselrichter"
+      },
+      "serial_number": {
+        "name": "Seriennummer"
+      },
       "battery_runtime_estimate": {
         "name": "Geschätzte Batterielaufzeit"
       },

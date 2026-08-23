@@ -1667,6 +1667,63 @@
       "software_version": {
         "name": "Softwareversie"
       },
+      "pv1_voltage": {
+        "name": "PV1 Spanning"
+      },
+      "pv2_voltage": {
+        "name": "PV2 Spanning"
+      },
+      "pv3_voltage": {
+        "name": "PV3 Spanning"
+      },
+      "pv4_voltage": {
+        "name": "PV4 Spanning"
+      },
+      "pack1_firmware_version": {
+        "name": "Batterijpack 1 Firmware"
+      },
+      "pack2_firmware_version": {
+        "name": "Batterijpack 2 Firmware"
+      },
+      "pack3_firmware_version": {
+        "name": "Batterijpack 3 Firmware"
+      },
+      "pack1_serial_number": {
+        "name": "Batterijpack 1 Serienummer"
+      },
+      "pack2_serial_number": {
+        "name": "Batterijpack 2 Serienummer"
+      },
+      "pack3_serial_number": {
+        "name": "Batterijpack 3 Serienummer"
+      },
+      "backup_function": {
+        "name": "Back-upfunctie"
+      },
+      "inverter_software_version": {
+        "name": "Omvormerfirmware"
+      },
+      "inverter_ac_power": {
+        "name": "Omvormer AC-vermogen"
+      },
+      "charging_cutoff_capacity": {
+        "name": "Laadafkapgrens"
+      },
+      "discharging_cutoff_capacity": {
+        "name": "Ontlaadafkapgrens"
+      },
+      "user_work_mode": {
+        "name": "Werkmodus"
+      },
+      "inverter_max_power": {
+        "name": "Max. Omvormervermogen"
+      },
+      "inverter_rated_power": {
+        "name": "Nominaal Omvormervermogen"
+      },
+      "serial_number": {
+        "name": "Serienummer"
+      },
       "battery_runtime_estimate": {
         "name": "Geschatte Batterijduur"
       },

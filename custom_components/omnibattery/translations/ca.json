@@ -1667,6 +1667,63 @@
       "software_version": {
         "name": "Versió de Programari"
       },
+      "pv1_voltage": {
+        "name": "Tensió PV1"
+      },
+      "pv2_voltage": {
+        "name": "Tensió PV2"
+      },
+      "pv3_voltage": {
+        "name": "Tensió PV3"
+      },
+      "pv4_voltage": {
+        "name": "Tensió PV4"
+      },
+      "pack1_firmware_version": {
+        "name": "Microprogramari del Paquet de Bateries 1"
+      },
+      "pack2_firmware_version": {
+        "name": "Microprogramari del Paquet de Bateries 2"
+      },
+      "pack3_firmware_version": {
+        "name": "Microprogramari del Paquet de Bateries 3"
+      },
+      "pack1_serial_number": {
+        "name": "Número de Sèrie del Paquet 1"
+      },
+      "pack2_serial_number": {
+        "name": "Número de Sèrie del Paquet 2"
+      },
+      "pack3_serial_number": {
+        "name": "Número de Sèrie del Paquet 3"
+      },
+      "backup_function": {
+        "name": "Funció de Reserva"
+      },
+      "inverter_software_version": {
+        "name": "Microprogramari de l'Inversor"
+      },
+      "inverter_ac_power": {
+        "name": "Potència CA de l'Inversor"
+      },
+      "charging_cutoff_capacity": {
+        "name": "Límit de Fi de Càrrega"
+      },
+      "discharging_cutoff_capacity": {
+        "name": "Límit de Fi de Descàrrega"
+      },
+      "user_work_mode": {
+        "name": "Mode de Funcionament"
+      },
+      "inverter_max_power": {
+        "name": "Potència Màxima de l'Inversor"
+      },
+      "inverter_rated_power": {
+        "name": "Potència Nominal de l'Inversor"
+      },
+      "serial_number": {
+        "name": "Número de Sèrie"
+      },
       "battery_runtime_estimate": {
         "name": "Estimació d'Autonomia de la Bateria"
       },

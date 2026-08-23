@@ -1679,6 +1679,63 @@
       "software_version": {
         "name": "Version Logiciel"
       },
+      "pv1_voltage": {
+        "name": "Tension PV1"
+      },
+      "pv2_voltage": {
+        "name": "Tension PV2"
+      },
+      "pv3_voltage": {
+        "name": "Tension PV3"
+      },
+      "pv4_voltage": {
+        "name": "Tension PV4"
+      },
+      "pack1_firmware_version": {
+        "name": "Micrologiciel du Pack Batterie 1"
+      },
+      "pack2_firmware_version": {
+        "name": "Micrologiciel du Pack Batterie 2"
+      },
+      "pack3_firmware_version": {
+        "name": "Micrologiciel du Pack Batterie 3"
+      },
+      "pack1_serial_number": {
+        "name": "Numéro de Série du Pack 1"
+      },
+      "pack2_serial_number": {
+        "name": "Numéro de Série du Pack 2"
+      },
+      "pack3_serial_number": {
+        "name": "Numéro de Série du Pack 3"
+      },
+      "backup_function": {
+        "name": "Fonction de Secours"
+      },
+      "inverter_software_version": {
+        "name": "Micrologiciel de l'Onduleur"
+      },
+      "inverter_ac_power": {
+        "name": "Puissance CA de l'Onduleur"
+      },
+      "charging_cutoff_capacity": {
+        "name": "Seuil de Fin de Charge"
+      },
+      "discharging_cutoff_capacity": {
+        "name": "Seuil de Fin de Décharge"
+      },
+      "user_work_mode": {
+        "name": "Mode de Fonctionnement"
+      },
+      "inverter_max_power": {
+        "name": "Puissance Max. de l'Onduleur"
+      },
+      "inverter_rated_power": {
+        "name": "Puissance Nominale de l'Onduleur"
+      },
+      "serial_number": {
+        "name": "Numéro de Série"
+      },
       "battery_runtime_estimate": {
         "name": "Estimation d'Autonomie de la Batterie"
       },
