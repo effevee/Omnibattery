@@ -814,3 +814,77 @@ async def test_storage_firmware_is_exposed_for_the_device_card():
     blocks = {**_LIVE_BLOCKS, 37814: [0x5632, 0x3030] + [0] * 13}  # "V200"
     data = await _driver(_fake_client(blocks)).read_telemetry(["software_version"])
     assert data["software_version"] == "V200"
+
+
+# ----------------------------------------------------------------------
+# off-grid / backup
+#
+# Huawei meters no separate backup port. While the grid is disconnected the
+# inverter feeds nothing but the backup circuit, so its AC power *is* the
+# backup output; on-grid there is no such output at all.
+# ----------------------------------------------------------------------
+def _state3(bits, ac_power=994):
+    high, low = divmod(ac_power & 0xFFFFFFFF, 0x10000)
+    pv = [0, 0] + [0] * 14 + [high, low]
+    return {**_LIVE_BLOCKS, 32003: [0, bits], 32064: pv}
+
+
+@pytest.mark.asyncio
+async def test_on_grid_reports_no_backup_output():
+    """The house supply must never be reported as backup power."""
+    data = await _driver(_fake_client(_state3(0b00))).read_telemetry()
+    assert data["ac_offgrid_power"] == 0
+    assert data["backup_function"] == "Disabled"
+    # The AC reading itself is untouched.
+    assert data["ac_power"] == 994
+
+
+@pytest.mark.asyncio
+async def test_backup_armed_but_still_on_grid_is_not_an_output():
+    data = await _driver(_fake_client(_state3(0b10))).read_telemetry()
+    assert data["backup_function"] == "Ready"
+    assert data["ac_offgrid_power"] == 0
+
+
+@pytest.mark.asyncio
+async def test_off_grid_reports_the_inverter_output_as_backup_power():
+    data = await _driver(_fake_client(_state3(0b11, ac_power=3200))).read_telemetry()
+    assert data["backup_function"] == "Off-grid"
+    assert data["ac_offgrid_power"] == 3200
+
+
+@pytest.mark.asyncio
+async def test_off_grid_power_is_never_negative():
+    # Importing while off-grid is not physical, but a transient must not print
+    # a negative backup output.
+    data = await _driver(_fake_client(_state3(0b01, ac_power=-500))).read_telemetry()
+    assert data["ac_offgrid_power"] == 0
+
+
+@pytest.mark.asyncio
+async def test_backup_keys_are_absent_without_the_state_register():
+    blocks = dict(_LIVE_BLOCKS)  # no 32003 entry -> the client returns None
+    data = await _driver(_fake_client(blocks)).read_telemetry()
+    assert "ac_offgrid_power" not in data
+    assert "backup_function" not in data
+
+
+@pytest.mark.asyncio
+async def test_asking_for_backup_power_pulls_both_of_its_blocks():
+    """Its two inputs live in different register blocks.
+
+    Scheduling attaches the key to one group only, so the filter has to fetch
+    the other block or the value would never appear.
+    """
+    data = await _driver(_fake_client(_state3(0b01, ac_power=2500))).read_telemetry(
+        ["ac_offgrid_power"]
+    )
+    assert data["ac_offgrid_power"] == 2500
+
+
+def test_cross_block_derivation_is_scheduled_exactly_once():
+    groups = _driver().read_groups
+    carrying = [g for g in groups if "ac_offgrid_power" in g.keys]
+    assert len(carrying) == 1
+    # Attached to the group holding its first source, not the one holding ac_power.
+    assert "off_grid_state" in carrying[0].keys

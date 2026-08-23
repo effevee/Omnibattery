@@ -99,6 +99,10 @@ _STORAGE_STATUS_RUNNING = 2
 # label a standing battery "Charge" and flip the header on noise.
 _STATE_DIRECTION_DEADBAND_W = 100
 
+# Register 32003 bitfield.
+_STATE3_OFF_GRID = 0b01
+_STATE3_OFF_GRID_SWITCH_ENABLED = 0b10
+
 # Envelope ceiling. The live per-model caps come from 37046/37048; this only
 # bounds a malformed reading so it cannot inflate the PD limits.
 _HW_MAX_POWER_W = 15000
@@ -162,6 +166,9 @@ _BLOCK_PV = (32064, 18, "high", {
 })
 # Per-string DC. Huawei publishes voltage and current separately, so the power
 # the panel wants is derived below rather than read.
+_BLOCK_STATE3 = (32003, 2, "medium", {
+    "off_grid_state": (0, "u32", 1),
+})
 _BLOCK_STRINGS = (32016, 4, "high", {
     "pv1_voltage": (0, "i16", 0.1),
     "pv1_current": (1, "i16", 0.01),
@@ -192,7 +199,8 @@ _BLOCK_SERIAL = (37052, 10, "very_low", {"serial_number": (0, "str", 10)})
 _BLOCK_STORAGE_SW = (37814, 15, "very_low", {"software_version": (0, "str", 15)})
 
 _BLOCKS = (
-    _BLOCK_LIVE, _BLOCK_PV, _BLOCK_STRINGS, _BLOCK_FORCIBLE_MODE, _BLOCK_FORCIBLE_POWER,
+    _BLOCK_LIVE, _BLOCK_PV, _BLOCK_STATE3, _BLOCK_STRINGS,
+    _BLOCK_FORCIBLE_MODE, _BLOCK_FORCIBLE_POWER,
     _BLOCK_DAILY, _BLOCK_LIMITS, _BLOCK_TOTALS, _BLOCK_CONFIG,
     _BLOCK_CAPACITY, _BLOCK_RATING, _BLOCK_MODEL, _BLOCK_SERIAL, _BLOCK_STORAGE_SW,
 )
@@ -202,9 +210,13 @@ _DECODERS = {"u16": decode_u16, "i16": decode_i16, "u32": decode_u32, "i32": dec
 # Keys computed from other keys rather than read. They belong to no register
 # block, so both the poll scheduler and the key filter have to be told which
 # raw values they stand on — otherwise asking for them reads nothing.
+# The first source decides which read group carries the derived key, so a
+# derivation whose inputs span two blocks still gets scheduled exactly once.
 _DERIVED_FROM = {
     "mppt1_power": ("pv1_voltage", "pv1_current"),
     "mppt2_power": ("pv2_voltage", "pv2_current"),
+    "ac_offgrid_power": ("off_grid_state", "ac_power"),
+    "backup_function": ("off_grid_state",),
 }
 
 # Keys that are read but then refined using another key. Unlike _DERIVED_FROM
@@ -224,6 +236,8 @@ SENSOR_DEFINITIONS = [
     {"key": "mppt2_power", "name": "MPPT2 Power", "unit": "W", "device_class": "power", "state_class": "measurement", "scale": 1, "precision": 0, "scan_interval": "high", "enabled_by_default": True},
     {"key": "pv1_voltage", "name": "PV1 Voltage", "unit": "V", "device_class": "voltage", "state_class": "measurement", "scale": 1, "precision": 1, "category": "diagnostic", "scan_interval": "high", "enabled_by_default": False},
     {"key": "pv2_voltage", "name": "PV2 Voltage", "unit": "V", "device_class": "voltage", "state_class": "measurement", "scale": 1, "precision": 1, "category": "diagnostic", "scan_interval": "high", "enabled_by_default": False},
+    {"key": "ac_offgrid_power", "name": "Off-grid Power", "unit": "W", "device_class": "power", "state_class": "measurement", "scale": 1, "precision": 0, "scan_interval": "medium", "enabled_by_default": True},
+    {"key": "backup_function", "name": "Backup Function", "data_type": "char", "icon": "mdi:home-lightning-bolt-outline", "category": "diagnostic", "scan_interval": "medium", "enabled_by_default": True},
     {"key": "software_version", "name": "Storage Firmware", "data_type": "char", "icon": "mdi:ticket-confirmation-outline", "category": "diagnostic", "scan_interval": "very_low", "enabled_by_default": True},
     {"key": "ac_power", "name": "Inverter Active Power", "unit": "W", "device_class": "power", "state_class": "measurement", "scale": 1, "precision": 0, "scan_interval": "high", "enabled_by_default": True},
     {"key": "internal_temperature", "name": "Battery Temperature", "unit": "°C", "device_class": "temperature", "state_class": "measurement", "scale": 1, "precision": 1, "scan_interval": "low", "enabled_by_default": True},
@@ -298,7 +312,7 @@ class HuaweiSolarDriver(BatteryDriver):
         self._read_groups = [
             ReadGroup(interval, tuple(keys) + tuple(
                 derived for derived, sources in _DERIVED_FROM.items()
-                if all(source in keys for source in sources)
+                if sources[0] in keys
             ))
             for _start, _count, interval, keys in _BLOCKS
         ]
@@ -417,6 +431,23 @@ class HuaweiSolarDriver(BatteryDriver):
             amps = snapshot.get(f"pv{index}_current")
             if volts is not None and amps is not None:
                 snapshot[f"mppt{index}_power"] = round(volts * amps)
+
+        # Off-grid output is not metered separately: while the grid is
+        # disconnected the inverter feeds nothing but the backup circuit, so its
+        # AC power *is* the backup output. On-grid there is no such output, and
+        # reporting the house supply as backup power would be plainly wrong.
+        state3 = snapshot.get("off_grid_state")
+        if state3 is not None:
+            bits = int(state3)
+            off_grid = bool(bits & _STATE3_OFF_GRID)
+            snapshot["backup_function"] = (
+                "Off-grid" if off_grid
+                else "Ready" if bits & _STATE3_OFF_GRID_SWITCH_ENABLED
+                else "Disabled"
+            )
+            ac_power = snapshot.get("ac_power")
+            if ac_power is not None:
+                snapshot["ac_offgrid_power"] = max(0, int(ac_power)) if off_grid else 0
 
         # Enum registers become their label; the raw number stays available to
         # the control layer under the same key only where it is numeric.
