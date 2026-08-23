@@ -1473,6 +1473,9 @@
       "consumption_profile_capture": {
         "name": "Captura del perfil de consum actual"
       },
+      "daily_operation_timeline": {
+        "name": "Línia temporal d'operació diària"
+      },
       "system_pd_control_quality": {
         "name": "Qualitat de Control PD",
         "state": {

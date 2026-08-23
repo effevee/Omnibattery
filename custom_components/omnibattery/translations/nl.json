@@ -1473,6 +1473,9 @@
       "consumption_profile_capture": {
         "name": "Huidige verbruiksprofielregistratie"
       },
+      "daily_operation_timeline": {
+        "name": "Dagelijkse bedrijfstijdlijn"
+      },
       "system_pd_control_quality": {
         "name": "PD-Regelkwaliteit",
         "state": {

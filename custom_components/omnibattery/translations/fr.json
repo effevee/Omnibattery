@@ -1486,6 +1486,9 @@
       "consumption_profile_capture": {
         "name": "Capture actuelle du profil de consommation"
       },
+      "daily_operation_timeline": {
+        "name": "Chronologie quotidienne de fonctionnement"
+      },
       "system_pd_control_quality": {
         "name": "Qualité du Contrôle PD",
         "state": {

@@ -40,7 +40,7 @@
 
 The panel installs automatically as a Home Assistant sidebar panel — no extra HACS card or YAML configuration is required. It provides three tabs:
 
-- **Overview** with animated SOC ring, Grid↔Home↔Battery↔Solar energy-flow diagram, diagnostics, 2×2 chart grid
+- **Overview** with animated SOC ring, Grid↔Home↔Battery↔Solar energy-flow diagram, diagnostics, 2×2 chart grid and a measured/projected daily operation timeline
 - **Batteries** with per-battery SOC/power, health & cells, daily energy, optional MPPT, firmware info, controls
 - **Control** with system-wide settings grouped by feature, each with its switch + config parameters
 

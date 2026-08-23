@@ -1473,6 +1473,9 @@
       "consumption_profile_capture": {
         "name": "Captura del perfil de consumo actual"
       },
+      "daily_operation_timeline": {
+        "name": "Línea temporal de operación diaria"
+      },
       "home_consumption": {
         "name": "Consumo de la Casa"
       },

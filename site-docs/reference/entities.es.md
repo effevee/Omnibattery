@@ -177,3 +177,24 @@ La carga predictiva también publica `solar_timeline_source`,
 `solar_profile_generation`. Los diagnósticos contienen una sección acotada
 `solar_profile` con origen de telemetría, contadores de calidad, generación,
 estado de backfill y como máximo 24 valores resumidos de progreso.
+
+### Línea temporal de operación diaria
+
+`sensor.omnibattery_daily_operation_timeline` es un snapshot de diagnóstico del
+día local que usa la tarjeta Resumen. Su estado es la fecha local y sus
+atributos acotados contienen `schema_version`, `timezone`,
+`interval_minutes` (15), `interval_count` (96), `current_index`,
+`current_progress`, `mode`, frescura y los objetos `series`, `operations` y
+`sources`. Las listas se excluyen de Recorder. Los valores `actual_*` son
+medidos; los `planned_*` son proyecciones informativas y pueden ser `null` si
+su fuente está obsoleta.
+
+La línea conserva los intervalos cerrados aunque se reevalúe el plan y, tras un
+reinicio, solo restaura el día local actual. Las máscaras `action_mask` usan
+`solar_charge=1`, `grid_charge=2` y `discharge=4`; las máscaras de contexto
+identifican setpoint, Retraso de Carga y el modo predictivo.
+`grid_charge_decision` es independiente del flujo físico (`scheduled`,
+`not_needed`, `unknown` o `not_applicable`).
+
+Consulta la [guía de la línea temporal diaria](../features/daily-operation-timeline.es.md)
+para las reglas visuales, DST e interacción móvil.

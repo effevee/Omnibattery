@@ -1,0 +1,54 @@
+# Daily operation timeline
+
+The Overview tab includes a 24-hour operation timeline with 96 fixed
+quarter-hour cells. Cells describe battery actions; the overlaid curves show
+solar and household energy in `kWh/15 min`.
+
+## Reading the card
+
+- Closed intervals are observed data. The current interval contains the real
+  accumulated value and a projected remainder until the quarter closes.
+- Future intervals are an informational projection from the active consumption
+  and solar profiles, the current battery state and the already selected
+  Dynamic Pricing or Time Slot plan.
+- Real-Time Price intentionally has no future calendar. It records only its
+  actual activations in the past and current interval.
+- Solid curves are measured; dashed curves are forecast. A learned solar shape
+  or the active sinusoidal fallback is named in the tooltip.
+
+The colors describe flows, not permissions: green means solar energy is
+assigned to battery charging, purple means a grid-charge decision, blue means
+observed or projected battery discharge, and grey means an explicit
+`grid_charge_not_needed` decision. A cell can contain up to three actions;
+diagonal patterns and the accessible text preserve the distinction in light
+and dark themes. “Charging to setpoint” is context, not another color. Charge
+Delay uses a clock marker and an estimated unlock time.
+
+## Entity contract
+
+The diagnostic entity is
+`sensor.omnibattery_daily_operation_timeline`. Its state is the local snapshot
+date. Attributes include `schema_version`, timezone, freshness, profile
+sources, 96-value energy series, operation masks, grid decisions and delay
+metadata. Arrays are bounded to the current local day and are excluded from
+Recorder; the entity is safe to use from a dashboard without causing control
+reevaluations.
+
+The backend keeps completed quarter-hours immutable. A plan reevaluation may
+replace only the open current interval and the future. Store restoration is
+accepted only for the same local date and temporal fingerprint; corrupt data
+degrades to an empty timeline and never blocks battery control.
+
+## Mobile and missing data
+
+On narrow screens the 96 cells keep a readable minimum width and scroll
+horizontally by hour. Keyboard arrows, touch and mouse tooltips expose the same
+interval details. Missing telemetry remains `null`; it is not silently turned
+into zero. When a forecast is unavailable or stale, the card keeps the observed
+past and marks only unjustified future values as unavailable.
+
+See [consumption estimate](consumption-estimate.md), [solar charge delay](solar-charge-delay.md),
+[Dynamic Pricing](../configuration/predictive-charging/dynamic-pricing.md),
+[Time Slot](../configuration/predictive-charging/time-slot.md) and
+[Real-Time Price](../configuration/predictive-charging/real-time-price.md) for
+the sources used by the projection.

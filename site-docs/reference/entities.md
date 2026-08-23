@@ -113,6 +113,26 @@ Only present when the [cell balance monitor](../features/cell-balance-monitor.md
 
 ## System sensors
 
+### Daily operation timeline
+
+`sensor.omnibattery_daily_operation_timeline` is a diagnostic-only, local-day
+snapshot for the Overview card. Its state is the local date and its bounded
+attributes contain `schema_version`, `timezone`, `interval_minutes` (15),
+`interval_count` (96), `current_index`, `current_progress`, `mode`, freshness
+and the `series`, `operations` and `sources` objects. The arrays are excluded
+from Recorder. `actual_*` values are measured, while `planned_*` values are
+informational projections and may be `null` when their source is stale.
+
+The timeline preserves closed intervals across plan reevaluations and, after a
+restart, restores only the current local day. `action_mask` values are
+`solar_charge=1`, `grid_charge=2` and `discharge=4`; context masks identify
+setpoint, Charge Delay and the predictive mode. `grid_charge_decision` is
+independent of physical flow (`scheduled`, `not_needed`, `unknown` or
+`not_applicable`).
+
+See the [daily operation timeline guide](../features/daily-operation-timeline.md)
+for the visual rules, DST handling and mobile interaction.
+
 ### Integration Status
 
 `sensor.marstek_venus_system_integration_status` shows at a glance what the integration is currently doing. It reflects the highest-priority active mode:

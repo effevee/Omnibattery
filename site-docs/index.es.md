@@ -40,7 +40,7 @@
 
 El panel se instala automáticamente como un panel lateral de Home Assistant; no necesita tarjetas HACS adicionales ni configuración YAML. Incluye tres pestañas:
 
-- **Resumen** con anillo de SOC animado, diagrama de flujo energético Red↔Casa↔Batería↔Solar, diagnósticos y una cuadrícula de gráficos 2×2
+- **Resumen** con anillo de SOC animado, diagrama de flujo energético Red↔Casa↔Batería↔Solar, diagnósticos, una cuadrícula de gráficos 2×2 y una línea temporal diaria real/prevista
 - **Baterías** con SOC/potencia por batería, salud y celdas, energía diaria, MPPT opcional, información de firmware y controles
 - **Control** con los ajustes de todo el sistema agrupados por funcionalidad, cada uno con su interruptor y sus parámetros
 

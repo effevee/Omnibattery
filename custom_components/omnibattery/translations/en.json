@@ -1483,6 +1483,9 @@
       "consumption_profile_capture": {
         "name": "Current Consumption Profile Capture"
       },
+      "daily_operation_timeline": {
+        "name": "Daily Operation Timeline"
+      },
       "home_consumption": {
         "name": "Home Consumption"
       },

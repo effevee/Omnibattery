@@ -48,6 +48,18 @@ const I18N = {
     placeholderMsg: "This view is coming in a future phase. For now, use the Overview view.",
     cardFlow: "Energy flow", cardSoc: "System status", cardDaily: "Energy today",
     cardWeekly: "Weekly energy", cardPower: "Power", cardSocToday: "SOC · today",
+    dailyOperationTitle: "Daily operation", dailyOperationDescription: "Observed and projected energy · 15 min",
+    dailyOperationReal: "Real", dailyOperationCurrent: "Current", dailyOperationForecast: "Forecast",
+    dailyOperationStale: "Data may be outdated", dailyOperationNoData: "No daily operation data",
+    dailyOperationSolarCharge: "Solar charge", dailyOperationGridCharge: "Grid charge", dailyOperationDischarge: "Battery discharge",
+    dailyOperationNotNeeded: "Grid charge not needed", dailyOperationNoAction: "No action", dailyOperationSetpoint: "Until setpoint",
+    dailyOperationDelay: "Charge delayed", dailyOperationUnlock: "Estimated unlock: {time}", dailyOperationAxis: "kWh/15 min",
+    dailyOperationSolar: "Solar", dailyOperationConsumption: "Consumption", dailyOperationLearned: "Learned profile",
+    dailyOperationSinusoidal: "Sinusoidal fallback", dailyOperationFallback: "Fallback: {reason}", dailyOperationPlan: "Plan",
+    dailyOperationObserved: "Observed", dailyOperationProjected: "Projected", dailyOperationPrevious: "Previous",
+    dailyOperationNext: "Next", dailyOperationNow: "Now", dailyOperationCoverage: "Coverage", dailyOperationMode: "Mode",
+    dailyOperationSource: "Source", dailyOperationDSTSkipped: "DST interval skipped", dailyOperationDSTRepeated: "Repeated local hour",
+    dailyOperationRealtimeNoFuture: "Real-time price has no future calendar", dailyOperationUnknown: "Unknown",
     forecastToday: "Solar forecast · 00:05", solarRemaining: "Solar remaining", expectedConsumption: "Expected consumption",
     grid: "Grid", solar: "Solar", home: "Home", battery: "Battery",
     excludedDevices: "Excluded devices",
@@ -120,6 +132,18 @@ const I18N = {
     placeholderMsg: "Esta vista llegará en una próxima fase. Por ahora, usa la vista Resumen.",
     cardFlow: "Flujo de energía", cardSoc: "Estado del sistema", cardDaily: "Energía hoy",
     cardWeekly: "Energía semanal", cardPower: "Potencias", cardSocToday: "SOC · hoy",
+    dailyOperationTitle: "Operación diaria", dailyOperationDescription: "Energía real y prevista · 15 min",
+    dailyOperationReal: "Real", dailyOperationCurrent: "Actual", dailyOperationForecast: "Previsto",
+    dailyOperationStale: "Datos posiblemente obsoletos", dailyOperationNoData: "Sin datos de operación diaria",
+    dailyOperationSolarCharge: "Carga solar", dailyOperationGridCharge: "Carga de red", dailyOperationDischarge: "Descarga de batería",
+    dailyOperationNotNeeded: "Carga de red no necesaria", dailyOperationNoAction: "Sin acción", dailyOperationSetpoint: "Hasta el setpoint",
+    dailyOperationDelay: "Carga retrasada", dailyOperationUnlock: "Desbloqueo estimado: {time}", dailyOperationAxis: "kWh/15 min",
+    dailyOperationSolar: "Solar", dailyOperationConsumption: "Consumo", dailyOperationLearned: "Perfil aprendido",
+    dailyOperationSinusoidal: "Fallback sinusoidal", dailyOperationFallback: "Fallback: {reason}", dailyOperationPlan: "Plan",
+    dailyOperationObserved: "Observado", dailyOperationProjected: "Previsto", dailyOperationPrevious: "Anterior",
+    dailyOperationNext: "Siguiente", dailyOperationNow: "Ahora", dailyOperationCoverage: "Cobertura", dailyOperationMode: "Modo",
+    dailyOperationSource: "Fuente", dailyOperationDSTSkipped: "Intervalo DST omitido", dailyOperationDSTRepeated: "Hora local repetida",
+    dailyOperationRealtimeNoFuture: "El precio en tiempo real no tiene calendario futuro", dailyOperationUnknown: "Desconocido",
     forecastToday: "Previsión solar · 00:05", solarRemaining: "Solar restante", expectedConsumption: "Consumo esperado",
     grid: "Red", solar: "Solar", home: "Casa", battery: "Batería",
     excludedDevices: "Disp. excluidos",
@@ -192,6 +216,18 @@ const I18N = {
     placeholderMsg: "Aquesta vista arribarà en una fase futura. De moment, fes servir la vista Resum.",
     cardFlow: "Flux d'energia", cardSoc: "Estat del sistema", cardDaily: "Energia avui",
     cardWeekly: "Energia setmanal", cardPower: "Potències", cardSocToday: "SOC · avui",
+    dailyOperationTitle: "Operació diària", dailyOperationDescription: "Energia observada i prevista · 15 min",
+    dailyOperationReal: "Real", dailyOperationCurrent: "Actual", dailyOperationForecast: "Previst",
+    dailyOperationStale: "Dades possiblement obsoletes", dailyOperationNoData: "Sense dades d'operació diària",
+    dailyOperationSolarCharge: "Càrrega solar", dailyOperationGridCharge: "Càrrega de xarxa", dailyOperationDischarge: "Descàrrega de bateria",
+    dailyOperationNotNeeded: "Càrrega de xarxa no necessària", dailyOperationNoAction: "Sense acció", dailyOperationSetpoint: "Fins al setpoint",
+    dailyOperationDelay: "Càrrega retardada", dailyOperationUnlock: "Desbloqueig estimat: {time}", dailyOperationAxis: "kWh/15 min",
+    dailyOperationSolar: "Solar", dailyOperationConsumption: "Consum", dailyOperationLearned: "Perfil après",
+    dailyOperationSinusoidal: "Fallback sinusoidal", dailyOperationFallback: "Fallback: {reason}", dailyOperationPlan: "Pla",
+    dailyOperationObserved: "Observat", dailyOperationProjected: "Previst", dailyOperationPrevious: "Anterior",
+    dailyOperationNext: "Següent", dailyOperationNow: "Ara", dailyOperationCoverage: "Cobertura", dailyOperationMode: "Mode",
+    dailyOperationSource: "Font", dailyOperationDSTSkipped: "Interval DST omès", dailyOperationDSTRepeated: "Hora local repetida",
+    dailyOperationRealtimeNoFuture: "El preu en temps real no té calendari futur", dailyOperationUnknown: "Desconegut",
     forecastToday: "Previsió solar · 00:05", solarRemaining: "Solar restant", expectedConsumption: "Consum esperat",
     grid: "Xarxa", solar: "Solar", home: "Casa", battery: "Bateria",
     excludedDevices: "Disp. exclosos",
@@ -260,6 +296,18 @@ const I18N = {
     placeholderMsg: "Diese Ansicht kommt in einer späteren Phase. Nutze vorerst die Übersicht.",
     cardFlow: "Energiefluss", cardSoc: "Systemstatus", cardDaily: "Energie heute",
     cardWeekly: "Wochenenergie", cardPower: "Leistung", cardSocToday: "SOC · heute",
+    dailyOperationTitle: "Tagesbetrieb", dailyOperationDescription: "Beobachtete und prognostizierte Energie · 15 Min.",
+    dailyOperationReal: "Ist", dailyOperationCurrent: "Aktuell", dailyOperationForecast: "Prognose",
+    dailyOperationStale: "Daten möglicherweise veraltet", dailyOperationNoData: "Keine Tagesbetriebsdaten",
+    dailyOperationSolarCharge: "Solarladung", dailyOperationGridCharge: "Netzladung", dailyOperationDischarge: "Batterieentladung",
+    dailyOperationNotNeeded: "Keine Netzladung erforderlich", dailyOperationNoAction: "Keine Aktion", dailyOperationSetpoint: "Bis zum Sollwert",
+    dailyOperationDelay: "Laden verzögert", dailyOperationUnlock: "Voraussichtliche Freigabe: {time}", dailyOperationAxis: "kWh/15 Min.",
+    dailyOperationSolar: "Solar", dailyOperationConsumption: "Verbrauch", dailyOperationLearned: "Gelerntes Profil",
+    dailyOperationSinusoidal: "Sinusförmiger Fallback", dailyOperationFallback: "Fallback: {reason}", dailyOperationPlan: "Plan",
+    dailyOperationObserved: "Beobachtet", dailyOperationProjected: "Prognostiziert", dailyOperationPrevious: "Zurück",
+    dailyOperationNext: "Weiter", dailyOperationNow: "Jetzt", dailyOperationCoverage: "Abdeckung", dailyOperationMode: "Modus",
+    dailyOperationSource: "Quelle", dailyOperationDSTSkipped: "DST-Intervall übersprungen", dailyOperationDSTRepeated: "Wiederholte Ortszeit",
+    dailyOperationRealtimeNoFuture: "Echtzeitpreis hat keinen Zukunftskalender", dailyOperationUnknown: "Unbekannt",
     forecastToday: "Solarprognose · 00:05", solarRemaining: "Verbleibende Solarenergie", expectedConsumption: "Erwarteter Verbrauch",
     grid: "Netz", solar: "Solar", home: "Haus", battery: "Batterie",
     excludedDevices: "Ausgeschl. Geräte",
@@ -328,6 +376,18 @@ const I18N = {
     placeholderMsg: "Cette vue arrivera dans une phase ultérieure. Pour l'instant, utilisez la vue Résumé.",
     cardFlow: "Flux d'énergie", cardSoc: "État du système", cardDaily: "Énergie aujourd'hui",
     cardWeekly: "Énergie hebdomadaire", cardPower: "Puissances", cardSocToday: "SOC · aujourd'hui",
+    dailyOperationTitle: "Opération quotidienne", dailyOperationDescription: "Énergie observée et prévue · 15 min",
+    dailyOperationReal: "Réel", dailyOperationCurrent: "Actuel", dailyOperationForecast: "Prévision",
+    dailyOperationStale: "Données potentiellement obsolètes", dailyOperationNoData: "Aucune donnée d'opération quotidienne",
+    dailyOperationSolarCharge: "Charge solaire", dailyOperationGridCharge: "Charge réseau", dailyOperationDischarge: "Décharge batterie",
+    dailyOperationNotNeeded: "Charge réseau non nécessaire", dailyOperationNoAction: "Aucune action", dailyOperationSetpoint: "Jusqu'au point de consigne",
+    dailyOperationDelay: "Charge retardée", dailyOperationUnlock: "Déblocage estimé : {time}", dailyOperationAxis: "kWh/15 min",
+    dailyOperationSolar: "Solaire", dailyOperationConsumption: "Consommation", dailyOperationLearned: "Profil appris",
+    dailyOperationSinusoidal: "Fallback sinusoïdal", dailyOperationFallback: "Fallback : {reason}", dailyOperationPlan: "Plan",
+    dailyOperationObserved: "Observé", dailyOperationProjected: "Prévu", dailyOperationPrevious: "Précédent",
+    dailyOperationNext: "Suivant", dailyOperationNow: "Maintenant", dailyOperationCoverage: "Couverture", dailyOperationMode: "Mode",
+    dailyOperationSource: "Source", dailyOperationDSTSkipped: "Intervalle DST ignoré", dailyOperationDSTRepeated: "Heure locale répétée",
+    dailyOperationRealtimeNoFuture: "Le prix en temps réel n'a pas de calendrier futur", dailyOperationUnknown: "Inconnu",
     forecastToday: "Prévision solaire · 00:05", solarRemaining: "Solaire restant", expectedConsumption: "Consommation prévue",
     grid: "Réseau", solar: "Solaire", home: "Maison", battery: "Batterie",
     excludedDevices: "Appareils exclus",
@@ -396,6 +456,18 @@ const I18N = {
     placeholderMsg: "Deze weergave komt in een latere fase. Gebruik voorlopig het Overzicht.",
     cardFlow: "Energiestroom", cardSoc: "Systeemstatus", cardDaily: "Energie vandaag",
     cardWeekly: "Energie per week", cardPower: "Vermogen", cardSocToday: "SOC · vandaag",
+    dailyOperationTitle: "Dagelijkse werking", dailyOperationDescription: "Geobserveerde en verwachte energie · 15 min",
+    dailyOperationReal: "Werkelijk", dailyOperationCurrent: "Huidig", dailyOperationForecast: "Verwachting",
+    dailyOperationStale: "Gegevens zijn mogelijk verouderd", dailyOperationNoData: "Geen gegevens voor dagelijkse werking",
+    dailyOperationSolarCharge: "Laden met zonne-energie", dailyOperationGridCharge: "Laden vanaf net", dailyOperationDischarge: "Batterij ontladen",
+    dailyOperationNotNeeded: "Laden vanaf net niet nodig", dailyOperationNoAction: "Geen actie", dailyOperationSetpoint: "Tot setpoint",
+    dailyOperationDelay: "Laden vertraagd", dailyOperationUnlock: "Geschatte vrijgave: {time}", dailyOperationAxis: "kWh/15 min",
+    dailyOperationSolar: "Zon", dailyOperationConsumption: "Verbruik", dailyOperationLearned: "Geleerd profiel",
+    dailyOperationSinusoidal: "Sinusvormige fallback", dailyOperationFallback: "Fallback: {reason}", dailyOperationPlan: "Plan",
+    dailyOperationObserved: "Geobserveerd", dailyOperationProjected: "Verwacht", dailyOperationPrevious: "Vorige",
+    dailyOperationNext: "Volgende", dailyOperationNow: "Nu", dailyOperationCoverage: "Dekking", dailyOperationMode: "Modus",
+    dailyOperationSource: "Bron", dailyOperationDSTSkipped: "DST-interval overgeslagen", dailyOperationDSTRepeated: "Herhaalde lokale tijd",
+    dailyOperationRealtimeNoFuture: "Realtimeprijs heeft geen toekomstige kalender", dailyOperationUnknown: "Onbekend",
     forecastToday: "Zonneverwachting · 00:05", solarRemaining: "Resterende zonne-energie", expectedConsumption: "Verwacht verbruik",
     grid: "Net", solar: "Zon", home: "Huis", battery: "Batterij",
     excludedDevices: "Uitgesloten app.",
@@ -1896,6 +1968,7 @@ class MarstekVenusPanel extends HTMLElement {
         c.flow,
         wrap("charts-2x2", [c.daily, c.weekly, c.power, c.mini]),
       ]),
+      c.dailyOperation,
     ]);
   }
 
@@ -1917,7 +1990,786 @@ class MarstekVenusPanel extends HTMLElement {
       weekly: this._buildWeeklyCard(),
       power: this._buildPowerHistoryCard(),
       mini: this._buildMiniHistory(),
+      dailyOperation: this._buildDailyOperationTimelineCard(),
     };
+  }
+
+  // ----- Daily operation timeline ------------------------------------------
+  /**
+   * Build the timeline shell once. The sensor is deliberately optional: the
+   * card is hidden until the versioned timeline entity is available, so an
+   * older backend cannot break the rest of Resumen.
+   */
+  _buildDailyOperationTimelineCard() {
+    const { card, head } = this._card(this._t("dailyOperationTitle"), "mdi:chart-timeline-variant");
+    card.classList.add("daily-operation-card");
+    card.hidden = true;
+    this._dailyOpPinnedIndex = null;
+
+    const badge = document.createElement("span");
+    badge.className = "daily-op-badge";
+    badge.innerHTML = `<span class="daily-op-badge-dot"></span><span></span>`;
+    head.appendChild(badge);
+
+    const description = document.createElement("div");
+    description.className = "daily-op-description muted";
+    description.textContent = this._t("dailyOperationDescription");
+    card.appendChild(description);
+
+    const toolbar = document.createElement("div");
+    toolbar.className = "daily-op-toolbar";
+    const legend = document.createElement("div");
+    legend.className = "daily-op-legend";
+    legend.innerHTML =
+      `<span class="daily-op-legend-item"><i class="daily-op-swatch daily-op-swatch-solar"></i>${this._t("dailyOperationSolarCharge")}</span>` +
+      `<span class="daily-op-legend-item"><i class="daily-op-swatch daily-op-swatch-grid"></i>${this._t("dailyOperationGridCharge")}</span>` +
+      `<span class="daily-op-legend-item"><i class="daily-op-swatch daily-op-swatch-discharge"></i>${this._t("dailyOperationDischarge")}</span>` +
+      `<span class="daily-op-legend-item"><i class="daily-op-swatch daily-op-swatch-not-needed"></i>${this._t("dailyOperationNotNeeded")}</span>` +
+      `<span class="daily-op-legend-item"><i class="daily-op-line daily-op-line-solar"></i>${this._t("dailyOperationSolar")}</span>` +
+      `<span class="daily-op-legend-item"><i class="daily-op-line daily-op-line-consumption"></i>${this._t("dailyOperationConsumption")}</span>`;
+    toolbar.appendChild(legend);
+
+    const nav = document.createElement("div");
+    nav.className = "daily-op-nav";
+    const previous = document.createElement("button");
+    previous.type = "button";
+    previous.className = "daily-op-nav-btn";
+    previous.setAttribute("aria-label", this._t("dailyOperationPrevious"));
+    previous.title = this._t("dailyOperationPrevious");
+    previous.innerHTML = "<ha-icon icon=\"mdi:chevron-left\"></ha-icon>";
+    const next = document.createElement("button");
+    next.type = "button";
+    next.className = "daily-op-nav-btn";
+    next.setAttribute("aria-label", this._t("dailyOperationNext"));
+    next.title = this._t("dailyOperationNext");
+    next.innerHTML = "<ha-icon icon=\"mdi:chevron-right\"></ha-icon>";
+    previous.addEventListener("click", () => this._scrollDailyOperation(-1));
+    next.addEventListener("click", () => this._scrollDailyOperation(1));
+    nav.append(previous, next);
+    toolbar.appendChild(nav);
+    card.appendChild(toolbar);
+
+    const notice = document.createElement("div");
+    notice.className = "daily-op-notice";
+    notice.setAttribute("role", "status");
+    notice.hidden = true;
+    card.appendChild(notice);
+
+    const layout = document.createElement("div");
+    layout.className = "daily-op-layout";
+    const yAxis = document.createElement("div");
+    yAxis.className = "daily-op-yaxis";
+    yAxis.setAttribute("aria-hidden", "true");
+    layout.appendChild(yAxis);
+
+    const viewport = document.createElement("div");
+    viewport.className = "daily-op-viewport";
+    viewport.tabIndex = 0;
+    viewport.setAttribute("role", "region");
+    viewport.setAttribute("aria-label", this._t("dailyOperationTitle"));
+    const stage = document.createElement("div");
+    stage.className = "daily-op-stage";
+
+    const uid = `mv-daily-op-${(this._dailyOpUid = (this._dailyOpUid || 0) + 1)}`;
+    const patternIds = {};
+    const patternDefs = [
+      ["solar", "var(--daily-op-solar)", false], ["solar", "var(--daily-op-solar)", true],
+      ["grid", "var(--daily-op-grid)", false], ["grid", "var(--daily-op-grid)", true],
+      ["discharge", "var(--daily-op-discharge)", false], ["discharge", "var(--daily-op-discharge)", true],
+    ].map(([action, color, reverse], ordinal) => {
+      const direction = reverse ? "reverse" : "forward";
+      const id = `${uid}-${action}-${direction}`;
+      patternIds[`${action}-${reverse ? 1 : 0}`] = id;
+      const path = reverse ? "M-2,-2 L10,10 M-10,-2 L2,10" : "M-2,10 L10,-2 M-10,10 L2,-2";
+      return `<pattern id="${id}" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(${ordinal % 2 ? 0 : 0})"><path d="${path}" stroke="${color}" stroke-width="1.6" fill="none" opacity=".95"/></pattern>`;
+    }).join("");
+
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.classList.add("daily-op-svg");
+    svg.setAttribute("viewBox", "0 0 960 190");
+    svg.setAttribute("preserveAspectRatio", "none");
+    svg.setAttribute("aria-hidden", "true");
+    svg.innerHTML =
+      `<defs>${patternDefs}</defs>` +
+      `<g class="daily-op-grid-lines">` +
+      Array.from({ length: 6 }, (_, i) => `<line x1="0" y1="${32 + i * 26.4}" x2="960" y2="${32 + i * 26.4}"/>`).join("") +
+      Array.from({ length: 25 }, (_, i) => `<line class="daily-op-hour-line" x1="${i * 40}" y1="24" x2="${i * 40}" y2="170"/>`).join("") +
+      `</g>` +
+      `<path class="daily-op-path daily-op-path-solar-actual" fill="none"></path>` +
+      `<path class="daily-op-path daily-op-path-solar-forecast" fill="none"></path>` +
+      `<path class="daily-op-path daily-op-path-consumption-actual" fill="none"></path>` +
+      `<path class="daily-op-path daily-op-path-consumption-forecast" fill="none"></path>` +
+      `<line class="daily-op-now-line" x1="0" y1="24" x2="0" y2="170"></line>` +
+      `<text class="daily-op-now-text" x="4" y="20"></text>`;
+    stage.appendChild(svg);
+
+    const labels = document.createElement("div");
+    labels.className = "daily-op-hour-labels";
+    const hours = document.createElement("div");
+    hours.className = "daily-op-hours";
+    const cells = [];
+    for (let hour = 0; hour < 24; hour++) {
+      const label = document.createElement("span");
+      label.className = "daily-op-hour-label";
+      label.textContent = String(hour).padStart(2, "0");
+      labels.appendChild(label);
+
+      const group = document.createElement("div");
+      group.className = "daily-op-hour";
+      group.dataset.hour = String(hour);
+      for (let quarter = 0; quarter < 4; quarter++) {
+        const index = hour * 4 + quarter;
+        const cell = document.createElement("button");
+        cell.type = "button";
+        cell.className = "daily-op-cell daily-op-base-neutral";
+        cell.dataset.index = String(index);
+        cell.tabIndex = 0;
+        cell.setAttribute("aria-label", `${String(hour).padStart(2, "0")}:${String(quarter * 15).padStart(2, "0")}`);
+        const delay = document.createElement("span");
+        delay.className = "daily-op-delay-mark";
+        delay.hidden = true;
+        delay.innerHTML = "<ha-icon icon=\"mdi:clock-outline\"></ha-icon>";
+        const setpoint = document.createElement("span");
+        setpoint.className = "daily-op-setpoint-mark";
+        setpoint.hidden = true;
+        setpoint.innerHTML = "<ha-icon icon=\"mdi:target\"></ha-icon>";
+        cell.append(delay, setpoint);
+        cell.addEventListener("mouseenter", () => this._showDailyOperationTooltip(index, cell));
+        cell.addEventListener("mouseleave", () => {
+          if (this._dailyOpPinnedIndex == null) this._hideDailyOperationTooltip();
+        });
+        cell.addEventListener("focus", () => this._showDailyOperationTooltip(index, cell));
+        cell.addEventListener("blur", () => {
+          if (this._dailyOpPinnedIndex == null) this._hideDailyOperationTooltip();
+        });
+        cell.addEventListener("click", () => {
+          if (this._dailyOpPinnedIndex === index) {
+            this._dailyOpPinnedIndex = null;
+            this._hideDailyOperationTooltip();
+          } else {
+            this._dailyOpPinnedIndex = index;
+            this._showDailyOperationTooltip(index, cell);
+          }
+        });
+        cell.addEventListener("keydown", (event) => {
+          if (event.key === "Escape") {
+            this._dailyOpPinnedIndex = null;
+            this._hideDailyOperationTooltip();
+            cell.blur();
+            return;
+          }
+          const delta = event.key === "ArrowRight" || event.key === "ArrowDown" ? 1
+            : event.key === "ArrowLeft" || event.key === "ArrowUp" ? -1 : 0;
+          if (delta) {
+            event.preventDefault();
+            const target = this._r.dailyOperation && this._r.dailyOperation.cells[index + delta];
+            if (target) target.focus();
+          }
+          if (event.key === "Home" || event.key === "End") {
+            event.preventDefault();
+            const target = this._r.dailyOperation && this._r.dailyOperation.cells[event.key === "Home" ? 0 : 95];
+            if (target) target.focus();
+          }
+        });
+        group.appendChild(cell);
+        cells.push(cell);
+      }
+      hours.appendChild(group);
+    }
+    const grid = document.createElement("div");
+    grid.className = "daily-op-grid";
+    grid.append(labels, hours);
+    stage.appendChild(grid);
+
+    const tooltip = document.createElement("div");
+    tooltip.className = "daily-op-tooltip";
+    tooltip.id = `${uid}-tooltip`;
+    tooltip.setAttribute("role", "tooltip");
+    tooltip.setAttribute("aria-live", "polite");
+    tooltip.hidden = true;
+    stage.appendChild(tooltip);
+
+    viewport.appendChild(stage);
+    layout.appendChild(viewport);
+    card.appendChild(layout);
+
+    const scrollState = { manual: false, initialized: false, programmaticUntil: 0 };
+    viewport.addEventListener("scroll", () => {
+      if (Date.now() > scrollState.programmaticUntil) scrollState.manual = true;
+      this._updateDailyOperationNav();
+    }, { passive: true });
+    const markManualScroll = () => {
+      if (Date.now() > scrollState.programmaticUntil) scrollState.manual = true;
+    };
+    viewport.addEventListener("wheel", markManualScroll, { passive: true });
+    viewport.addEventListener("touchstart", markManualScroll, { passive: true });
+    viewport.addEventListener("pointerdown", markManualScroll, { passive: true });
+    this._r.dailyOperation = {
+      card, badge, notice, yAxis, viewport, stage, svg, tooltip, previous, next,
+      cells, labels, hours,
+      paths: {
+        solarActual: svg.querySelector(".daily-op-path-solar-actual"),
+        solarForecast: svg.querySelector(".daily-op-path-solar-forecast"),
+        consumptionActual: svg.querySelector(".daily-op-path-consumption-actual"),
+        consumptionForecast: svg.querySelector(".daily-op-path-consumption-forecast"),
+      },
+      nowLine: svg.querySelector(".daily-op-now-line"),
+      nowText: svg.querySelector(".daily-op-now-text"),
+      patternIds,
+      scrollState,
+    };
+    return card;
+  }
+
+  /**
+   * Integration point: the backend should expose the stable sensor ID below.
+   * A panel config override is accepted for installations that rename it; no
+   * service call or control recalculation is performed from this card.
+   */
+  _dailyOperationEntityId() {
+    const hass = this._hass;
+    if (!hass || !hass.states) return null;
+    const configured = [
+      this._panelConfig.daily_operation_timeline_entity,
+      this._panelConfig.daily_operation_entity,
+      this._panelConfig.dailyOperationTimelineEntity,
+    ].filter(Boolean);
+    const candidates = [...configured, "sensor.omnibattery_daily_operation_timeline"];
+    return candidates.find((id) => hass.states[id]) || null;
+  }
+
+  _dailyOperationArray(value) {
+    const values = Array.isArray(value) ? value : value && Array.isArray(value.values) ? value.values : null;
+    if (!values) return null;
+    return Array.from({ length: 96 }, (_, index) => values[index] == null ? null : values[index]);
+  }
+
+  _dailyOperationPick(source, keys) {
+    if (!source || typeof source !== "object") return undefined;
+    for (const key of keys) {
+      if (Object.prototype.hasOwnProperty.call(source, key)) return source[key];
+    }
+    return undefined;
+  }
+
+  _dailyOperationBool(value) {
+    if (value === true || value === 1) return true;
+    return typeof value === "string" && ["true", "on", "yes", "1"].includes(value.toLowerCase());
+  }
+
+  _dailyOperationNumber(value) {
+    if (value == null || value === "") return null;
+    const number = Number(value);
+    return Number.isFinite(number) ? number : null;
+  }
+
+  _dailyOperationState() {
+    const entityId = this._dailyOperationEntityId();
+    if (!entityId) return null;
+    const stateObj = this._hass.states[entityId];
+    const attributes = (stateObj && stateObj.attributes) || {};
+    const nested = attributes.timeline || attributes.daily_operation_timeline;
+    const data = nested && typeof nested === "object" ? { ...attributes, ...nested } : attributes;
+    const unavailable = !stateObj || ["unknown", "unavailable"].includes(String(stateObj.state).toLowerCase());
+    const series = data.series && typeof data.series === "object" ? data.series : data;
+    const operations = data.operations && typeof data.operations === "object" ? data.operations : data;
+    const pickSeries = (keys) => this._dailyOperationArray(this._dailyOperationPick(series, keys));
+    const pickOperation = (keys) => this._dailyOperationArray(this._dailyOperationPick(operations, keys));
+    const actualSolar = pickSeries(["solar_actual_kwh", "solar_actual"]);
+    const forecastSolar = pickSeries(["solar_forecast_kwh", "solar_forecast"]);
+    const actualConsumption = pickSeries(["consumption_actual_kwh", "consumption_actual", "home_actual_kwh"]);
+    const forecastConsumption = pickSeries(["consumption_forecast_kwh", "consumption_forecast", "home_forecast_kwh"]);
+    const currentFallback = this._dateParts();
+    const fallbackIndex = currentFallback.hour * 4 + Math.floor(currentFallback.minute / 15);
+    const currentIndex = Math.max(0, Math.min(95,
+      Math.floor(this._dailyOperationNumber(data.current_index) ?? fallbackIndex)));
+    const currentProgress = this._clamp(
+      this._dailyOperationNumber(data.current_progress) ?? (currentFallback.minute % 15) / 15,
+      0, 1
+    );
+    const rawDecision = this._dailyOperationPick(operations, ["grid_charge_decision"]);
+    const actualDecision = this._dailyOperationArray(this._dailyOperationPick(operations, ["actual_grid_charge_decision"]));
+    const plannedDecision = this._dailyOperationArray(this._dailyOperationPick(operations, ["planned_grid_charge_decision"]));
+    let gridDecision = null;
+    if (Array.isArray(rawDecision)) gridDecision = this._dailyOperationArray(rawDecision);
+    else if (rawDecision && typeof rawDecision === "object") {
+      gridDecision = this._dailyOperationArray(rawDecision.values || rawDecision.planned || rawDecision.actual);
+    }
+    const flags = this._dailyOperationPick(data, ["dst_flags", "local_time_flags"]);
+    const flagArray = Array.isArray(flags) ? flags : Array(96).fill(null);
+    const skipped = this._dailyOperationArray(this._dailyOperationPick(data, ["dst_skipped"]));
+    const repeated = this._dailyOperationArray(this._dailyOperationPick(data, ["dst_repeated"]));
+    const isSkipped = Array.from({ length: 96 }, (_, index) =>
+      this._dailyOperationBool(skipped && skipped[index]) || String(flagArray[index] || "").toLowerCase() === "dst_skipped"
+    );
+    const isRepeated = Array.from({ length: 96 }, (_, index) =>
+      this._dailyOperationBool(repeated && repeated[index]) || String(flagArray[index] || "").toLowerCase() === "dst_repeated"
+    );
+    const sourceData = data.sources && typeof data.sources === "object" ? data.sources : {};
+    const source = (kind) => {
+      const keys = kind === "solar"
+        ? ["solar_forecast", "solar", "solar_source"]
+        : kind === "consumption"
+          ? ["consumption_forecast", "consumption", "consumption_source"]
+          : ["operation_plan", "plan", "operation_source"];
+      const value = this._dailyOperationPick(sourceData, keys) ?? data[`${kind}_forecast_source`];
+      return value == null ? null : String(value);
+    };
+    const fallbackReason = (kind) => {
+      const value = this._dailyOperationPick(sourceData, kind === "solar"
+        ? ["solar_fallback_reason", "solar_forecast_fallback_reason"]
+        : ["consumption_fallback_reason", "consumption_forecast_fallback_reason"]
+      ) ?? data[`${kind}_fallback_reason`];
+      return value == null || value === "" ? null : String(value);
+    };
+    const plannedActions = pickOperation(["planned_action_mask"]);
+    const realtimeMode = ["real_time", "realtime_price", "realtime"].some((mode) =>
+      String(data.mode || "").toLowerCase().replace(/[- ]/g, "_").includes(mode)
+    );
+    const hasFutureValues = [plannedActions, forecastSolar, forecastConsumption].some((array) =>
+      Array.isArray(array) && array.slice(currentIndex + 1).some((value) =>
+        this._dailyOperationNumber(value) != null && this._dailyOperationNumber(value) !== 0
+      )
+    );
+    const hasValues = [actualSolar, forecastSolar, actualConsumption, forecastConsumption,
+      pickOperation(["actual_action_mask"]), plannedActions].some((array) =>
+      Array.isArray(array) && array.some((value) => this._dailyOperationNumber(value) != null)
+    );
+    return {
+      entityId, stateObj, data, unavailable, hasValues,
+      localDate: data.local_date || null,
+      timezone: data.timezone || null,
+      generatedAt: data.generated_at || null,
+      planEvaluatedAt: data.plan_evaluated_at || null,
+      setpointInfo: data.setpoint && typeof data.setpoint === "object" ? data.setpoint : null,
+      delayInfo: data.delay && typeof data.delay === "object" ? data.delay : null,
+      currentIndex, currentProgress,
+      mode: data.mode == null ? null : String(data.mode),
+      stale: this._dailyOperationBool(data.stale),
+      staleReason: data.stale_reason == null ? null : String(data.stale_reason),
+      actualSolar, forecastSolar, actualConsumption, forecastConsumption,
+      actualMask: pickOperation(["actual_action_mask"]),
+      plannedMask: plannedActions,
+      actualContext: pickOperation(["actual_context_mask"]),
+      plannedContext: pickOperation(["planned_context_mask"]),
+      gridDecision, actualDecision, plannedDecision,
+      delayUntil: pickOperation(["delay_until", "planned_delay_until"]),
+      chargePower: pickOperation(["charge_power_w", "actual_charge_power_w", "planned_charge_power_w"]),
+      dischargePower: pickOperation(["discharge_power_w", "actual_discharge_power_w", "planned_discharge_power_w"]),
+      coverage: pickSeries(["actual_coverage_s", "coverage_s"]),
+      solarToBattery: pickOperation(["solar_to_battery_kwh"]),
+      gridToBattery: pickOperation(["grid_to_battery_kwh"]),
+      batteryToHome: pickOperation(["battery_to_home_kwh"]),
+      storedEnergyEnd: pickOperation(["stored_energy_end_kwh"]),
+      socEnd: pickOperation(["soc_end_pct", "stored_soc_end_pct"]),
+      observedSeconds: this._dailyOperationPick(operations, [
+        "observed_seconds_by_action_by_interval",
+        "observed_seconds_by_action",
+      ]),
+      isSkipped, isRepeated, source, fallbackReason,
+      realtimeNoFuture: realtimeMode && !hasFutureValues,
+    };
+  }
+
+  _dailyOperationMaskAt(array, index) {
+    if (!Array.isArray(array) || array[index] == null) return null;
+    const value = this._dailyOperationNumber(array[index]);
+    return value == null ? null : value | 0;
+  }
+
+  _dailyOperationValueAt(array, index) {
+    return Array.isArray(array) ? this._dailyOperationNumber(array[index]) : null;
+  }
+
+  _dailyOperationChoiceAt(array, index) {
+    if (!Array.isArray(array) || array[index] == null || array[index] === "") return null;
+    return String(array[index]).toLowerCase();
+  }
+
+  _dailyOperationActionBits(mask) {
+    const value = Number(mask) || 0;
+    return [1, 2, 4].filter((bit) => (value & bit) !== 0);
+  }
+
+  _dailyOperationActionKey(bit) {
+    return bit === 1 ? "solar" : bit === 2 ? "grid" : "discharge";
+  }
+
+  _dailyOperationActionLabel(bit) {
+    return this._t(bit === 1 ? "dailyOperationSolarCharge" : bit === 2 ? "dailyOperationGridCharge" : "dailyOperationDischarge");
+  }
+
+  _dailyOperationStatus(snapshot, index) {
+    if (index < snapshot.currentIndex) return "real";
+    if (index === snapshot.currentIndex) return "current";
+    return "forecast";
+  }
+
+  _dailyOperationStatusLabel(status) {
+    return this._t(status === "real" ? "dailyOperationReal" : status === "current" ? "dailyOperationCurrent" : "dailyOperationForecast");
+  }
+
+  _dailyOperationTimeRange(index) {
+    const start = index * 15;
+    const end = start + 15;
+    const clock = (minutes) => {
+      const hour = Math.floor(minutes / 60);
+      return `${String(hour).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
+    };
+    return `${clock(start)}–${clock(end)}`;
+  }
+
+  _dailyOperationSourceLabel(value) {
+    if (!value) return null;
+    const normalized = String(value).toLowerCase();
+    if (normalized.includes("learned")) return this._t("dailyOperationLearned");
+    if (normalized.includes("sinus")) return this._t("dailyOperationSinusoidal");
+    return String(value).replace(/_/g, " ");
+  }
+
+  _dailyOperationItem(snapshot, index) {
+    const status = this._dailyOperationStatus(snapshot, index);
+    const actualMask = this._dailyOperationMaskAt(snapshot.actualMask, index);
+    const plannedMask = this._dailyOperationMaskAt(snapshot.plannedMask, index);
+    let mask = status === "forecast" ? plannedMask : actualMask;
+    if (status === "current") mask = actualMask == null ? plannedMask : plannedMask == null ? actualMask : actualMask | plannedMask;
+    if (snapshot.isSkipped[index]) mask = 0;
+    const contextActual = this._dailyOperationMaskAt(snapshot.actualContext, index);
+    const contextPlanned = this._dailyOperationMaskAt(snapshot.plannedContext, index);
+    let context = status === "forecast" ? contextPlanned : contextActual;
+    if (status === "current") context = contextActual == null ? contextPlanned : contextPlanned == null ? contextActual : contextActual | contextPlanned;
+    const decision = this._dailyOperationChoiceAt(snapshot.gridDecision, index) ||
+      (status === "forecast" ? this._dailyOperationChoiceAt(snapshot.plannedDecision, index) : this._dailyOperationChoiceAt(snapshot.actualDecision, index));
+    const actions = this._dailyOperationActionBits(mask).map((bit) => this._dailyOperationActionKey(bit));
+    const delayState = snapshot.delayInfo && String(snapshot.delayInfo.state || snapshot.delayInfo.status || "").toLowerCase();
+    const topLevelDelay = index === snapshot.currentIndex && ["delayed", "waiting_for_solar", "waiting", "blocked"].includes(delayState);
+    const delayUntil = (Array.isArray(snapshot.delayUntil) ? snapshot.delayUntil[index] : null) ??
+      (topLevelDelay && snapshot.delayInfo ? snapshot.delayInfo.estimated_unlock_time || snapshot.delayInfo.unlock_time : null);
+    const delay = (delayUntil != null && delayUntil !== "") || (context & 2) !== 0 || topLevelDelay;
+    const setpointState = snapshot.setpointInfo && String(snapshot.setpointInfo.state || snapshot.setpointInfo.status || "").toLowerCase();
+    const topLevelSetpoint = index === snapshot.currentIndex && ["charging_to_setpoint", "to_setpoint", "charging"].includes(setpointState);
+    const actionSeconds = {};
+    if (snapshot.observedSeconds && typeof snapshot.observedSeconds === "object") {
+      for (const bit of [1, 2, 4]) {
+        const key = this._dailyOperationActionKey(bit);
+        if (Array.isArray(snapshot.observedSeconds)) {
+          const cellDurations = snapshot.observedSeconds[index] || {};
+          const canonical = key === "solar" ? "solar_charge" : key === "grid" ? "grid_charge" : "discharge";
+          actionSeconds[key] = this._dailyOperationNumber(
+            cellDurations[key] ?? cellDurations[canonical] ?? cellDurations[String(bit)]
+          );
+        } else {
+          const source = snapshot.observedSeconds[key]
+            || snapshot.observedSeconds[`${key}_charge`]
+            || snapshot.observedSeconds[String(bit)];
+          actionSeconds[key] = this._dailyOperationValueAt(source, index);
+        }
+      }
+    }
+    return {
+      index, status, statusLabel: this._dailyOperationStatusLabel(status),
+      timeRange: this._dailyOperationTimeRange(index),
+      mask: mask || 0, actions, context: context || 0, decision,
+      delay, delayUntil: delayUntil == null ? null : String(delayUntil),
+      setpoint: ((context || 0) & 1) !== 0 || topLevelSetpoint,
+      skipped: snapshot.isSkipped[index], repeated: snapshot.isRepeated[index],
+      solarActual: this._dailyOperationValueAt(snapshot.actualSolar, index),
+      solarForecast: this._dailyOperationValueAt(snapshot.forecastSolar, index),
+      consumptionActual: this._dailyOperationValueAt(snapshot.actualConsumption, index),
+      consumptionForecast: this._dailyOperationValueAt(snapshot.forecastConsumption, index),
+      coverage: this._dailyOperationValueAt(snapshot.coverage, index),
+      chargePower: this._dailyOperationValueAt(snapshot.chargePower, index),
+      dischargePower: this._dailyOperationValueAt(snapshot.dischargePower, index),
+      solarToBattery: this._dailyOperationValueAt(snapshot.solarToBattery, index),
+      gridToBattery: this._dailyOperationValueAt(snapshot.gridToBattery, index),
+      batteryToHome: this._dailyOperationValueAt(snapshot.batteryToHome, index),
+      storedEnergyEnd: this._dailyOperationValueAt(snapshot.storedEnergyEnd, index),
+      socEnd: this._dailyOperationValueAt(snapshot.socEnd, index),
+      actionSeconds,
+    };
+  }
+
+  _dailyOperationEscape(value) {
+    return String(value == null ? "" : value).replace(/[&<>"']/g, (character) => ({
+      "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;",
+    }[character]));
+  }
+
+  _dailyOperationFormatKwh(value) {
+    return value == null ? "—" : `${this._nf(value, 3)} kWh`;
+  }
+
+  _dailyOperationFormatPower(value) {
+    return value == null ? "—" : `${this._nf(value, 0)} W`;
+  }
+
+  _dailyOperationDecisionLabel(decision) {
+    if (!decision) return null;
+    if (decision === "not_needed") return this._t("dailyOperationNotNeeded");
+    if (decision === "not_applicable") return this._t("dailyOperationNoAction");
+    if (decision === "unknown") return this._t("dailyOperationUnknown");
+    return decision.replace(/_/g, " ");
+  }
+
+  _dailyOperationAriaLabel(snapshot, item) {
+    const parts = [item.timeRange, item.statusLabel];
+    if (item.skipped) parts.push(this._t("dailyOperationDSTSkipped"));
+    if (item.repeated) parts.push(this._t("dailyOperationDSTRepeated"));
+    if (item.solarActual != null) parts.push(`${this._t("dailyOperationSolar")} (${this._t("dailyOperationReal")}): ${this._dailyOperationFormatKwh(item.solarActual)}`);
+    if (item.solarForecast != null) parts.push(`${this._t("dailyOperationSolar")} (${this._t("dailyOperationForecast")}): ${this._dailyOperationFormatKwh(item.solarForecast)}`);
+    if (item.consumptionActual != null) parts.push(`${this._t("dailyOperationConsumption")} (${this._t("dailyOperationReal")}): ${this._dailyOperationFormatKwh(item.consumptionActual)}`);
+    if (item.consumptionForecast != null) parts.push(`${this._t("dailyOperationConsumption")} (${this._t("dailyOperationForecast")}): ${this._dailyOperationFormatKwh(item.consumptionForecast)}`);
+    if (item.coverage != null) parts.push(`${this._t("dailyOperationCoverage")}: ${Math.round(item.coverage)} s`);
+    if (item.actions.length) parts.push(`${this._t("dailyOperationPlan")}: ${item.actions.map((key) => this._dailyOperationActionLabel(key === "solar" ? 1 : key === "grid" ? 2 : 4)).join(", ")}`);
+    else if (item.decision === "not_needed") parts.push(this._t("dailyOperationNotNeeded"));
+    else parts.push(this._t("dailyOperationNoAction"));
+    if (item.chargePower != null) parts.push(`${this._t("dailyOperationGridCharge")}: ${this._dailyOperationFormatPower(item.chargePower)}`);
+    if (item.dischargePower != null) parts.push(`${this._t("dailyOperationDischarge")}: ${this._dailyOperationFormatPower(item.dischargePower)}`);
+    if (item.solarToBattery != null) parts.push(`${this._t("dailyOperationSolarCharge")}: ${this._dailyOperationFormatKwh(item.solarToBattery)}`);
+    if (item.gridToBattery != null) parts.push(`${this._t("dailyOperationGridCharge")}: ${this._dailyOperationFormatKwh(item.gridToBattery)}`);
+    if (item.batteryToHome != null) parts.push(`${this._t("dailyOperationDischarge")}: ${this._dailyOperationFormatKwh(item.batteryToHome)}`);
+    for (const action of item.actions) {
+      if (item.actionSeconds[action] != null) parts.push(`${this._t("dailyOperationObserved")} · ${this._dailyOperationActionLabel(action === "solar" ? 1 : action === "grid" ? 2 : 4)}: ${Math.round(item.actionSeconds[action])} s`);
+    }
+    if (item.decision) parts.push(`${this._t("dailyOperationMode")}: ${this._dailyOperationDecisionLabel(item.decision)}`);
+    if (item.setpoint) parts.push(this._t("dailyOperationSetpoint"));
+    if (item.delay) {
+      parts.push(item.delayUntil ? this._t("dailyOperationUnlock", { time: item.delayUntil }) : this._t("dailyOperationDelay"));
+    }
+    if (item.socEnd != null) parts.push(`SOC: ${this._nf(item.socEnd, 1)} %`);
+    const solarSource = this._dailyOperationSourceLabel(snapshot.source("solar"));
+    const consumptionSource = this._dailyOperationSourceLabel(snapshot.source("consumption"));
+    const planSource = this._dailyOperationSourceLabel(snapshot.source("plan"));
+    if (solarSource) parts.push(`${this._t("dailyOperationSolar")} · ${this._t("dailyOperationSource")}: ${solarSource}`);
+    if (consumptionSource) parts.push(`${this._t("dailyOperationConsumption")} · ${this._t("dailyOperationSource")}: ${consumptionSource}`);
+    if (planSource) parts.push(`${this._t("dailyOperationPlan")} · ${this._t("dailyOperationSource")}: ${planSource}`);
+    if (snapshot.planEvaluatedAt) parts.push(`${this._t("dailyOperationPlan")}: ${snapshot.planEvaluatedAt}`);
+    if (snapshot.generatedAt) parts.push(`${this._t("dailyOperationSource")}: ${snapshot.generatedAt}`);
+    if (snapshot.stale) parts.push(snapshot.staleReason ? `${this._t("dailyOperationStale")}: ${snapshot.staleReason}` : this._t("dailyOperationStale"));
+    return parts.join(". ");
+  }
+
+  _dailyOperationTooltipHTML(snapshot, item) {
+    const escape = (value) => this._dailyOperationEscape(value);
+    const row = (label, value) => `<div class="daily-op-tip-row"><span>${escape(label)}</span><strong>${escape(value)}</strong></div>`;
+    const rows = [row(this._t("dailyOperationMode"), item.statusLabel)];
+    if (item.solarActual != null) rows.push(row(`${this._t("dailyOperationSolar")} · ${this._t("dailyOperationReal")}`, this._dailyOperationFormatKwh(item.solarActual)));
+    if (item.solarForecast != null) rows.push(row(`${this._t("dailyOperationSolar")} · ${this._t("dailyOperationForecast")}`, this._dailyOperationFormatKwh(item.solarForecast)));
+    if (item.consumptionActual != null) rows.push(row(`${this._t("dailyOperationConsumption")} · ${this._t("dailyOperationReal")}`, this._dailyOperationFormatKwh(item.consumptionActual)));
+    if (item.consumptionForecast != null) rows.push(row(`${this._t("dailyOperationConsumption")} · ${this._t("dailyOperationForecast")}`, this._dailyOperationFormatKwh(item.consumptionForecast)));
+    if (item.coverage != null) rows.push(row(this._t("dailyOperationCoverage"), `${Math.round(item.coverage)} s`));
+    const actionLabels = item.actions.length
+      ? item.actions.map((key) => this._dailyOperationActionLabel(key === "solar" ? 1 : key === "grid" ? 2 : 4)).join(", ")
+      : item.decision === "not_needed" ? this._t("dailyOperationNotNeeded") : this._t("dailyOperationNoAction");
+    rows.push(row(this._t("dailyOperationPlan"), actionLabels));
+    if (item.solarToBattery != null) rows.push(row(this._t("dailyOperationSolarCharge"), this._dailyOperationFormatKwh(item.solarToBattery)));
+    if (item.gridToBattery != null) rows.push(row(this._t("dailyOperationGridCharge"), this._dailyOperationFormatKwh(item.gridToBattery)));
+    if (item.batteryToHome != null) rows.push(row(this._t("dailyOperationDischarge"), this._dailyOperationFormatKwh(item.batteryToHome)));
+    for (const action of item.actions) {
+      if (item.actionSeconds[action] != null) rows.push(row(`${this._t("dailyOperationObserved")} · ${this._dailyOperationActionLabel(action === "solar" ? 1 : action === "grid" ? 2 : 4)}`, `${Math.round(item.actionSeconds[action])} s`));
+    }
+    if (item.chargePower != null) rows.push(row(this._t("dailyOperationGridCharge"), this._dailyOperationFormatPower(item.chargePower)));
+    if (item.dischargePower != null) rows.push(row(this._t("dailyOperationDischarge"), this._dailyOperationFormatPower(item.dischargePower)));
+    if (item.decision) rows.push(row(this._t("dailyOperationMode"), this._dailyOperationDecisionLabel(item.decision)));
+    if (item.setpoint) rows.push(row(this._t("dailyOperationSetpoint"), this._t("dailyOperationSetpoint")));
+    if (item.delay) rows.push(row(this._t("dailyOperationDelay"), item.delayUntil ? this._t("dailyOperationUnlock", { time: item.delayUntil }) : this._t("dailyOperationDelay")));
+    if (item.socEnd != null) rows.push(row("SOC", `${this._nf(item.socEnd, 1)} %`));
+    const solarSource = this._dailyOperationSourceLabel(snapshot.source("solar"));
+    const consumptionSource = this._dailyOperationSourceLabel(snapshot.source("consumption"));
+    const planSource = this._dailyOperationSourceLabel(snapshot.source("plan"));
+    if (solarSource) rows.push(row(`${this._t("dailyOperationSolar")} · ${this._t("dailyOperationSource")}`, solarSource));
+    if (consumptionSource) rows.push(row(`${this._t("dailyOperationConsumption")} · ${this._t("dailyOperationSource")}`, consumptionSource));
+    if (planSource) rows.push(row(`${this._t("dailyOperationPlan")} · ${this._t("dailyOperationSource")}`, planSource));
+    if (snapshot.planEvaluatedAt) rows.push(row(this._t("dailyOperationPlan"), snapshot.planEvaluatedAt));
+    if (snapshot.generatedAt) rows.push(row(this._t("dailyOperationSource"), snapshot.generatedAt));
+    if (snapshot.mode) rows.push(row(this._t("dailyOperationMode"), snapshot.mode));
+    if (snapshot.stale) rows.push(row(this._t("dailyOperationStale"), snapshot.staleReason || this._t("dailyOperationStale")));
+    if (item.repeated) rows.push(row(this._t("dailyOperationDSTRepeated"), this._t("dailyOperationDSTRepeated")));
+    return `<div class="daily-op-tip-head">${escape(item.timeRange)}</div>` + rows.join("");
+  }
+
+  _showDailyOperationTooltip(index, cell) {
+    const ref = this._r.dailyOperation;
+    const snapshot = this._dailyOperationSnapshot;
+    if (!ref || !snapshot || snapshot.unavailable) return;
+    const item = this._dailyOperationItem(snapshot, index);
+    ref.tooltip.innerHTML = this._dailyOperationTooltipHTML(snapshot, item);
+    ref.tooltip.hidden = false;
+    ref.tooltip.setAttribute("aria-label", this._dailyOperationAriaLabel(snapshot, item));
+    cell.setAttribute("aria-describedby", ref.tooltip.id);
+    const cardRect = ref.card.getBoundingClientRect();
+    const cellRect = cell.getBoundingClientRect();
+    const tipWidth = ref.tooltip.offsetWidth || 250;
+    const tipHeight = ref.tooltip.offsetHeight || 100;
+    let left = cellRect.left - cardRect.left + cellRect.width / 2 - tipWidth / 2;
+    let top = cellRect.top - cardRect.top - tipHeight - 8;
+    left = this._clamp(left, 8, Math.max(8, cardRect.width - tipWidth - 8));
+    if (top < 8) top = cellRect.bottom - cardRect.top + 8;
+    ref.tooltip.style.left = `${left}px`;
+    ref.tooltip.style.top = `${top}px`;
+  }
+
+  _hideDailyOperationTooltip() {
+    const ref = this._r.dailyOperation;
+    if (!ref) return;
+    ref.tooltip.hidden = true;
+    ref.tooltip.removeAttribute("aria-label");
+  }
+
+  _scrollDailyOperation(direction) {
+    const ref = this._r.dailyOperation;
+    if (!ref) return;
+    ref.scrollState.manual = true;
+    const amount = Math.max(160, ref.viewport.clientWidth * 0.72);
+    if (typeof ref.viewport.scrollBy === "function") {
+      ref.viewport.scrollBy({ left: direction * amount, behavior: "smooth" });
+    } else {
+      ref.viewport.scrollLeft += direction * amount;
+    }
+  }
+
+  _centerDailyOperationNow(snapshot) {
+    const ref = this._r.dailyOperation;
+    if (!ref || ref.scrollState.initialized || ref.scrollState.manual) return;
+    const center = () => {
+      if (ref.scrollState.initialized || ref.scrollState.manual) return;
+      if (!ref.viewport.clientWidth) return;
+      const hourWidth = ref.stage.scrollWidth / 24;
+      const target = snapshot.currentIndex / 4 * hourWidth - (ref.viewport.clientWidth - hourWidth) / 2;
+      ref.scrollState.programmaticUntil = Date.now() + 250;
+      ref.viewport.scrollLeft = Math.max(0, target);
+      ref.scrollState.initialized = true;
+      this._updateDailyOperationNav();
+    };
+    if (ref.viewport.clientWidth) center();
+    else if (typeof requestAnimationFrame === "function") requestAnimationFrame(center);
+  }
+
+  _updateDailyOperationNav() {
+    const ref = this._r.dailyOperation;
+    if (!ref) return;
+    const max = Math.max(0, ref.viewport.scrollWidth - ref.viewport.clientWidth);
+    ref.previous.disabled = ref.viewport.scrollLeft <= 2;
+    ref.next.disabled = ref.viewport.scrollLeft >= max - 2;
+  }
+
+  _dailyOperationPath(values, snapshot, yMax, future) {
+    if (!Array.isArray(values)) return "";
+    const top = 32, bottom = 164;
+    const y = (value) => bottom - (this._clamp(value, 0, yMax) / yMax) * (bottom - top);
+    const parts = [];
+    let segment = [];
+    const flush = () => {
+      if (segment.length) parts.push(segment.join(" "));
+      segment = [];
+    };
+    values.forEach((value, index) => {
+      const number = this._dailyOperationNumber(value);
+      const inRange = future ? index >= snapshot.currentIndex : index <= snapshot.currentIndex;
+      if (snapshot.isSkipped[index] || number == null || !inRange) {
+        flush();
+        return;
+      }
+      const x = (index === snapshot.currentIndex ? index + snapshot.currentProgress : index + 0.5) * 10;
+      segment.push(`${segment.length ? "L" : "M"}${x.toFixed(2)},${y(number).toFixed(2)}`);
+    });
+    flush();
+    return parts.join(" ");
+  }
+
+  _dailyOperationUpdatePaths(snapshot) {
+    const ref = this._r.dailyOperation;
+    if (!ref) return;
+    const values = [snapshot.actualSolar, snapshot.forecastSolar, snapshot.actualConsumption, snapshot.forecastConsumption];
+    const yMax = Math.max(0.1, ...values.flatMap((array) => Array.isArray(array)
+      ? array.map((value) => this._dailyOperationNumber(value)).filter((value) => value != null)
+      : []
+    )) * 1.12;
+    ref.yAxis.innerHTML = [yMax, yMax * 0.75, yMax * 0.5, yMax * 0.25, 0]
+      .map((value) => `<span>${this._nf(value, 2)}</span>`).join("") +
+      `<small>${this._t("dailyOperationAxis")}</small>`;
+    const pathValues = [
+      [ref.paths.solarActual, snapshot.actualSolar, false],
+      [ref.paths.solarForecast, snapshot.forecastSolar, true],
+      [ref.paths.consumptionActual, snapshot.actualConsumption, false],
+      [ref.paths.consumptionForecast, snapshot.forecastConsumption, true],
+    ];
+    for (const [path, series, future] of pathValues) {
+      const d = this._dailyOperationPath(series, snapshot, yMax, future);
+      path.setAttribute("d", d);
+      path.style.display = d ? "" : "none";
+    }
+    const now = (snapshot.currentIndex + snapshot.currentProgress) * 10;
+    ref.nowLine.setAttribute("x1", now.toFixed(2));
+    ref.nowLine.setAttribute("x2", now.toFixed(2));
+    ref.nowText.setAttribute("x", Math.min(936, now + 4).toFixed(2));
+    ref.nowText.textContent = this._t("dailyOperationNow");
+  }
+
+  _dailyOperationUpdateCell(snapshot, index) {
+    const ref = this._r.dailyOperation;
+    const cell = ref.cells[index];
+    const item = this._dailyOperationItem(snapshot, index);
+    const baseAction = item.actions[0] || (item.decision === "not_needed" ? "not-needed" : "neutral");
+    cell.className = `daily-op-cell daily-op-base-${baseAction}`;
+    cell.classList.toggle("daily-op-real", item.status === "real");
+    cell.classList.toggle("daily-op-current", item.status === "current");
+    cell.classList.toggle("daily-op-forecast", item.status === "forecast");
+    cell.classList.toggle("daily-op-delay", item.delay);
+    cell.classList.toggle("daily-op-setpoint", item.setpoint);
+    cell.classList.toggle("daily-op-dst-skipped", item.skipped);
+    cell.classList.toggle("daily-op-dst-repeated", item.repeated);
+    cell.classList.toggle("daily-op-stale", snapshot.stale && item.status === "forecast");
+    const patterns = item.actions.slice(1, 3).map((action, patternIndex) => {
+      const key = `${action}-${patternIndex ? 1 : 0}`;
+      return `url(#${ref.patternIds[key]})`;
+    });
+    cell.style.backgroundImage = patterns.join(", ");
+    cell.setAttribute("aria-label", this._dailyOperationAriaLabel(snapshot, item));
+    cell.title = cell.getAttribute("aria-label");
+    const delayMark = cell.querySelector(".daily-op-delay-mark");
+    const setpointMark = cell.querySelector(".daily-op-setpoint-mark");
+    delayMark.hidden = !item.delay;
+    setpointMark.hidden = !item.setpoint;
+  }
+
+  _patchDailyOperationTimeline() {
+    const ref = this._r.dailyOperation;
+    if (!ref) return;
+    const snapshot = this._dailyOperationState();
+    this._dailyOperationSnapshot = snapshot;
+    if (!snapshot) {
+      ref.card.hidden = true;
+      this._hideDailyOperationTooltip();
+      return;
+    }
+    ref.card.hidden = false;
+    const badgeText = `${this._t("dailyOperationReal")} / ${this._t("dailyOperationForecast")}`;
+    ref.badge.querySelector("span:last-child").textContent = badgeText;
+    ref.badge.classList.toggle("daily-op-badge-stale", snapshot.stale);
+    const notices = [];
+    if (snapshot.unavailable || !snapshot.hasValues) notices.push(this._t("dailyOperationNoData"));
+    if (snapshot.stale) notices.push(snapshot.staleReason ? `${this._t("dailyOperationStale")}: ${snapshot.staleReason}` : this._t("dailyOperationStale"));
+    for (const kind of ["solar", "consumption"]) {
+      const reason = snapshot.fallbackReason(kind);
+      if (reason) notices.push(this._t("dailyOperationFallback", { reason }));
+      const source = snapshot.source(kind);
+      if (!reason && source && /fallback|sinus/i.test(source)) {
+        notices.push(this._t("dailyOperationFallback", { reason: this._dailyOperationSourceLabel(source) }));
+      }
+    }
+    if (snapshot.realtimeNoFuture) notices.push(this._t("dailyOperationRealtimeNoFuture"));
+    ref.notice.textContent = notices.join(" · ");
+    ref.notice.hidden = !notices.length;
+    ref.viewport.setAttribute("aria-label", `${this._t("dailyOperationTitle")}. ${badgeText}`);
+    for (let index = 0; index < 96; index++) this._dailyOperationUpdateCell(snapshot, index);
+    this._dailyOperationUpdatePaths(snapshot);
+    this._centerDailyOperationNow(snapshot);
+    this._updateDailyOperationNav();
+    if (this._dailyOpPinnedIndex != null) {
+      const cell = ref.cells[this._dailyOpPinnedIndex];
+      if (cell) this._showDailyOperationTooltip(this._dailyOpPinnedIndex, cell);
+    }
   }
 
   // ----- Flow card -----
@@ -3175,6 +4027,8 @@ class MarstekVenusPanel extends HTMLElement {
       this._setChip(el, text, tone);
       el.title = `${this._t(row.lk)}: ${text}`; // full value on hover (chips ellipsize)
     }
+
+    this._patchDailyOperationTimeline();
   }
 
   // --- history (SOC sparkline + Potencias + Energía semanal) -----------------
@@ -5020,6 +5874,11 @@ class MarstekVenusPanel extends HTMLElement {
         --flow-blue: oklch(0.70 0.15 245);
         --flow-green: oklch(0.78 0.16 150);
         --battery: var(--accent);
+        --daily-op-solar: var(--flow-green);
+        --daily-op-grid: var(--flow-purple);
+        --daily-op-discharge: var(--flow-blue);
+        --daily-op-not-needed: var(--ink-dim);
+        --daily-op-delay: oklch(0.78 0.15 58);
         --font-ui: "Manrope", system-ui, sans-serif;
         --font-display: "Space Grotesk", system-ui, sans-serif;
         --gap: 18px; --pad: 22px; --radius: 20px; --radius-sm: 13px;
@@ -5148,6 +6007,77 @@ class MarstekVenusPanel extends HTMLElement {
       .brush-box { position: absolute; top: 0; bottom: 0; background: var(--accent-soft);
         border-left: 1px solid var(--accent-line); border-right: 1px solid var(--accent-line);
         pointer-events: none; z-index: 5; }
+
+      /* ===== Daily operation timeline ===== */
+      .daily-operation-card { min-width: 0; overflow: visible; }
+      .daily-operation-card[hidden], .daily-operation-card [hidden] { display: none !important; }
+      .daily-op-description { font-size: 12px; line-height: 1.45; margin: -7px 0 12px; }
+      .daily-op-toolbar { display: flex; align-items: center; gap: 12px; min-width: 0; margin-bottom: 9px; }
+      .daily-op-legend { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; min-width: 0; }
+      .daily-op-legend-item { display: inline-flex; align-items: center; gap: 5px; color: var(--ink-mid); font-size: 11px; white-space: nowrap; }
+      .daily-op-swatch { display: inline-block; width: 12px; height: 12px; border: 1px solid var(--line-strong); border-radius: 3px; }
+      .daily-op-swatch-solar { background: color-mix(in oklab, var(--daily-op-solar) 55%, transparent); }
+      .daily-op-swatch-grid { background: color-mix(in oklab, var(--daily-op-grid) 55%, transparent); }
+      .daily-op-swatch-discharge { background: color-mix(in oklab, var(--daily-op-discharge) 55%, transparent); }
+      .daily-op-swatch-not-needed { background: color-mix(in oklab, var(--daily-op-not-needed) 45%, transparent); }
+      .daily-op-line { display: inline-block; width: 15px; height: 0; border-top: 2px solid var(--ink); }
+      .daily-op-line-solar { border-color: var(--daily-op-solar); }
+      .daily-op-line-consumption { border-color: var(--home); border-top-style: dashed; }
+      .daily-op-nav { display: inline-flex; gap: 5px; margin-left: auto; flex-shrink: 0; }
+      .daily-op-nav-btn { display: grid; place-items: center; width: 29px; height: 29px; padding: 0; border: 1px solid var(--line); border-radius: 8px; background: var(--bg-2); color: var(--ink-mid); cursor: pointer; --mdc-icon-size: 18px; }
+      .daily-op-nav-btn:hover:not(:disabled) { color: var(--ink); background: var(--bg-hover); }
+      .daily-op-nav-btn:disabled { opacity: .38; cursor: default; }
+      .daily-op-badge { display: inline-flex; align-items: center; gap: 6px; margin-left: auto; padding: 5px 9px; border: 1px solid var(--accent-line); border-radius: 999px; color: var(--accent); background: var(--accent-soft); font-size: 11px; font-weight: 600; white-space: nowrap; }
+      .daily-op-badge-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
+      .daily-op-badge-stale { color: oklch(0.82 0.14 75); border-color: oklch(0.82 0.14 75 / .4); background: oklch(0.82 0.14 75 / .1); }
+      .daily-op-notice { margin: 0 0 9px; padding: 7px 10px; border: 1px solid oklch(0.82 0.14 75 / .35); border-radius: 9px; color: oklch(0.82 0.14 75); background: oklch(0.82 0.14 75 / .08); font-size: 11px; line-height: 1.4; }
+      .daily-op-layout { display: grid; grid-template-columns: 62px minmax(0, 1fr); gap: 0; min-width: 0; }
+      .daily-op-yaxis { display: flex; flex-direction: column; align-items: flex-end; justify-content: space-between; height: 190px; padding: 24px 8px 21px 0; color: var(--ink-dim); font-size: 10px; line-height: 1; white-space: nowrap; }
+      .daily-op-yaxis small { margin-top: -15px; font-size: 9px; writing-mode: vertical-rl; transform: rotate(180deg); }
+      .daily-op-viewport { position: relative; min-width: 0; overflow-x: auto; overflow-y: hidden; scroll-snap-type: x proximity; scrollbar-width: thin; overscroll-behavior-x: contain; outline: none; }
+      .daily-op-viewport:focus-visible { box-shadow: inset 0 0 0 2px var(--accent-line); border-radius: 8px; }
+      .daily-op-stage { position: relative; width: 100%; min-width: 960px; height: 190px; }
+      .daily-op-svg { position: absolute; inset: 0; z-index: 1; display: block; width: 100%; height: 190px; overflow: visible; pointer-events: none; }
+      .daily-op-grid-lines line { stroke: var(--line); stroke-width: 1; vector-effect: non-scaling-stroke; }
+      .daily-op-grid-lines .daily-op-hour-line { stroke: var(--line-strong); }
+      .daily-op-path { stroke-width: 2.2; vector-effect: non-scaling-stroke; stroke-linecap: round; stroke-linejoin: round; }
+      .daily-op-path-solar-actual { stroke: var(--daily-op-solar); }
+      .daily-op-path-solar-forecast { stroke: var(--daily-op-solar); stroke-dasharray: 5 4; opacity: .78; }
+      .daily-op-path-consumption-actual { stroke: var(--home); }
+      .daily-op-path-consumption-forecast { stroke: var(--home); stroke-dasharray: 5 4; opacity: .78; }
+      .daily-op-now-line { stroke: var(--accent); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+      .daily-op-now-text { fill: var(--accent); font-size: 10px; font-weight: 600; }
+      .daily-op-grid { position: absolute; inset: 0; z-index: 2; display: grid; grid-template-rows: 24px 146px 20px; pointer-events: none; }
+      .daily-op-hour-labels, .daily-op-hours { display: grid; grid-template-columns: repeat(24, minmax(0, 1fr)); min-width: 0; }
+      .daily-op-hour-label { padding-left: 4px; color: var(--ink-dim); font-size: 10px; font-variant-numeric: tabular-nums; }
+      .daily-op-hour { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); min-width: 0; scroll-snap-align: start; border-right: 1px solid var(--line-strong); }
+      .daily-op-cell { position: relative; display: block; min-width: 0; height: 146px; padding: 0; border: 0; border-left: 1px solid var(--line); border-radius: 0; background-color: transparent; background-repeat: repeat; background-size: 8px 8px; cursor: pointer; pointer-events: auto; transition: filter .12s, opacity .12s; }
+      .daily-op-cell:hover, .daily-op-cell:focus-visible { z-index: 4; filter: brightness(1.18); outline: 2px solid var(--accent); outline-offset: -2px; }
+      .daily-op-cell.daily-op-current { box-shadow: inset 0 0 0 1px var(--accent); }
+      .daily-op-cell.daily-op-forecast { border-bottom: 1px dashed var(--line-strong); }
+      .daily-op-cell.daily-op-stale { opacity: .55; }
+      .daily-op-base-solar { background-color: color-mix(in oklab, var(--daily-op-solar) 48%, transparent); }
+      .daily-op-base-grid { background-color: color-mix(in oklab, var(--daily-op-grid) 48%, transparent); }
+      .daily-op-base-discharge { background-color: color-mix(in oklab, var(--daily-op-discharge) 48%, transparent); }
+      .daily-op-base-not-needed { background-color: color-mix(in oklab, var(--daily-op-not-needed) 38%, transparent); }
+      .daily-op-base-neutral { background-color: color-mix(in oklab, var(--bg-2) 35%, transparent); }
+      .daily-op-cell.daily-op-delay::before { content: ""; position: absolute; left: 1px; right: 1px; top: 0; height: 3px; background: var(--daily-op-delay); }
+      .daily-op-delay-mark, .daily-op-setpoint-mark { position: absolute; z-index: 2; display: grid; place-items: center; color: var(--daily-op-delay); --mdc-icon-size: 12px; }
+      .daily-op-delay-mark { top: 4px; right: 2px; }
+      .daily-op-setpoint-mark { right: 2px; bottom: 3px; color: var(--ink-mid); opacity: .85; }
+      .daily-op-dst-skipped { opacity: .25; background-image: repeating-linear-gradient(135deg, transparent 0 4px, var(--line-strong) 4px 5px) !important; }
+      .daily-op-dst-repeated { box-shadow: inset 0 0 0 1px var(--ink-dim); }
+      .daily-op-tooltip { position: absolute; z-index: 10; max-width: min(340px, calc(100% - 16px)); min-width: 210px; padding: 9px 11px; border: 1px solid var(--line-strong); border-radius: 10px; background: var(--bg-2); color: var(--ink); box-shadow: 0 8px 24px oklch(0 0 0 / .35); font-size: 11px; line-height: 1.4; pointer-events: none; }
+      .daily-op-tip-head { margin-bottom: 5px; color: var(--ink); font-weight: 700; font-variant-numeric: tabular-nums; }
+      .daily-op-tip-row { display: flex; justify-content: space-between; gap: 14px; border-top: 1px solid var(--line); padding-top: 3px; margin-top: 3px; }
+      .daily-op-tip-row span { color: var(--ink-mid); }
+      .daily-op-tip-row strong { color: var(--ink); text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; }
+      @media (max-width: 720px) {
+        .daily-op-toolbar { align-items: flex-start; }
+        .daily-op-legend { gap: 8px; }
+        .daily-op-layout { grid-template-columns: 54px minmax(0, 1fr); }
+        .daily-op-yaxis { padding-right: 6px; }
+      }
 
       .stat-label { font-size: 12.5px; color: var(--ink-mid); font-weight: 600; display: flex; align-items: center; gap: 7px; --mdc-icon-size: 15px; }
       .stat-value { font-family: var(--font-display); font-weight: 600; letter-spacing: -0.02em; line-height: 1; font-size: 26px; }
