@@ -161,8 +161,7 @@ async def test_read_telemetry_decodes_the_reference_installation():
 
 @pytest.mark.asyncio
 async def test_enum_registers_become_labels():
-    data = await _driver().read_telemetry(["inverter_state", "user_work_mode"])
-    assert data["inverter_state"] == "Running"
+    data = await _driver().read_telemetry(["user_work_mode"])
     assert data["user_work_mode"] == "Maximise self consumption"
 
 
@@ -172,6 +171,60 @@ async def test_unknown_enum_value_is_reported_rather_than_hidden():
     blocks[37000] = [99, 0, 0, 0, 500]
     data = await _driver(_fake_client(blocks)).read_telemetry(["inverter_state"])
     assert data["inverter_state"] == "Unknown (99)"
+
+
+# ----------------------------------------------------------------------
+# inverter state
+#
+# Register 37000 only says whether the storage is alive, so on its own the
+# panel header reads "Running" all day. The direction comes from measured
+# power, using the same words as the Marstek register map so the panel is
+# consistent across brands.
+# ----------------------------------------------------------------------
+def _state(running, battery_w):
+    high, low = divmod(battery_w & 0xFFFFFFFF, 0x10000)
+    return {**_LIVE_BLOCKS, 37000: [running, high, low, 7963, 610]}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "battery_w,expected",
+    [
+        (2000, "Charge"),
+        (-2000, "Discharge"),
+        (0, "Standby"),
+        # The inverter idles around +50 W; comparing against zero would call a
+        # standing battery "Charge" and flip the header on noise.
+        (50, "Standby"),
+        (-46, "Standby"),
+        (101, "Charge"),
+        (-101, "Discharge"),
+    ],
+)
+async def test_running_state_is_refined_by_direction(battery_w, expected):
+    data = await _driver(_fake_client(_state(2, battery_w))).read_telemetry()
+    assert data["inverter_state"] == expected
+    assert data["battery_power"] == battery_w
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("raw,expected", [(0, "Offline"), (1, "Standby"), (3, "Fault"), (4, "Sleep")])
+async def test_non_running_states_are_reported_as_is(raw, expected):
+    """Offline / Fault / Sleep carry more than a direction ever could."""
+    data = await _driver(_fake_client(_state(raw, -2000))).read_telemetry()
+    assert data["inverter_state"] == expected
+
+
+@pytest.mark.asyncio
+async def test_state_falls_back_to_running_without_a_power_reading():
+    blocks = {**_LIVE_BLOCKS, 37000: [2, 0xFFFF, 0xFCD7, 7963, 610]}
+    driver = _driver(_fake_client(blocks))
+    # Force the power away so only the raw status remains.
+    data = await driver.read_telemetry()
+    data.pop("battery_power")
+    refined = await driver.read_telemetry(["inverter_state"])
+    # Asking for the state alone must still pull its companion reading.
+    assert refined["inverter_state"] == "Discharge"
 
 
 @pytest.mark.asyncio

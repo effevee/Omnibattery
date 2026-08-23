@@ -78,14 +78,26 @@ _WORKING_MODE_LABELS = {
     5: "Time of use (LUNA2000)",
 }
 
-# Storage running status (register 37000), StorageStatus.
+# Storage running status (register 37000), StorageStatus. Deliberately worded
+# like the Marstek register map so the battery panel reads the same across
+# brands — it prints this label verbatim.
 _STORAGE_STATUS_LABELS = {
     0: "Offline",
     1: "Standby",
     2: "Running",
     3: "Fault",
-    4: "Sleep mode",
+    4: "Sleep",
 }
+_STORAGE_STATUS_RUNNING = 2
+
+# "Running" says the storage is alive, not which way the energy flows, so the
+# panel header would sit on that one word all day. The direction comes from
+# measured battery power instead.
+#
+# The deadband is not cosmetic: this inverter idles around +50 W (its own
+# consumption, and what a held zero settles at), so comparing against 0 would
+# label a standing battery "Charge" and flip the header on noise.
+_STATE_DIRECTION_DEADBAND_W = 100
 
 # Envelope ceiling. The live per-model caps come from 37046/37048; this only
 # bounds a malformed reading so it cannot inflate the PD limits.
@@ -193,6 +205,13 @@ _DECODERS = {"u16": decode_u16, "i16": decode_i16, "u32": decode_u32, "i32": dec
 _DERIVED_FROM = {
     "mppt1_power": ("pv1_voltage", "pv1_current"),
     "mppt2_power": ("pv2_voltage", "pv2_current"),
+}
+
+# Keys that are read but then refined using another key. Unlike _DERIVED_FROM
+# these already sit in a read group; only the key filter has to pull their
+# companion along, or a poll for just this key would lose the refinement.
+_REFINED_FROM = {
+    "inverter_state": ("battery_power",),
 }
 
 SENSOR_DEFINITIONS = [
@@ -358,9 +377,10 @@ class HuaweiSolarDriver(BatteryDriver):
     async def read_telemetry(self, keys: Optional[list[str]] = None) -> TelemetrySnapshot:
         requested = set(keys) if keys is not None else None
         if requested is not None:
-            for derived, sources in _DERIVED_FROM.items():
-                if derived in requested:
-                    requested.update(sources)
+            for extra_map in (_DERIVED_FROM, _REFINED_FROM):
+                for key, sources in extra_map.items():
+                    if key in requested:
+                        requested.update(sources)
         snapshot: TelemetrySnapshot = {}
 
         for start, count, _interval, fields in _BLOCKS:
@@ -401,9 +421,21 @@ class HuaweiSolarDriver(BatteryDriver):
         # Enum registers become their label; the raw number stays available to
         # the control layer under the same key only where it is numeric.
         if "inverter_state" in snapshot:
-            snapshot["inverter_state"] = _STORAGE_STATUS_LABELS.get(
-                int(snapshot["inverter_state"]), f"Unknown ({snapshot['inverter_state']})"
-            )
+            raw_state = int(snapshot["inverter_state"])
+            battery_power = snapshot.get("battery_power")
+            if raw_state == _STORAGE_STATUS_RUNNING and battery_power is not None:
+                power = int(battery_power)
+                if power > _STATE_DIRECTION_DEADBAND_W:
+                    label = "Charge"
+                elif power < -_STATE_DIRECTION_DEADBAND_W:
+                    label = "Discharge"
+                else:
+                    label = "Standby"
+            else:
+                # Offline / Fault / Sleep carry more than a direction ever could,
+                # so they are reported as-is.
+                label = _STORAGE_STATUS_LABELS.get(raw_state, f"Unknown ({raw_state})")
+            snapshot["inverter_state"] = label
         if "user_work_mode" in snapshot:
             snapshot["user_work_mode"] = _WORKING_MODE_LABELS.get(
                 int(snapshot["user_work_mode"]), f"Unknown ({snapshot['user_work_mode']})"
