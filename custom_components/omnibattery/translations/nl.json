@@ -1721,8 +1721,14 @@
       "inverter_rated_power": {
         "name": "Nominaal Omvormervermogen"
       },
-      "serial_number": {
-        "name": "Serienummer"
+      "power_module_serial_number": {
+        "name": "Vermogensmodule Serienummer"
+      },
+      "power_module_firmware_version": {
+        "name": "Vermogensmodule Firmware"
+      },
+      "inverter_serial_number": {
+        "name": "Omvormer Serienummer"
       },
       "battery_runtime_estimate": {
         "name": "Geschatte Batterijduur"

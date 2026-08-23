@@ -853,10 +853,40 @@ def test_derived_keys_are_scheduled_with_their_source_block():
 
 
 @pytest.mark.asyncio
-async def test_storage_firmware_is_exposed_for_the_device_card():
-    blocks = {**_LIVE_BLOCKS, 37814: [0x5632, 0x3030] + [0] * 13}  # "V200"
-    data = await _driver(_fake_client(blocks)).read_telemetry(["software_version"])
-    assert data["software_version"] == "V200"
+async def test_each_part_reports_its_own_identity():
+    """A LUNA2000 is three kinds of hardware, each with its own serial.
+
+    On the reference installation the inverter is BT24B1457565, the power module
+    between it and the packs is TA2470074124, and the packs are theirs again.
+    Publishing any of them as "the" serial mislabels the other two.
+    """
+    blocks = {
+        **_LIVE_BLOCKS,
+        30000: _text("SUN2000-8K-MAP0", 15) + _text("BT24B1457565", 10),
+        37052: _text("TA2470074124", 10),
+        37814: _text("V200R025C00SPC103", 15),
+        30050: _text("V200R024C00SPC110", 15),
+    }
+    driver = _driver(_fake_client(blocks))
+    data = await driver.read_telemetry()
+
+    assert data["inverter_serial_number"] == "BT24B1457565"
+    assert data["inverter_software_version"] == "V200R024C00SPC110"
+    assert data["power_module_serial_number"] == "TA2470074124"
+    assert data["power_module_firmware_version"] == "V200R025C00SPC103"
+    # The device entry stands for the storage, so it takes the power module's.
+    await driver.connect()
+    assert driver.serial == "TA2470074124"
+
+
+def test_each_identity_has_an_entity():
+    keys = {row["key"] for row in SENSOR_DEFINITIONS}
+    assert {
+        "inverter_serial_number",
+        "inverter_software_version",
+        "power_module_serial_number",
+        "power_module_firmware_version",
+    } <= keys
 
 
 # ----------------------------------------------------------------------

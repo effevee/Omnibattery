@@ -126,9 +126,10 @@ All registers FC03 holding, unit id 4, verified against the corresponding
 | `off_grid_state` | O | 32003 | u32 | bitfield | medium | N | [x] |
 | `ac_offgrid_power` | O | — | — | derived (§13.5) | medium | D | [x] |
 | `device_name` | O | 30000 | str(15) | — | very_low | N | [x] |
-| `serial_number` | O | 37052 | str(10) | — | very_low | N | [x] |
+| `power_module_serial_number` | O | 37052 | str(10) | — | very_low | N | [x] |
+| `power_module_firmware_version` | O | 37814 | str(15) | — | very_low | N | [x] |
 | `inverter_serial_number` | O | 30015 | str(10) | — | very_low | N | [x] |
-| `software_version` | O | 37814 | str(15) | — | very_low | N | [x] |
+| `inverter_software_version` | O | 30050 | str(15) | — | very_low | N | [x] |
 | `pack1..3_firmware_version` | O | 38210/38252/38294 | str(15) | — | very_low | N | [x] |
 | `pack1..3_serial_number` | O | 38200/38242/38284 | str(10) | — | very_low | N | [x] |
 | `max_cell_voltage` / `min_cell_voltage` | O | — | — | **X** | — | X | — |
@@ -170,6 +171,18 @@ last so a sequence failing earlier leaves the inverter untouched.
 **The service validates power against the register maximum** and raises
 `ValueError: Power cannot be more than 7000W`. Configuring a limit above the
 BMS figure produces failing writes, not clamped ones.
+
+**One "battery" is three kinds of hardware.** A LUNA2000 installation is an
+inverter, a power module, and one to three battery packs, and each carries its
+own serial and firmware in its own registers — 30015/30050 for the inverter,
+37052/37814 for the power module, 38200+ per pack. Publishing any one of them as
+*the* serial mislabels the other two, so the driver names each part. The device
+registry entry stands for the storage, so it takes the power module's serial.
+
+The Modbus endpoint can be a fourth device again: on the reference installation
+the address answers as `SmartHEMS` (an EMMA-A02, serial NS24A1211290) on slave 0,
+with the inverter behind it on slave 4. That is the gateway, not the battery, and
+it appears nowhere in the telemetry.
 
 **The setup names the battery twice.** On the service path a Modbus address
 identifies the inverter and a registry device identifies the battery, and

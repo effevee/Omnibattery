@@ -1730,8 +1730,14 @@
       "inverter_rated_power": {
         "name": "Inverter Rated Power"
       },
-      "serial_number": {
-        "name": "Serial Number"
+      "power_module_serial_number": {
+        "name": "Power Module Serial Number"
+      },
+      "power_module_firmware_version": {
+        "name": "Power Module Firmware"
+      },
+      "inverter_serial_number": {
+        "name": "Inverter Serial Number"
       },
       "battery_runtime_estimate": {
         "name": "Battery Runtime Estimate"

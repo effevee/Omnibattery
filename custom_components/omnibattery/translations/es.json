@@ -1721,8 +1721,14 @@
       "inverter_rated_power": {
         "name": "Potencia Nominal del Inversor"
       },
-      "serial_number": {
-        "name": "Número de Serie"
+      "power_module_serial_number": {
+        "name": "Número de Serie del Módulo de Potencia"
+      },
+      "power_module_firmware_version": {
+        "name": "Firmware del Módulo de Potencia"
+      },
+      "inverter_serial_number": {
+        "name": "Número de Serie del Inversor"
       },
       "battery_runtime_estimate": {
         "name": "Estimación de Autonomía de Batería"

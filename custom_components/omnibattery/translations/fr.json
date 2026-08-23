@@ -1733,8 +1733,14 @@
       "inverter_rated_power": {
         "name": "Puissance Nominale de l'Onduleur"
       },
-      "serial_number": {
-        "name": "Numéro de Série"
+      "power_module_serial_number": {
+        "name": "Numéro de Série du Module de Puissance"
+      },
+      "power_module_firmware_version": {
+        "name": "Micrologiciel du Module de Puissance"
+      },
+      "inverter_serial_number": {
+        "name": "Numéro de Série de l'Onduleur"
       },
       "battery_runtime_estimate": {
         "name": "Estimation d'Autonomie de la Batterie"

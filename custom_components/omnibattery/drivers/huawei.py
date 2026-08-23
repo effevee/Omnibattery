@@ -244,8 +244,10 @@ _BLOCK_MODEL = (30000, 25, "very_low", {
     # identifier — so it ties a Modbus address to a device in the registry.
     "inverter_serial_number": (15, "str", 10),
 })
-_BLOCK_SERIAL = (37052, 10, "very_low", {"serial_number": (0, "str", 10)})
-_BLOCK_STORAGE_SW = (37814, 15, "very_low", {"software_version": (0, "str", 15)})
+# 37052/37814 belong to the power module (the LUNA2000-xKW-Cx that sits between
+# the inverter and the packs), not to the inverter and not to a pack.
+_BLOCK_SERIAL = (37052, 10, "very_low", {"power_module_serial_number": (0, "str", 10)})
+_BLOCK_STORAGE_SW = (37814, 15, "very_low", {"power_module_firmware_version": (0, "str", 15)})
 _BLOCK_INVERTER_SW = (30050, 15, "very_low", {"inverter_software_version": (0, "str", 15)})
 # Each pack answers on its own address run; there is no contiguous block. Serial
 # and firmware sit next to each other within a run, so one read covers both.
@@ -316,7 +318,7 @@ SENSOR_DEFINITIONS = [
     ],
     {"key": "ac_offgrid_power", "name": "Off-grid Power", "unit": "W", "device_class": "power", "state_class": "measurement", "scale": 1, "precision": 0, "scan_interval": "medium", "enabled_by_default": True},
     {"key": "backup_function", "name": "Backup Function", "data_type": "char", "icon": "mdi:home-lightning-bolt-outline", "category": "diagnostic", "scan_interval": "medium", "enabled_by_default": True},
-    {"key": "software_version", "name": "Storage Firmware", "data_type": "char", "icon": "mdi:ticket-confirmation-outline", "category": "diagnostic", "scan_interval": "very_low", "enabled_by_default": True},
+    {"key": "power_module_firmware_version", "name": "Power Module Firmware", "data_type": "char", "icon": "mdi:ticket-confirmation-outline", "category": "diagnostic", "scan_interval": "very_low", "enabled_by_default": True},
     {"key": "inverter_software_version", "name": "Inverter Firmware", "data_type": "char", "icon": "mdi:ticket-confirmation-outline", "category": "diagnostic", "scan_interval": "very_low", "enabled_by_default": True},
     *[
         row
@@ -341,7 +343,8 @@ SENSOR_DEFINITIONS = [
     {"key": "inverter_max_power", "name": "Inverter Max AC Power", "unit": "W", "device_class": "power", "state_class": "measurement", "scale": 1, "precision": 0, "category": "diagnostic", "scan_interval": "very_low", "enabled_by_default": True},
     {"key": "inverter_rated_power", "name": "Inverter Rated Power", "unit": "W", "device_class": "power", "state_class": "measurement", "scale": 1, "precision": 0, "category": "diagnostic", "scan_interval": "very_low", "enabled_by_default": False},
     {"key": "device_name", "name": "Device Model", "data_type": "char", "icon": "mdi:information-outline", "category": "diagnostic", "scan_interval": "very_low", "enabled_by_default": True},
-    {"key": "serial_number", "name": "Serial Number", "data_type": "char", "icon": "mdi:identifier", "category": "diagnostic", "scan_interval": "very_low", "enabled_by_default": False},
+    {"key": "power_module_serial_number", "name": "Power Module Serial", "data_type": "char", "icon": "mdi:identifier", "category": "diagnostic", "scan_interval": "very_low", "enabled_by_default": True},
+    {"key": "inverter_serial_number", "name": "Inverter Serial", "data_type": "char", "icon": "mdi:identifier", "category": "diagnostic", "scan_interval": "very_low", "enabled_by_default": True},
 ]
 
 
@@ -504,11 +507,13 @@ class HuaweiSolarDriver(BatteryDriver):
         # The pack serials come along because the entity list depends on which
         # slots are populated, and that has to be known before setup.
         identity = await self.read_telemetry(
-            ["device_name", "serial_number", "pv_string_count"]
+            ["device_name", "power_module_serial_number", "pv_string_count"]
             + [f"pack{index}_serial_number" for index in (1, 2, 3)]
         )
         self._model = identity.get("device_name") or self._model
-        self._serial = identity.get("serial_number") or self._serial
+        # The power module is the storage device's own identity; the inverter
+        # has a separate serial, and the packs have theirs.
+        self._serial = identity.get("power_module_serial_number") or self._serial
         return True
 
     async def close(self) -> None:
