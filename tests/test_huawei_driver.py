@@ -1712,3 +1712,29 @@ async def test_a_serial_carried_with_a_suffix_still_counts_as_a_match(monkeypatc
     )
     form = await flow.async_step_battery_connection_huawei(dict(_HUAWEI_INPUT))
     assert form["step_id"] == "battery_limits"
+
+
+@pytest.mark.asyncio
+async def test_the_device_is_named_after_the_storage_not_the_inverter():
+    """The device entry stands for the battery, so SUN2000 would mislead.
+
+    Naming it after the inverter reads as though the packs and the power module
+    belonged to the inverter. Register 47000 says which storage is attached; the
+    inverter keeps its model in its own entity.
+    """
+    driver = _driver(_fake_client({**_LIVE_BLOCKS, 47000: [2]}))
+    await driver.connect()
+    assert driver.model_label == "LUNA2000"
+
+    data = await driver.read_telemetry()
+    assert data["device_name"] == "SUN2000-8K-MAP0"
+    # The raw enum is a means to an end and does not belong in diagnostics.
+    assert "storage_product_model" not in data
+
+
+@pytest.mark.asyncio
+async def test_an_unknown_storage_falls_back_to_the_inverter_model():
+    """Better a model that is merely imprecise than none at all."""
+    driver = _driver(_fake_client({**_LIVE_BLOCKS, 47000: [7]}))
+    await driver.connect()
+    assert driver.model_label == "SUN2000-8K-MAP0"

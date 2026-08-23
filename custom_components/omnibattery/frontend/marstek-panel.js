@@ -3528,6 +3528,7 @@ class MarstekVenusPanel extends HTMLElement {
           // Huawei publishes the serial as a sensor; the registry entry has none.
           serial: (devReg && devReg.serial_number) || this._sval(byTk[K.powerModuleSerial]),
           powerModuleFw: this._sval(byTk[K.powerModuleFirmware]),
+          inverterModel: this._sval(byTk[K.deviceName]),
           inverterSn: this._sval(byTk[K.inverterSerial]),
           inverterFw: this._sval(byTk[K.inverterFirmware]),
           // A battery built from packs names each one. Empty slots answer with
@@ -3962,7 +3963,10 @@ class MarstekVenusPanel extends HTMLElement {
     // packs — and each carries its own serial and firmware. Brands with a
     // single identity keep the plain serial row.
     if (b.info.powerModuleFw || b.info.inverterSn) {
-      addRow(this._t("infoInverter"), [b.info.inverterSn, b.info.inverterFw].filter(Boolean).join(" · "));
+      addRow(
+        this._t("infoInverter"),
+        [b.info.inverterModel, b.info.inverterSn, b.info.inverterFw].filter(Boolean).join(" · ")
+      );
       addRow(this._t("infoPowerModule"), [b.info.serial, b.info.powerModuleFw].filter(Boolean).join(" · "));
     } else {
       addRow(this._t("infoSerial"), b.info.serial);

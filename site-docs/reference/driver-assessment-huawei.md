@@ -126,6 +126,7 @@ All registers FC03 holding, unit id 4, verified against the corresponding
 | `off_grid_state` | O | 32003 | u32 | bitfield | medium | N | [x] |
 | `ac_offgrid_power` | O | — | — | derived (§13.5) | medium | D | [x] |
 | `device_name` | O | 30000 | str(15) | — | very_low | N | [x] |
+| `storage_product_model` | O | 47000 | u16 | enum | very_low | N | — |
 | `power_module_serial_number` | O | 37052 | str(10) | — | very_low | N | [x] |
 | `power_module_firmware_version` | O | 37814 | str(15) | — | very_low | N | [x] |
 | `inverter_serial_number` | O | 30015 | str(10) | — | very_low | N | [x] |
@@ -177,7 +178,11 @@ inverter, a power module, and one to three battery packs, and each carries its
 own serial and firmware in its own registers — 30015/30050 for the inverter,
 37052/37814 for the power module, 38200+ per pack. Publishing any one of them as
 *the* serial mislabels the other two, so the driver names each part. The device
-registry entry stands for the storage, so it takes the power module's serial.
+registry entry stands for the storage, so it takes the power module's serial —
+and its model from 47000 (`2` = LUNA2000) rather than from 30000, which is the
+inverter's. Calling the device a SUN2000 would read as though the packs belonged
+to the inverter. That enum is telemetry-only: it resolves to a label and is
+dropped, so no entity carries a bare `2`.
 
 The Modbus endpoint can be a fourth device again: on the reference installation
 the address answers as `SmartHEMS` (an EMMA-A02, serial NS24A1211290) on slave 0,

@@ -238,6 +238,10 @@ _BLOCK_RATING = (30073, 4, "very_low", {
     # rated value above it is the nameplate and can be lower.
     "inverter_max_power": (2, "u32", 1),
 })
+# Which kind of storage is attached, if any. The inverter model says nothing
+# about it — a SUN2000 runs with or without a battery, and with either brand.
+_STORAGE_MODELS = {0: None, 1: "LG-RESU", 2: "LUNA2000"}
+_BLOCK_STORAGE_MODEL = (47000, 1, "very_low", {"storage_product_model": (0, "u16", 1)})
 _BLOCK_MODEL = (30000, 25, "very_low", {
     "device_name": (0, "str", 15),
     # The inverter's own serial, which huawei_solar also uses as its device
@@ -269,7 +273,7 @@ _BLOCKS = (
     _BLOCK_FORCIBLE_MODE, _BLOCK_FORCIBLE_POWER,
     _BLOCK_DAILY, _BLOCK_LIMITS, _BLOCK_TOTALS, _BLOCK_CONFIG,
     _BLOCK_CAPACITY, _BLOCK_STRING_COUNT, _BLOCK_RATING, _BLOCK_MODEL, _BLOCK_SERIAL,
-    _BLOCK_STORAGE_SW, _BLOCK_INVERTER_SW,
+    _BLOCK_STORAGE_SW, _BLOCK_INVERTER_SW, _BLOCK_STORAGE_MODEL,
     _BLOCK_PACK1, _BLOCK_PACK2, _BLOCK_PACK3,
 )
 
@@ -342,7 +346,7 @@ SENSOR_DEFINITIONS = [
     {"key": "user_work_mode", "name": "Working Mode", "data_type": "char", "icon": "mdi:cog-outline", "category": "diagnostic", "scan_interval": "low", "enabled_by_default": True},
     {"key": "inverter_max_power", "name": "Inverter Max AC Power", "unit": "W", "device_class": "power", "state_class": "measurement", "scale": 1, "precision": 0, "category": "diagnostic", "scan_interval": "very_low", "enabled_by_default": True},
     {"key": "inverter_rated_power", "name": "Inverter Rated Power", "unit": "W", "device_class": "power", "state_class": "measurement", "scale": 1, "precision": 0, "category": "diagnostic", "scan_interval": "very_low", "enabled_by_default": False},
-    {"key": "device_name", "name": "Device Model", "data_type": "char", "icon": "mdi:information-outline", "category": "diagnostic", "scan_interval": "very_low", "enabled_by_default": True},
+    {"key": "device_name", "name": "Inverter Model", "data_type": "char", "icon": "mdi:information-outline", "category": "diagnostic", "scan_interval": "very_low", "enabled_by_default": True},
     {"key": "power_module_serial_number", "name": "Power Module Serial", "data_type": "char", "icon": "mdi:identifier", "category": "diagnostic", "scan_interval": "very_low", "enabled_by_default": True},
     {"key": "inverter_serial_number", "name": "Inverter Serial", "data_type": "char", "icon": "mdi:identifier", "category": "diagnostic", "scan_interval": "very_low", "enabled_by_default": True},
 ]
@@ -372,7 +376,10 @@ class HuaweiSolarDriver(BatteryDriver):
         self._direct_write = bool(direct_write)
         self._client = client if client is not None else HuaweiModbusClient(host, port, slave_id)
         self._shutting_down = False
+        # The inverter's model, read from 30000. The device this driver stands
+        # for is the storage, whose own model comes from 47000.
         self._model: Optional[str] = None
+        self._storage_model: Optional[str] = None
         # Refined from register 30071 on the first poll; two is the common case
         # and keeps the entity list sane until the inverter has answered.
         self._pv_strings = 2
@@ -438,7 +445,13 @@ class HuaweiSolarDriver(BatteryDriver):
 
     @property
     def model_label(self) -> Optional[str]:
-        return self._model or "Huawei LUNA2000"
+        """What this device is, which is the storage rather than the inverter.
+
+        The device entry stands for the battery, so naming it SUN2000 would read
+        as though the packs belonged to the inverter. The inverter's own model
+        keeps its own entity.
+        """
+        return self._storage_model or self._model or "Huawei LUNA2000"
 
     @property
     def serial(self) -> Optional[str]:
@@ -507,7 +520,10 @@ class HuaweiSolarDriver(BatteryDriver):
         # The pack serials come along because the entity list depends on which
         # slots are populated, and that has to be known before setup.
         identity = await self.read_telemetry(
-            ["device_name", "power_module_serial_number", "pv_string_count"]
+            [
+                "device_name", "storage_product_model",
+                "power_module_serial_number", "pv_string_count",
+            ]
             + [f"pack{index}_serial_number" for index in (1, 2, 3)]
         )
         self._model = identity.get("device_name") or self._model
@@ -566,6 +582,12 @@ class HuaweiSolarDriver(BatteryDriver):
         # The read covers every string the map defines; only the ones this
         # inverter actually has are published, so an unused pair does not become
         # a permanent 0 W entity.
+        # Telemetry-only: the enum says which storage is attached, and the
+        # label it resolves to is what the device entry calls itself.
+        storage = snapshot.pop("storage_product_model", None)
+        if storage is not None:
+            self._storage_model = _STORAGE_MODELS.get(int(storage)) or self._storage_model
+
         for index in (1, 2, 3):
             if snapshot.get(f"pack{index}_serial_number") or snapshot.get(
                 f"pack{index}_firmware_version"
