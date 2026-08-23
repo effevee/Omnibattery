@@ -130,6 +130,7 @@ All registers FC03 holding, unit id 4, verified against the corresponding
 | `inverter_serial_number` | O | 30015 | str(10) | — | very_low | N | [x] |
 | `software_version` | O | 37814 | str(15) | — | very_low | N | [x] |
 | `pack1..3_firmware_version` | O | 38210/38252/38294 | str(15) | — | very_low | N | [x] |
+| `pack1..3_serial_number` | O | 38200/38242/38284 | str(10) | — | very_low | N | [x] |
 | `max_cell_voltage` / `min_cell_voltage` | O | — | — | **X** | — | X | — |
 
 **Not available.** A LUNA2000 reports per *pack* values, not per cell. There is
@@ -137,8 +138,9 @@ nothing honest to put in the cell fields, so balance monitoring and the 100 %
 voltage taper are disabled for this brand.
 
 **Registers that did not answer** on the tested unit: 37026 (DCDC version) and
-37036 (BMS version) return a Modbus exception; 38210 (pack 1 firmware) returns
-an empty string. All three are optional and omitted rather than shipped as
+37036 (BMS version) return a Modbus exception; the whole pack 1 run (38200)
+returns padding, because that slot holds no pack — the tested unit has packs 2
+and 3 only. All three are optional and omitted rather than shipped as
 permanently-missing entities.
 
 ## 5. Control mapping worksheet

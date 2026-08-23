@@ -976,12 +976,30 @@ async def test_string_count_is_known_before_the_entities_are_built():
 
 
 # ----------------------------------------------------------------------
-# firmware
+# firmware and pack serials
+#
+# Serial and firmware sit next to each other in each pack's address run, so one
+# read covers both. The values below are the ones the reference LUNA2000
+# reports; its pack 1 slot is empty and answers with padding only.
 # ----------------------------------------------------------------------
+def _text(value, registers):
+    """Encode a string the way the inverter does: two chars per register."""
+    raw = value.encode("ascii").ljust(registers * 2, b"\x00")
+    return [int.from_bytes(raw[i:i + 2], "big") for i in range(0, len(raw), 2)]
+
+
+def _pack(serial, firmware):
+    return _text(serial, 10) + _text(firmware, 15)
+
+
 @pytest.mark.asyncio
 async def test_pack_and_inverter_firmware_are_exposed():
-    v200 = [0x5632, 0x3030] + [0] * 13  # "V200"
-    blocks = {**_LIVE_BLOCKS, 30050: v200, 38252: v200, 38294: v200}
+    blocks = {
+        **_LIVE_BLOCKS,
+        30050: _text("V200", 15),
+        38242: _pack("EX24A0056894", "V200"),
+        38284: _pack("EX2480065597", "V200"),
+    }
     data = await _driver(_fake_client(blocks)).read_telemetry()
     assert data["inverter_software_version"] == "V200"
     assert data["pack2_firmware_version"] == "V200"
@@ -989,11 +1007,37 @@ async def test_pack_and_inverter_firmware_are_exposed():
 
 
 @pytest.mark.asyncio
-async def test_a_pack_reporting_an_empty_string_is_omitted():
-    """Pack 1 answers with nothing but padding on the reference hardware."""
-    blocks = {**_LIVE_BLOCKS, 38210: [0] * 15}
+async def test_each_pack_reports_its_own_serial():
+    """The packs are the parts that get replaced, so they are worth naming."""
+    blocks = {
+        **_LIVE_BLOCKS,
+        38242: _pack("EX24A0056894", "V200R025C00SPC103"),
+        38284: _pack("EX2480065597", "V200R025C00SPC103"),
+    }
+    data = await _driver(_fake_client(blocks)).read_telemetry()
+    assert data["pack2_serial_number"] == "EX24A0056894"
+    assert data["pack3_serial_number"] == "EX2480065597"
+    # Serial and firmware come out of the same read, not two.
+    assert data["pack2_firmware_version"] == "V200R025C00SPC103"
+
+
+def test_every_pack_serial_has_an_entity():
+    keys = {row["key"] for row in SENSOR_DEFINITIONS}
+    for index in (1, 2, 3):
+        assert f"pack{index}_serial_number" in keys
+
+
+@pytest.mark.asyncio
+async def test_an_empty_pack_slot_is_omitted_entirely():
+    """Pack 1 answers with nothing but padding on the reference hardware.
+
+    An empty slot must leave no entity behind at all — neither firmware nor
+    serial — rather than showing up as a battery pack with blank details.
+    """
+    blocks = {**_LIVE_BLOCKS, 38200: [0] * 25}
     data = await _driver(_fake_client(blocks)).read_telemetry()
     assert "pack1_firmware_version" not in data
+    assert "pack1_serial_number" not in data
 
 
 @pytest.mark.asyncio
@@ -1065,7 +1109,7 @@ async def test_a_missing_firmware_string_does_not_empty_its_group():
     The group has to keep returning its other values, or the coordinator reads
     the empty result as a dead battery.
     """
-    blocks = {**_LIVE_BLOCKS, 38210: [0] * 15}
+    blocks = {**_LIVE_BLOCKS, 38200: [0] * 25}
     driver = _driver(_fake_client(blocks))
     very_low = next(g for g in driver.read_groups if g.scan_interval == "very_low")
     data = await driver.read_telemetry(list(very_low.keys))

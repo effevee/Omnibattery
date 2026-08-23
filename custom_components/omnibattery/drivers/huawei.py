@@ -247,10 +247,20 @@ _BLOCK_MODEL = (30000, 25, "very_low", {
 _BLOCK_SERIAL = (37052, 10, "very_low", {"serial_number": (0, "str", 10)})
 _BLOCK_STORAGE_SW = (37814, 15, "very_low", {"software_version": (0, "str", 15)})
 _BLOCK_INVERTER_SW = (30050, 15, "very_low", {"inverter_software_version": (0, "str", 15)})
-# Each pack answers on its own address run; there is no contiguous block.
-_BLOCK_PACK1_SW = (38210, 15, "very_low", {"pack1_firmware_version": (0, "str", 15)})
-_BLOCK_PACK2_SW = (38252, 15, "very_low", {"pack2_firmware_version": (0, "str", 15)})
-_BLOCK_PACK3_SW = (38294, 15, "very_low", {"pack3_firmware_version": (0, "str", 15)})
+# Each pack answers on its own address run; there is no contiguous block. Serial
+# and firmware sit next to each other within a run, so one read covers both.
+_BLOCK_PACK1 = (38200, 25, "very_low", {
+    "pack1_serial_number": (0, "str", 10),
+    "pack1_firmware_version": (10, "str", 15),
+})
+_BLOCK_PACK2 = (38242, 25, "very_low", {
+    "pack2_serial_number": (0, "str", 10),
+    "pack2_firmware_version": (10, "str", 15),
+})
+_BLOCK_PACK3 = (38284, 25, "very_low", {
+    "pack3_serial_number": (0, "str", 10),
+    "pack3_firmware_version": (10, "str", 15),
+})
 
 _BLOCKS = (
     _BLOCK_LIVE, _BLOCK_PV, _BLOCK_STATE3, _BLOCK_STRINGS,
@@ -258,7 +268,7 @@ _BLOCKS = (
     _BLOCK_DAILY, _BLOCK_LIMITS, _BLOCK_TOTALS, _BLOCK_CONFIG,
     _BLOCK_CAPACITY, _BLOCK_STRING_COUNT, _BLOCK_RATING, _BLOCK_MODEL, _BLOCK_SERIAL,
     _BLOCK_STORAGE_SW, _BLOCK_INVERTER_SW,
-    _BLOCK_PACK1_SW, _BLOCK_PACK2_SW, _BLOCK_PACK3_SW,
+    _BLOCK_PACK1, _BLOCK_PACK2, _BLOCK_PACK3,
 )
 
 _DECODERS = {"u16": decode_u16, "i16": decode_i16, "u32": decode_u32, "i32": decode_i32}
@@ -309,8 +319,12 @@ SENSOR_DEFINITIONS = [
     {"key": "software_version", "name": "Storage Firmware", "data_type": "char", "icon": "mdi:ticket-confirmation-outline", "category": "diagnostic", "scan_interval": "very_low", "enabled_by_default": True},
     {"key": "inverter_software_version", "name": "Inverter Firmware", "data_type": "char", "icon": "mdi:ticket-confirmation-outline", "category": "diagnostic", "scan_interval": "very_low", "enabled_by_default": True},
     *[
-        {"key": f"pack{index}_firmware_version", "name": f"Battery Pack {index} Firmware", "data_type": "char", "icon": "mdi:ticket-confirmation-outline", "category": "diagnostic", "scan_interval": "very_low", "enabled_by_default": True}
+        row
         for index in (1, 2, 3)
+        for row in (
+            {"key": f"pack{index}_firmware_version", "name": f"Battery Pack {index} Firmware", "data_type": "char", "icon": "mdi:ticket-confirmation-outline", "category": "diagnostic", "scan_interval": "very_low", "enabled_by_default": True},
+            {"key": f"pack{index}_serial_number", "name": f"Battery Pack {index} Serial", "data_type": "char", "icon": "mdi:identifier", "category": "diagnostic", "scan_interval": "very_low", "enabled_by_default": True},
+        )
     ],
     {"key": "inverter_ac_power", "name": "Inverter AC Power", "unit": "W", "device_class": "power", "state_class": "measurement", "scale": 1, "precision": 0, "scan_interval": "high", "enabled_by_default": True},
     {"key": "internal_temperature", "name": "Battery Temperature", "unit": "°C", "device_class": "temperature", "state_class": "measurement", "scale": 1, "precision": 1, "scan_interval": "low", "enabled_by_default": True},
