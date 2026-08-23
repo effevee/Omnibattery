@@ -138,11 +138,23 @@ _BLOCK_TOTALS = (37066, 4, "low", {
     "total_discharging_energy": (2, "u32", 0.01),
 })
 _BLOCK_CAPACITY = (37758, 2, "very_low", {
-    "battery_total_energy": (0, "u32", 1),
+    # 37758 reports Wh, but every consumer of this key treats it as kWh
+    # (charge-delay energy balance, predictive charging, stored-energy display).
+    "battery_total_energy": (0, "u32", 0.001),
 })
 _BLOCK_PV = (32064, 18, "high", {
-    "pv_power": (0, "i32", 1),
+    # The panel reads the DC total under "solar_power"; "pv_power" is not a key
+    # it knows, so this brand would show an empty solar card under that name.
+    "solar_power": (0, "i32", 1),
     "ac_power": (16, "i32", 1),
+})
+# Per-string DC. Huawei publishes voltage and current separately, so the power
+# the panel wants is derived below rather than read.
+_BLOCK_STRINGS = (32016, 4, "high", {
+    "pv1_voltage": (0, "i16", 0.1),
+    "pv1_current": (1, "i16", 0.01),
+    "pv2_voltage": (2, "i16", 0.1),
+    "pv2_current": (3, "i16", 0.01),
 })
 _BLOCK_CONFIG = (47081, 7, "low", {
     "charging_cutoff_capacity": (0, "u16", 0.1),
@@ -165,21 +177,35 @@ _BLOCK_RATING = (30073, 4, "very_low", {
 })
 _BLOCK_MODEL = (30000, 15, "very_low", {"device_name": (0, "str", 15)})
 _BLOCK_SERIAL = (37052, 10, "very_low", {"serial_number": (0, "str", 10)})
+_BLOCK_STORAGE_SW = (37814, 15, "very_low", {"software_version": (0, "str", 15)})
 
 _BLOCKS = (
-    _BLOCK_LIVE, _BLOCK_PV, _BLOCK_FORCIBLE_MODE, _BLOCK_FORCIBLE_POWER,
+    _BLOCK_LIVE, _BLOCK_PV, _BLOCK_STRINGS, _BLOCK_FORCIBLE_MODE, _BLOCK_FORCIBLE_POWER,
     _BLOCK_DAILY, _BLOCK_LIMITS, _BLOCK_TOTALS, _BLOCK_CONFIG,
-    _BLOCK_CAPACITY, _BLOCK_RATING, _BLOCK_MODEL, _BLOCK_SERIAL,
+    _BLOCK_CAPACITY, _BLOCK_RATING, _BLOCK_MODEL, _BLOCK_SERIAL, _BLOCK_STORAGE_SW,
 )
 
 _DECODERS = {"u16": decode_u16, "i16": decode_i16, "u32": decode_u32, "i32": decode_i32}
+
+# Keys computed from other keys rather than read. They belong to no register
+# block, so both the poll scheduler and the key filter have to be told which
+# raw values they stand on — otherwise asking for them reads nothing.
+_DERIVED_FROM = {
+    "mppt1_power": ("pv1_voltage", "pv1_current"),
+    "mppt2_power": ("pv2_voltage", "pv2_current"),
+}
 
 SENSOR_DEFINITIONS = [
     {"key": "battery_soc", "name": "Battery SOC", "unit": "%", "device_class": "battery", "state_class": "measurement", "scale": 1, "precision": 1, "scan_interval": "high", "enabled_by_default": True},
     {"key": "battery_power", "name": "Battery Power", "unit": "W", "device_class": "power", "state_class": "measurement", "scale": 1, "precision": 0, "scan_interval": "high", "enabled_by_default": True},
     {"key": "battery_voltage", "name": "Battery Voltage", "unit": "V", "device_class": "voltage", "state_class": "measurement", "scale": 1, "precision": 1, "scan_interval": "high", "enabled_by_default": True},
-    {"key": "battery_total_energy", "name": "Battery Total Energy", "unit": "Wh", "device_class": "energy_storage", "state_class": "measurement", "scale": 1, "precision": 0, "scan_interval": "very_low", "enabled_by_default": True},
-    {"key": "pv_power", "name": "PV Power", "unit": "W", "device_class": "power", "state_class": "measurement", "scale": 1, "precision": 0, "scan_interval": "high", "enabled_by_default": True},
+    {"key": "battery_total_energy", "name": "Battery Total Energy", "unit": "kWh", "device_class": "energy_storage", "state_class": "measurement", "scale": 1, "precision": 2, "scan_interval": "very_low", "enabled_by_default": True},
+    {"key": "solar_power", "name": "Solar Power", "unit": "W", "device_class": "power", "state_class": "measurement", "scale": 1, "precision": 0, "scan_interval": "high", "enabled_by_default": True},
+    {"key": "mppt1_power", "name": "MPPT1 Power", "unit": "W", "device_class": "power", "state_class": "measurement", "scale": 1, "precision": 0, "scan_interval": "high", "enabled_by_default": True},
+    {"key": "mppt2_power", "name": "MPPT2 Power", "unit": "W", "device_class": "power", "state_class": "measurement", "scale": 1, "precision": 0, "scan_interval": "high", "enabled_by_default": True},
+    {"key": "pv1_voltage", "name": "PV1 Voltage", "unit": "V", "device_class": "voltage", "state_class": "measurement", "scale": 1, "precision": 1, "category": "diagnostic", "scan_interval": "high", "enabled_by_default": False},
+    {"key": "pv2_voltage", "name": "PV2 Voltage", "unit": "V", "device_class": "voltage", "state_class": "measurement", "scale": 1, "precision": 1, "category": "diagnostic", "scan_interval": "high", "enabled_by_default": False},
+    {"key": "software_version", "name": "Storage Firmware", "data_type": "char", "icon": "mdi:ticket-confirmation-outline", "category": "diagnostic", "scan_interval": "very_low", "enabled_by_default": True},
     {"key": "ac_power", "name": "Inverter Active Power", "unit": "W", "device_class": "power", "state_class": "measurement", "scale": 1, "precision": 0, "scan_interval": "high", "enabled_by_default": True},
     {"key": "internal_temperature", "name": "Battery Temperature", "unit": "°C", "device_class": "temperature", "state_class": "measurement", "scale": 1, "precision": 1, "scan_interval": "low", "enabled_by_default": True},
     {"key": "total_charging_energy", "name": "Total Charging Energy", "unit": "kWh", "device_class": "energy", "state_class": "total_increasing", "scale": 1, "precision": 2, "scan_interval": "low", "enabled_by_default": True},
@@ -251,7 +277,10 @@ class HuaweiSolarDriver(BatteryDriver):
             engage_grace_s=_ACTUATOR_LATENCY_S,
         )
         self._read_groups = [
-            ReadGroup(interval, tuple(keys))
+            ReadGroup(interval, tuple(keys) + tuple(
+                derived for derived, sources in _DERIVED_FROM.items()
+                if all(source in keys for source in sources)
+            ))
             for _start, _count, interval, keys in _BLOCKS
         ]
 
@@ -328,6 +357,10 @@ class HuaweiSolarDriver(BatteryDriver):
 
     async def read_telemetry(self, keys: Optional[list[str]] = None) -> TelemetrySnapshot:
         requested = set(keys) if keys is not None else None
+        if requested is not None:
+            for derived, sources in _DERIVED_FROM.items():
+                if derived in requested:
+                    requested.update(sources)
         snapshot: TelemetrySnapshot = {}
 
         for start, count, _interval, fields in _BLOCKS:
@@ -356,6 +389,14 @@ class HuaweiSolarDriver(BatteryDriver):
                 if value is None:
                     continue
                 snapshot[key] = value
+
+        # Huawei reports each string as voltage and current; the panel and the
+        # control layer want power, so derive it where both parts arrived.
+        for index in (1, 2):
+            volts = snapshot.get(f"pv{index}_voltage")
+            amps = snapshot.get(f"pv{index}_current")
+            if volts is not None and amps is not None:
+                snapshot[f"mppt{index}_power"] = round(volts * amps)
 
         # Enum registers become their label; the raw number stays available to
         # the control layer under the same key only where it is numeric.

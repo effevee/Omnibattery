@@ -147,7 +147,8 @@ async def test_read_telemetry_decodes_the_reference_installation():
     # Huawei's sign convention matches Omnibattery's: negative is discharge.
     assert data["battery_power"] == -809
     assert data["battery_voltage"] == pytest.approx(796.3)
-    assert data["battery_total_energy"] == 13800
+    # kWh, not the register's Wh: every consumer of this key treats it as kWh.
+    assert data["battery_total_energy"] == 13.8
     assert data["max_charge_power"] == 7000
     # Exact, not approx: scaled values must not leak binary-fraction artefacts.
     assert data["internal_temperature"] == 35.4
@@ -155,6 +156,7 @@ async def test_read_telemetry_decodes_the_reference_installation():
     assert data["charging_cutoff_capacity"] == pytest.approx(100.0)
     assert data["discharging_cutoff_capacity"] == pytest.approx(5.0)
     assert data["ac_power"] == 758
+    assert data["solar_power"] == 0
 
 
 @pytest.mark.asyncio
@@ -188,7 +190,8 @@ async def test_failed_block_omits_its_keys_instead_of_publishing_zero():
     assert "battery_soc" not in data
     assert "battery_power" not in data
     # An unrelated block is unaffected.
-    assert data["battery_total_energy"] == 13800
+    # kWh, not the register's Wh: every consumer of this key treats it as kWh.
+    assert data["battery_total_energy"] == 13.8
 
 
 # ----------------------------------------------------------------------
@@ -698,3 +701,63 @@ def test_control_path_survives_a_driver_that_raises():
         ),
     )
     assert _apply_driver_dynamic_limit(coordinator, 2500) == 2500
+
+
+# ----------------------------------------------------------------------
+# panel telemetry
+# ----------------------------------------------------------------------
+def test_capacity_is_reported_in_kwh_not_the_registers_wh():
+    """A factor-1000 error here silently breaks the energy-balance features.
+
+    charge_delay and predictive charging both sum this key straight into a
+    kWh total, so reporting the register's raw Wh made 13.8 kWh of storage look
+    like 13800 kWh — enough that "solar covers the day" was always true.
+    """
+    definition = next(
+        d for d in SENSOR_DEFINITIONS if d["key"] == "battery_total_energy"
+    )
+    assert definition["unit"] == "kWh"
+
+
+@pytest.mark.asyncio
+async def test_string_power_is_derived_from_voltage_and_current():
+    # 380.0 V x 4.00 A and 190.0 V x 2.00 A
+    blocks = {**_LIVE_BLOCKS, 32016: [3800, 400, 1900, 200]}
+    data = await _driver(_fake_client(blocks)).read_telemetry()
+    assert data["mppt1_power"] == 1520
+    assert data["mppt2_power"] == 380
+
+
+@pytest.mark.asyncio
+async def test_string_power_is_omitted_when_its_block_fails():
+    blocks = dict(_LIVE_BLOCKS)  # no 32016 entry -> the client returns None
+    data = await _driver(_fake_client(blocks)).read_telemetry()
+    assert "mppt1_power" not in data
+    assert "mppt2_power" not in data
+
+
+@pytest.mark.asyncio
+async def test_asking_only_for_derived_power_still_reads_its_sources():
+    """A derived key belongs to no block, so the filter must expand it.
+
+    Without that expansion the poll would read nothing and the entity would
+    never leave "unknown".
+    """
+    blocks = {**_LIVE_BLOCKS, 32016: [3800, 400, 1900, 200]}
+    data = await _driver(_fake_client(blocks)).read_telemetry(["mppt1_power"])
+    assert data["mppt1_power"] == 1520
+
+
+def test_derived_keys_are_scheduled_with_their_source_block():
+    groups = _driver().read_groups
+    strings = next(g for g in groups if "pv1_voltage" in g.keys)
+    # Present in a read group, or the coordinator never requests them.
+    assert "mppt1_power" in strings.keys
+    assert "mppt2_power" in strings.keys
+
+
+@pytest.mark.asyncio
+async def test_storage_firmware_is_exposed_for_the_device_card():
+    blocks = {**_LIVE_BLOCKS, 37814: [0x5632, 0x3030] + [0] * 13}  # "V200"
+    data = await _driver(_fake_client(blocks)).read_telemetry(["software_version"])
+    assert data["software_version"] == "V200"
