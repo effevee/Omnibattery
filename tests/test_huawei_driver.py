@@ -1831,3 +1831,41 @@ async def test_the_probed_figure_becomes_the_starting_value(monkeypatch):
 
     assert flow._current_battery_data["max_charge_power"] == 7000
     assert flow._current_battery_data["device_inverter_max_power"] == 8800
+
+
+# ----------------------------------------------------------------------
+# commands against a limit the battery has outgrown — or not yet reached
+#
+# The limits form allows more than the battery reports today, because a third
+# pack raises that figure. Until it does, a command above the present reading is
+# refused outright — huawei_solar raises rather than trimming — so the live
+# figure has to bind at the driver.
+# ----------------------------------------------------------------------
+@pytest.mark.asyncio
+async def test_a_configured_limit_above_the_hardware_is_trimmed_not_sent():
+    hass = _hass_with_services()
+    driver = _driver(_fake_client(_LIVE_BLOCKS), hass=hass, max_charge_power_w=7500, max_discharge_power_w=7500)
+    await driver.connect()  # picks up 37046/37048 = 7000 W
+
+    result = await driver.apply_setpoint(7500, read_back=False)
+    assert result.net_power_w == 7000
+    called = hass.services.async_call.await_args
+    assert called.args[2]["power"] == 7000
+
+
+@pytest.mark.asyncio
+async def test_the_configured_limit_still_binds_when_it_is_the_lower_one():
+    """The register is a ceiling, never a licence to exceed the user's figure."""
+    hass = _hass_with_services()
+    driver = _driver(_fake_client(_LIVE_BLOCKS), hass=hass, max_charge_power_w=3000, max_discharge_power_w=3000)
+    await driver.connect()
+
+    assert (await driver.apply_setpoint(7000, read_back=False)).net_power_w == 3000
+
+
+@pytest.mark.asyncio
+async def test_an_unread_register_leaves_the_configured_limit_in_charge():
+    """No reading yet is not the same as a reading of zero."""
+    hass = _hass_with_services()
+    driver = _driver(_fake_client({}), hass=hass, max_charge_power_w=7500, max_discharge_power_w=7500)
+    assert (await driver.apply_setpoint(7500, read_back=False)).net_power_w == 7500

@@ -380,6 +380,10 @@ class HuaweiSolarDriver(BatteryDriver):
         # for is the storage, whose own model comes from 47000.
         self._model: Optional[str] = None
         self._storage_model: Optional[str] = None
+        # What the battery permits right now (37046/37048). It moves with the
+        # pack count, so a configured limit may sit above it — and a command
+        # above it is refused outright rather than clamped by the far end.
+        self._register_limits: dict[str, int] = {}
         # Refined from register 30071 on the first poll; two is the common case
         # and keeps the entity list sane until the inverter has answered.
         self._pv_strings = 2
@@ -523,6 +527,9 @@ class HuaweiSolarDriver(BatteryDriver):
             [
                 "device_name", "storage_product_model",
                 "power_module_serial_number", "pv_string_count",
+                # So the first set-point is already bounded by the hardware
+                # rather than by the configured limit alone.
+                "max_charge_power", "max_discharge_power",
             ]
             + [f"pack{index}_serial_number" for index in (1, 2, 3)]
         )
@@ -582,6 +589,11 @@ class HuaweiSolarDriver(BatteryDriver):
         # The read covers every string the map defines; only the ones this
         # inverter actually has are published, so an unused pair does not become
         # a permanent 0 W entity.
+        for key, side in (("max_charge_power", "charge"), ("max_discharge_power", "discharge")):
+            value = snapshot.get(key)
+            if value:
+                self._register_limits[side] = int(value)
+
         # Telemetry-only: the enum says which storage is attached, and the
         # label it resolves to is what the device entry calls itself.
         storage = snapshot.pop("storage_product_model", None)
@@ -653,6 +665,21 @@ class HuaweiSolarDriver(BatteryDriver):
 
     # --- control (write) ----------------------------------------------------
 
+    def _ceiling(self, side: str) -> int:
+        """The lower of the configured limit and what the battery permits now.
+
+        The configured limit may legitimately exceed the battery's present
+        reading — that reading rises when a pack is added — but a command above
+        it is rejected, not trimmed: the service raises and the control cycle
+        dies. So the live figure binds whenever it is known.
+        """
+        configured = (
+            self._capabilities.max_charge_power_w if side == "charge"
+            else self._capabilities.max_discharge_power_w
+        )
+        register = self._register_limits.get(side)
+        return min(configured, register) if register else configured
+
     async def apply_setpoint(
         self,
         net_power_w: int,
@@ -662,8 +689,8 @@ class HuaweiSolarDriver(BatteryDriver):
     ) -> SetpointResult:
         """Command a signed net power through the huawei_solar services."""
         applied = max(
-            -self._capabilities.max_discharge_power_w,
-            min(self._capabilities.max_charge_power_w, int(net_power_w)),
+            -self._ceiling("discharge"),
+            min(self._ceiling("charge"), int(net_power_w)),
         )
 
         if not self._should_write(applied):
@@ -764,10 +791,7 @@ class HuaweiSolarDriver(BatteryDriver):
                 (_REG_FORCIBLE_TARGET_MODE, [_TARGET_MODE_TIME]),
             ]
         else:
-            limit = (
-                self._capabilities.max_charge_power_w if applied > 0
-                else self._capabilities.max_discharge_power_w
-            )
+            limit = self._ceiling("charge" if applied > 0 else "discharge")
             magnitude = min(abs(applied), limit)
             if magnitude != abs(applied):
                 # huawei_solar validates against the register maximum and refuses

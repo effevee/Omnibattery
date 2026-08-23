@@ -17,13 +17,13 @@ existing driver model, both described in [§13](#13-what-a-dc-coupled-hybrid-bre
 |---|---|
 | Manufacturer | Huawei |
 | Commercial model | SUN2000-8K-MAP0 with LUNA2000 |
-| Device-reported model | `SUN2000-8K-MAP0` (register 30000) |
-| Verified firmware range | Inverter `V200R024C00SPC110`, storage `V200R025C00SPC103` |
+| Device-reported model | Storage `LUNA2000` (register 47000); inverter `SUN2000-8K-MAP0` (register 30000) |
+| Verified firmware range | Inverter `V200R024C00SPC110`; power module and packs `V200R025C00SPC103` |
 | Region/hardware variant | EU, three-phase, EMMA-A02 energy manager, SmartGuard-63A-T0 |
-| Rated capacity and power | 13.8 kWh; BMS 7000 W charge and discharge; inverter 8000 W rated, 8800 W maximum |
+| Rated capacity and power | 13.8 kWh in two LUNA2000-7-E1 packs on a LUNA2000-10KW-C1 power module; the battery reports 7000 W charge and discharge; inverter 8000 W rated, 8800 W maximum |
 | Coupling type | **DC** — battery and PV strings share one inverter |
 | Official document | Solar Inverter Modbus Interface Definitions v05; SmartHEMS V100R024C00 Modbus Interface Definitions |
-| Interface used | The `huawei_solar` integration by @wlcrs (register map + control services) |
+| Interface used | Modbus TCP throughout. Control optionally through the `huawei_solar` integration by @wlcrs, whose register map this work builds on |
 | Hardware used for validation | The installation above, one unit |
 | Test date | 2026-08-22 / 2026-08-23 |
 
@@ -39,7 +39,7 @@ existing driver model, both described in [§13](#13-what-a-dc-coupled-hybrid-bre
 
 | Model | Firmware | Transport | Read | Write | Known differences | Status |
 |---|---|---|---|---|---|---|
-| SUN2000-8K-MAP0 | V200R024C00SPC110 | Modbus TCP via proxy | yes | via `huawei_solar` | Per-string current reads 0 below ~100 W; pack 1 firmware string empty; registers 37026/37036 answer with a Modbus exception | tested |
+| SUN2000-8K-MAP0 | V200R024C00SPC110 | Modbus TCP via proxy | yes | via `huawei_solar` | Per-string current reads 0 below ~100 W; registers 37026/37036 answer with a Modbus exception; the pack 1 address run answers with padding because that slot is unpopulated | tested |
 | Other SUN2000 | — | — | — | — | String count read from 30071; up to four published | untested |
 
 ### Transport and access worksheet
@@ -49,8 +49,8 @@ existing driver model, both described in [§13](#13-what-a-dc-coupled-hybrid-bre
 | Scope | local |
 | Protocol | Modbus TCP, FC03 only |
 | Address | The inverter, reached through a `modbus-proxy` add-on |
-| Unit id | **4** = inverter. Also on the bus: 0 = EMMA (`SmartHEMS`), 2 = SmartGuard, 9 = charger. Not discoverable — the user must supply it |
-| Discovery | manual |
+| Unit id | **4** = inverter. Also on the bus: 0 = EMMA (`SmartHEMS`), 2 = SmartGuard, 9 = charger. Not derivable, but discoverable: a scan reads 30000 on nine candidate ids and keeps those answering as an inverter with an SOC |
+| Discovery | Address manual, unit id scanned. A cascade yields several inverters, and the user picks |
 | Authentication | none |
 | Maximum simultaneous connections | The inverter tolerates one client; a Modbus proxy fans it out. Verified: this driver read continuously while `huawei_solar` held its own connection |
 | Read latency | **median 3.6 ms, 6 ms at p95** over 800 consecutive reads with nothing else on the bus |
@@ -125,7 +125,7 @@ All registers FC03 holding, unit id 4, verified against the corresponding
 | `inverter_max_power` | R | 30075 | u32 | → W | very_low | N | [x] |
 | `off_grid_state` | O | 32003 | u32 | bitfield | medium | N | [x] |
 | `ac_offgrid_power` | O | — | — | derived (§13.5) | medium | D | [x] |
-| `device_name` | O | 30000 | str(15) | — | very_low | N | [x] |
+| `device_name` | O | 30000 | str(15) | inverter model | very_low | N | [x] |
 | `storage_product_model` | O | 47000 | u16 | enum | very_low | N | — |
 | `power_module_serial_number` | O | 37052 | str(10) | — | very_low | N | [x] |
 | `power_module_firmware_version` | O | 37814 | str(15) | — | very_low | N | [x] |
@@ -170,41 +170,11 @@ last so a sequence failing earlier leaves the inverter untouched.
 | Max/min SOC | `number.set_value` on the cutoff entities | 90–100 % / 0–20 % | **persistent** | — | skipped when out of range | [x] |
 
 **The service validates power against the register maximum** and raises
-`ValueError: Power cannot be more than 7000W`. Configuring a limit above the
-BMS figure produces failing writes, not clamped ones.
-
-**One "battery" is three kinds of hardware.** A LUNA2000 installation is an
-inverter, a power module, and one to three battery packs, and each carries its
-own serial and firmware in its own registers — 30015/30050 for the inverter,
-37052/37814 for the power module, 38200+ per pack. Publishing any one of them as
-*the* serial mislabels the other two, so the driver names each part. The device
-registry entry stands for the storage, so it takes the power module's serial —
-and its model from 47000 (`2` = LUNA2000) rather than from 30000, which is the
-inverter's. Calling the device a SUN2000 would read as though the packs belonged
-to the inverter. That enum is telemetry-only: it resolves to a label and is
-dropped, so no entity carries a bare `2`.
-
-The Modbus endpoint can be a fourth device again: on the reference installation
-the address answers as `SmartHEMS` (an EMMA-A02, serial NS24A1211290) on slave 0,
-with the inverter behind it on slave 4. That is the gateway, not the battery, and
-it appears nowhere in the telemetry.
-
-**The battery's reported power caps are a starting value, not a ceiling.**
-37046/37048 say what the battery permits right now, and that moves with the pack
-count — a third pack raises it. The limits form therefore opens on that figure
-but allows up to the inverter's maximum active power (30075), which is what the
-installation genuinely cannot exceed: charge and discharge both pass through it.
-On the tested unit that is 7000 W reported against an 8800 W inverter.
-
-**The setup names the battery twice.** On the service path a Modbus address
-identifies the inverter and a registry device identifies the battery, and
-nothing forces those to be the same unit — Huawei inverters cascade, so a
-two-inverter bus can readily have telemetry coming from one while the commands
-land on the other. Register 30015 carries the inverter serial, which is also
-what `huawei_solar` builds its device identifiers from, so the config flow
-compares the two and refuses a pairing that contradicts itself. A serial that
-is simply absent — older `huawei_solar` releases leave `serial_number` unset —
-never blocks the setup; only a contradiction does.
+`ValueError: Power cannot be more than 7000W` — it refuses an over-range command
+rather than trimming it, and the control cycle dies with it. Since the configured
+limit may legitimately sit above the present reading (§12), the driver clamps
+every set-point to 37046/37048 as read, on both control paths. The configured
+figure still binds whenever it is the lower of the two.
 
 **The cutoff entities live on two different devices.** `huawei_solar` puts the
 charge cutoff on the inverter and the discharge cutoff on the battery, so
@@ -233,8 +203,9 @@ open-ended command.
 
 ## 7. Minimum acceptance tests
 
-Covered by `tests/test_huawei_driver.py` (107 tests). Beyond the template's
-list, these encode failures found on hardware:
+Covered by `tests/test_huawei_driver.py` (152 tests). Beyond the template's
+list, these encode failures found on hardware — each was a live installation
+misbehaving first and a test second:
 
 - Capacity is published in kWh, not the register's Wh.
 - A throttled set-point reports the standing command, not the request.
@@ -242,6 +213,65 @@ list, these encode failures found on hardware:
 - The dynamic discharge limit ignores the battery's own contribution.
 - No read group may hold a single key.
 - The inverter's AC total is not published as the battery's AC port.
+- Every form schema survives the serialisation the frontend needs (§13.8).
+- An unpopulated pack slot produces no entities at all.
+- A battery device belonging to a different inverter is refused.
+- The limits form allows more than the battery reports today.
+- A set-point above the battery's present reading is trimmed, never sent.
+
+## 12. Setup and identity
+
+**What the user is asked for.** An address and a port; everything else the setup
+can find out for itself. The slave id is optional, and left empty it triggers the
+scan — which is the recommended path, because a wrong id reads an energy manager
+or a charger rather than failing outright. One inverter with a battery is taken
+straight away; several mean a cascade and the user picks from a list naming each
+model and id. A single checkbox chooses the control path, and the battery-device
+field is only needed on the service side.
+
+**A Huawei inverter accepts one Modbus connection.** Anything else already
+talking to it — `huawei_solar`, evcc, another system — takes that one. The setup
+says so and points at a Modbus proxy, and the reference installation runs one:
+this driver read continuously while `huawei_solar` held its own connection.
+
+**One "battery" is three kinds of hardware.** A LUNA2000 installation is an
+inverter, a power module, and one to three battery packs, and each carries its
+own serial and firmware in its own registers — 30015/30050 for the inverter,
+37052/37814 for the power module, 38200+ per pack. Publishing any one of them as
+*the* serial mislabels the other two, so the driver names each part. The device
+registry entry stands for the storage, so it takes the power module's serial —
+and its model from 47000 (`2` = LUNA2000) rather than from 30000, which is the
+inverter's. Calling the device a SUN2000 would read as though the packs belonged
+to the inverter. That enum is telemetry-only: it resolves to a label and is
+dropped, so no entity carries a bare `2`.
+
+The Modbus endpoint can be a fourth device again: on the reference installation
+the address answers as `SmartHEMS` (an EMMA-A02, serial NS24A1211290) on slave 0,
+with the inverter behind it on slave 4. That is the gateway, not the battery, and
+it appears nowhere in the telemetry.
+
+**The battery's reported power caps are a starting value, not a ceiling.**
+37046/37048 say what the battery permits right now, and that moves with the pack
+count — a third pack raises it. The limits form therefore opens on that figure
+but allows up to the inverter's maximum active power (30075), which is what the
+installation genuinely cannot exceed: charge and discharge both pass through it.
+On the tested unit that is 7000 W reported against an 8800 W inverter.
+
+The driver then has to hold the other end of that bargain: a command above what
+the battery permits right now is refused outright, so every set-point is clamped
+to the live reading before it is sent (§5).
+
+**The setup names the battery twice.** On the service path a Modbus address
+identifies the inverter and a registry device identifies the battery, and
+nothing forces those to be the same unit — Huawei inverters cascade, so a
+two-inverter bus can readily have telemetry coming from one while the commands
+land on the other. Register 30015 carries the inverter serial, which is also
+what `huawei_solar` builds its device identifiers from, so the config flow
+compares the two and refuses a pairing that contradicts itself. A serial that
+is simply absent — older `huawei_solar` releases leave `serial_number` unset —
+never blocks the setup; only a contradiction does. Where `huawei_solar` is not
+installed at all, the setup says that rather than asking for a device that
+cannot exist.
 
 ## 13. What a DC-coupled hybrid breaks
 
@@ -343,6 +373,19 @@ padding, so the pack 1 firmware string decodes to nothing, and the battery
 flapped in and out of the pool every three seconds all day. Groups are now one
 per cadence rather than one per block.
 
+### 13.8 A form schema must survive serialisation
+
+Home Assistant hands the frontend a *serialised* copy of every form schema, and
+not every voluptuous construct has a serialised form. A `vol.Any` in the
+slave-id field — added so an empty value could mean "search" — made the whole
+step fail with "Unknown error occurred" before the form was ever drawn. Setup
+and reconfiguration alike were unreachable for that brand.
+
+Nothing caught it, because the tests inspected schema markers and never
+converted them. Any driver contributing a config-flow step should convert its
+schemas in test the way Home Assistant converts them, including the output the
+step actually returns rather than only the helper it calls.
+
 ## 11. Decision report
 
 ```text
@@ -365,6 +408,9 @@ Omnibattery adaptations:
 - Dynamic discharge limit from the inverter's AC headroom
 - Per-string power derived from separate voltage and current registers
 - Inverter status refined by measured direction
+- Unit id discovered by scan; a cascade is resolved by the user
+- Inverter, power module and each populated pack named separately
+- Limits form bounded by the inverter rating, not by the battery's reading
 
 Disabled features:
 - Cell voltages, balance monitoring, 100% voltage taper (per-pack data only)
@@ -374,9 +420,12 @@ Open risks:
 - One installation, one firmware pair
 - Direct Modbus writes verified on one installation only; off by default
 - Two regulators share the meter whenever the battery is released
+- Cascaded inverters reasoned about and guarded against, but never tested:
+  the reference bus holds exactly one
 
 Pending hardware tests:
 - A second installation, ideally with more than two strings
+- A genuine cascade, and a three-pack storage
 - Off-grid behaviour (the tested unit has its off-grid switch disabled)
 - Whether per-string current is unpopulated below ~100 W on other models
 ```
