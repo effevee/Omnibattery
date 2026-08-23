@@ -351,9 +351,12 @@ async def test_small_change_inside_the_deadband_is_not_rewritten():
     await driver.apply_setpoint(1500, read_back=False)
     hass.services.async_call.reset_mock()
     result = await driver.apply_setpoint(1550, read_back=False)
-    # Still reported as delivered — the standing command covers it.
     assert result.ok is True
-    assert result.net_power_w == 1550
+    # Reports what is in force, not what was asked for: claiming the request
+    # had been applied would make the control layer expect power the battery
+    # was never told to deliver, and flag it as non-responsive for it.
+    assert result.net_power_w == 1500
+    assert result.applied["set_charge_power"] == 1500
     hass.services.async_call.assert_not_awaited()
 
 
@@ -1001,3 +1004,23 @@ async def test_unwired_strings_leave_nothing_in_the_cache():
     assert "pv2_voltage" in data
     assert "pv3_voltage" not in data
     assert "pv4_current" not in data
+
+
+@pytest.mark.asyncio
+async def test_a_suppressed_reversal_reports_the_standing_command():
+    """The worst case for the old behaviour: released, then asked to discharge.
+
+    Zero releases the battery, so nothing is latched. A discharge request in the
+    next few seconds is throttled — and reporting it as applied made the control
+    layer expect a discharge that had never been commanded.
+    """
+    hass = _hass_with_services()
+    driver = _driver(hass=hass)
+    await driver.apply_setpoint(0, read_back=False)
+    hass.services.async_call.reset_mock()
+
+    result = await driver.apply_setpoint(-1200, read_back=False)
+    hass.services.async_call.assert_not_awaited()
+    assert result.net_power_w == 0
+    assert result.applied["set_discharge_power"] == 0
+    assert driver.net_power_from_data(result.applied) == 0

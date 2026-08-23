@@ -545,11 +545,15 @@ class HuaweiSolarDriver(BatteryDriver):
             )
 
         if not self._should_write(applied):
-            # Nothing was sent, but the standing command still delivers this
-            # set-point, so this is a success with the previous value held.
+            # Nothing was sent, so report what is actually in force rather than
+            # what was asked for. Echoing the request would tell the control
+            # layer the battery had been commanded to a value it never received;
+            # it would then measure the older power, see a battery that accepts
+            # commands without delivering, and flag it as non-responsive.
+            held = self._last_written_w if self._last_written_w is not None else 0
             return SetpointResult(
-                ok=True, net_power_w=applied, confirmed=False,
-                applied=self._echo(applied),
+                ok=True, net_power_w=held, confirmed=False,
+                applied=self._echo(held),
             )
 
         if applied == 0:
