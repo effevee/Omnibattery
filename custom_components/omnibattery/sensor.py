@@ -1295,6 +1295,11 @@ def _timeline_energy(value: object) -> float | None:
     return _timeline_number(value)
 
 
+def _timeline_soc(value: object) -> float | None:
+    number = _timeline_number(value, 3)
+    return None if number is None else max(0.0, min(100.0, number))
+
+
 def _timeline_mask(value: object) -> int:
     number = _timeline_number(value, 0)
     return max(0, int(number)) if number is not None else 0
@@ -1747,6 +1752,42 @@ def _daily_operation_timeline_attributes(controller: object) -> dict[str, object
                 ),
                 _timeline_power,
                 0.0,
+            ),
+            "charge_to_battery_kwh": _timeline_array(
+                _timeline_find(source, ("charge_to_battery_kwh",), operations),
+                _timeline_energy,
+                None,
+            ),
+            "actual_charge_to_battery_kwh": _timeline_array(
+                _timeline_find(
+                    source, ("actual_charge_to_battery_kwh",), operations
+                ),
+                _timeline_energy,
+                None,
+            ),
+            "planned_charge_to_battery_kwh": _timeline_array(
+                _timeline_find(
+                    source, ("planned_charge_to_battery_kwh",), operations
+                ),
+                _timeline_energy,
+                None,
+            ),
+            "soc_pct": _timeline_array(
+                _timeline_find(source, ("soc_pct",), operations),
+                _timeline_soc,
+                None,
+            ),
+            "actual_soc_pct": _timeline_array(
+                _timeline_find(source, ("actual_soc_pct",), operations),
+                _timeline_soc,
+                None,
+            ),
+            "planned_soc_pct": _timeline_array(
+                _timeline_find(
+                    source, ("planned_soc_pct", "soc_end_pct"), operations
+                ),
+                _timeline_soc,
+                None,
             ),
             "solar_to_battery_kwh": _timeline_array(
                 _timeline_find(source, ("solar_to_battery_kwh",), operations),

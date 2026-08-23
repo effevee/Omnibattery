@@ -1109,6 +1109,20 @@ class ChargeDischargeController:
             getattr(self, "grid_charging_active", False)
             or getattr(self, "_realtime_price_charging", False)
         )
+        total_capacity = 0.0
+        total_stored = 0.0
+        for coordinator in getattr(self, "coordinators", ()):
+            data = getattr(coordinator, "data", None) or {}
+            capacity = self._daily_operation_float(
+                data.get("battery_total_energy"), math.nan
+            )
+            soc = self._daily_operation_float(data.get("battery_soc"), math.nan)
+            if math.isfinite(capacity) and capacity > 0.0 and math.isfinite(soc):
+                total_capacity += capacity
+                total_stored += capacity * max(0.0, min(100.0, soc)) / 100.0
+        system_soc = (
+            total_stored / total_capacity * 100.0 if total_capacity > 0.0 else None
+        )
         total_power = 0.0
         charge_power = 0.0
         discharge_power = 0.0
@@ -1263,6 +1277,7 @@ class ChargeDischargeController:
             "grid_charge_decision": grid_decision,
             "charge_power_w": charge_power,
             "discharge_power_w": discharge_power,
+            "soc_pct": system_soc,
             "delay_active": delay_active,
             "setpoint_active": setpoint_active,
             "delay_until": status.get("estimated_unlock_time"),
@@ -1279,8 +1294,7 @@ class ChargeDischargeController:
 
         result = []
         for index, coordinator in enumerate(getattr(self, "coordinators", ())):
-            if self._is_battery_manual_owned(coordinator):
-                continue
+            manual_owned = self._is_battery_manual_owned(coordinator)
             data = getattr(coordinator, "data", None) or {}
             capacity = self._daily_operation_float(data.get("battery_total_energy"), 0.0)
             soc = self._daily_operation_float(data.get("battery_soc"), 0.0)
@@ -1309,6 +1323,8 @@ class ChargeDischargeController:
                     ),
                     charge_power_w=max(0.0, charge_limit),
                     discharge_power_w=max(0.0, discharge_limit),
+                    can_charge=not manual_owned,
+                    can_discharge=not manual_owned,
                 )
             )
         return result

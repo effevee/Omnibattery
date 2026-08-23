@@ -14,7 +14,9 @@ superpuestas muestran energía solar y del hogar en `kWh/15 min`.
   plan ya seleccionado de Precio Dinámico o Franja horaria.
 - Precio en Tiempo Real no inventa un calendario futuro: conserva solo sus
   activaciones reales del pasado y del intervalo actual.
-- Las curvas continuas son medidas y las discontinuas son previstas. El tooltip
+- Las curvas continuas son medidas y las discontinuas son previstas. Solar y
+  consumo usan el eje izquierdo en `kWh/15 min`; el SOC total usa el eje derecho
+  de `0–100 %`. El tooltip muestra el SOC observado o proyectado del intervalo e
   identifica la forma solar aprendida o el fallback sinusoidal activo.
 
 Los colores de acción representan flujos, no permisos: verde significa energía
@@ -41,7 +43,7 @@ La entidad de diagnóstico es
 `sensor.omnibattery_daily_operation_timeline`. Su estado es la fecha local del
 snapshot. Los atributos contienen `schema_version`, zona horaria, frescura,
 fuentes de perfiles, series energéticas de 96 valores, máscaras de operación,
-decisiones de red y metadatos del retraso. Las listas se limitan al día local y
+SOC total observado y proyectado, decisiones de red y metadatos del retraso. Las listas se limitan al día local y
 se excluyen de Recorder; consultar la entidad desde el dashboard no provoca
 reevaluaciones del control.
 

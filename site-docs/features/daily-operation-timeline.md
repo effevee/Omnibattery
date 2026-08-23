@@ -13,8 +13,10 @@ solar and household energy in `kWh/15 min`.
   Dynamic Pricing or Time Slot plan.
 - Real-Time Price intentionally has no future calendar. It records only its
   actual activations in the past and current interval.
-- Solid curves are measured; dashed curves are forecast. A learned solar shape
-  or the active sinusoidal fallback is named in the tooltip.
+- Solid curves are measured; dashed curves are forecast. Solar and consumption
+  use the left `kWh/15 min` axis; total SOC uses the right `0–100%` axis. The
+  tooltip shows the interval's observed or projected SOC and names the learned
+  solar shape or active sinusoidal fallback.
 
 Action colors describe flows, not permissions: green means solar energy that
 has charged the battery or is allocated to it by the future plan, purple means
@@ -39,7 +41,7 @@ the total energy projected from solar and grid.
 The diagnostic entity is
 `sensor.omnibattery_daily_operation_timeline`. Its state is the local snapshot
 date. Attributes include `schema_version`, timezone, freshness, profile
-sources, 96-value energy series, operation masks, grid decisions and delay
+sources, 96-value energy series, observed and projected total SOC, operation masks, grid decisions and delay
 metadata. Arrays are bounded to the current local day and are excluded from
 Recorder; the entity is safe to use from a dashboard without causing control
 reevaluations.

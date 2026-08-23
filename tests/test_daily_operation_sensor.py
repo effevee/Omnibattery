@@ -63,6 +63,12 @@ def _snapshot() -> dict:
             "delay_until": [None] * 96,
             "charge_power_w": [0] * 96,
             "discharge_power_w": [0] * 96,
+            "charge_to_battery_kwh": [0.1] * 96,
+            "actual_charge_to_battery_kwh": [0.05] * 96,
+            "planned_charge_to_battery_kwh": [0.1] * 96,
+            "soc_pct": [50.5] * 96,
+            "actual_soc_pct": [49.5] * 96,
+            "planned_soc_pct": [51.5] * 96,
             "observed_seconds_by_action": {"solar_charge": 900},
             "observed_seconds_by_action_by_interval": [
                 {"solar_charge": 420},
@@ -123,6 +129,9 @@ def test_timeline_entity_publishes_fixed_96_element_json_safe_dto():
         "solar_charge": 420.0
     }
     assert len(attrs["operations"]["observed_seconds_by_action_by_interval"]) == 96
+    assert attrs["operations"]["actual_soc_pct"][0] == 49.5
+    assert attrs["operations"]["planned_soc_pct"][0] == 51.5
+    assert attrs["operations"]["charge_to_battery_kwh"][0] == 0.1
     json.dumps(attrs, allow_nan=False)
 
 
