@@ -17,10 +17,14 @@ superpuestas muestran energía solar y del hogar en `kWh/15 min`.
 - Las curvas continuas son medidas y las discontinuas son previstas. El tooltip
   identifica la forma solar aprendida o el fallback sinusoidal activo.
 
-Los colores representan flujos, no permisos: verde significa energía solar
-asignada a cargar la batería, morado una decisión de carga desde la red, azul
-una descarga observada o proyectada y gris una decisión explícita de
-`grid_charge_not_needed`. Una celda puede contener hasta tres acciones; los
+Los colores de acción representan flujos, no permisos: verde significa energía
+solar que ha cargado la batería o que el plan futuro le asigna, morado una
+decisión de carga desde la red, azul una descarga observada o proyectada y gris
+una decisión explícita de `grid_charge_not_needed`. Un sombreado amarillo tenue
+indica una ventana con excedente solar disponible en la que la batería podría
+cargar, pero sin mostrar esa posibilidad como una carga efectiva. En el cuarto
+de hora actual, una carga solar prevista permanece amarilla hasta que se observa
+energía entrando en la batería. Una celda puede contener hasta tres acciones; los
 patrones diagonales y el texto accesible mantienen la diferencia con cualquier
 tema. «Carga hasta el setpoint» es contexto, no otro color. El Retraso de
 Carga usa un reloj y una hora estimada de desbloqueo.

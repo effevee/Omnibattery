@@ -10,6 +10,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
+from custom_components.omnibattery import ChargeDischargeController
 from custom_components.omnibattery.tracking.daily_timeline import (
     ACTION_DISCHARGE,
     ACTION_GRID_CHARGE,
@@ -67,6 +68,60 @@ def _capture(value: float, coverage: float = 900.0):
     values[40] = value
     coverages[40] = coverage
     return {"interval_energy_kwh": values, "interval_coverage_s": coverages}
+
+
+def _runtime_controller(coordinators, *, grid_active=False):
+    return SimpleNamespace(
+        coordinators=coordinators,
+        grid_charging_active=grid_active,
+        predictive_charging_enabled=False,
+        charge_delay_enabled=False,
+        previous_power=0.0,
+        _daily_operation_mode=lambda: "normal",
+        _daily_operation_float=ChargeDischargeController._daily_operation_float,
+        _coordinator_delivered_power=(
+            ChargeDischargeController._coordinator_delivered_power
+        ),
+        _is_battery_manual_owned=lambda _coordinator: False,
+    )
+
+
+def test_runtime_diary_detects_dc_coupled_solar_charge_while_ac_is_exporting():
+    coordinator = SimpleNamespace(
+        capabilities=SimpleNamespace(has_mppt_pv=True, has_solar_telemetry=True),
+        data={
+            "ac_power": 265,
+            "mppt1_power": 405,
+            "mppt2_power": 402,
+            "mppt3_power": 139,
+            "mppt4_power": 0,
+        },
+    )
+    # Even if grid charging is globally active for another unit, this battery
+    # is exporting on AC and must only be classified as solar charging.
+    controller = _runtime_controller([coordinator], grid_active=True)
+
+    decision = ChargeDischargeController._daily_operation_runtime_decision(
+        controller, datetime(2026, 8, 23, 11, 30, tzinfo=MADRID)
+    )
+
+    assert decision["action_mask"] == ACTION_SOLAR_CHARGE
+    assert decision["charge_power_w"] == pytest.approx(681)
+
+
+def test_runtime_diary_composes_grid_and_dc_solar_charge():
+    coordinator = SimpleNamespace(
+        capabilities=SimpleNamespace(has_mppt_pv=True, has_solar_telemetry=True),
+        data={"ac_power": -200, "mppt1_power": 800},
+    )
+    controller = _runtime_controller([coordinator], grid_active=True)
+
+    decision = ChargeDischargeController._daily_operation_runtime_decision(
+        controller, datetime(2026, 8, 23, 11, 30, tzinfo=MADRID)
+    )
+
+    assert decision["action_mask"] == ACTION_SOLAR_CHARGE | ACTION_GRID_CHARGE
+    assert decision["simultaneous"] is True
 
 
 @pytest.mark.asyncio

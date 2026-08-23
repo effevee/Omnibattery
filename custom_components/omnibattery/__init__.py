@@ -1105,10 +1105,15 @@ class ChargeDischargeController:
             elif mode == "realtime_price":
                 context_mask |= CONTEXT_REALTIME_PRICE
 
+        grid_active = bool(
+            getattr(self, "grid_charging_active", False)
+            or getattr(self, "_realtime_price_charging", False)
+        )
         total_power = 0.0
         measured = False
         positive_batteries = 0
         negative_batteries = 0
+        action_mask = 0
         for coordinator in getattr(self, "coordinators", ()):
             if self._is_battery_manual_owned(coordinator):
                 continue
@@ -1118,32 +1123,75 @@ class ChargeDischargeController:
             parsed = self._daily_operation_float(delivered, math.nan)
             if not math.isfinite(parsed):
                 continue
+
+            # AC power alone misses DC-coupled PV charging on Venus A/D and
+            # aggregate-PV devices. Mirror the system battery-cell sensor:
+            # cell power = AC-side battery flow + direct PV, with positive
+            # meaning that energy is entering the cells.
+            data = getattr(coordinator, "data", None) or {}
+            capabilities = getattr(coordinator, "capabilities", None)
+            has_mppt = bool(getattr(capabilities, "has_mppt_pv", False))
+            has_aggregate_pv = bool(
+                getattr(capabilities, "has_solar_telemetry", False)
+            )
+            direct_pv_w = 0.0
+            if has_mppt:
+                for key in (
+                    "mppt1_power",
+                    "mppt2_power",
+                    "mppt3_power",
+                    "mppt4_power",
+                ):
+                    value = self._daily_operation_float(data.get(key), math.nan)
+                    if math.isfinite(value) and value >= 0.0:
+                        direct_pv_w += value
+            elif has_aggregate_pv:
+                value = self._daily_operation_float(
+                    data.get("solar_power"), math.nan
+                )
+                if math.isfinite(value) and value >= 0.0:
+                    direct_pv_w = value
+
+            cell_power = parsed
+            ac_power = self._daily_operation_float(data.get("ac_power"), math.nan)
+            if math.isfinite(ac_power) and (has_mppt or has_aggregate_pv):
+                offgrid_power = 0.0
+                if data.get("inverter_state") == 4:
+                    candidate = self._daily_operation_float(
+                        data.get("ac_offgrid_power"), math.nan
+                    )
+                    if math.isfinite(candidate):
+                        offgrid_power = candidate
+                cell_power = -ac_power - offgrid_power + direct_pv_w
+
             measured = True
-            total_power += parsed
-            if parsed > 10.0:
+            total_power += cell_power
+            if cell_power > 10.0:
                 positive_batteries += 1
-            elif parsed < -10.0:
+                if direct_pv_w > 10.0 or not grid_active:
+                    action_mask |= ACTION_SOLAR_CHARGE
+                # A global grid-charge mode can overlap a battery that is
+                # exporting AC while its MPPT still charges the cells. Only
+                # label grid charge when this unit actually draws from AC.
+                if grid_active and (
+                    not math.isfinite(ac_power) or ac_power < -10.0
+                ):
+                    action_mask |= ACTION_GRID_CHARGE
+            elif cell_power < -10.0:
                 negative_batteries += 1
+                action_mask |= ACTION_DISCHARGE
 
         if not measured:
             total_power = self._daily_operation_float(
                 getattr(self, "previous_power", 0.0), 0.0
             )
             measured = abs(total_power) > 10.0
-
-        grid_active = bool(
-            getattr(self, "grid_charging_active", False)
-            or getattr(self, "_realtime_price_charging", False)
-        )
-        action_mask = 0
-        if total_power > 10.0:
-            action_mask |= ACTION_GRID_CHARGE if grid_active else ACTION_SOLAR_CHARGE
-        elif total_power < -10.0:
-            action_mask |= ACTION_DISCHARGE
-        if positive_batteries and negative_batteries:
-            action_mask |= ACTION_DISCHARGE | (
-                ACTION_GRID_CHARGE if grid_active else ACTION_SOLAR_CHARGE
-            )
+            if total_power > 10.0:
+                action_mask |= (
+                    ACTION_GRID_CHARGE if grid_active else ACTION_SOLAR_CHARGE
+                )
+            elif total_power < -10.0:
+                action_mask |= ACTION_DISCHARGE
 
         charge_delay_enabled = bool(getattr(self, "charge_delay_enabled", False))
         delay_unlocked = bool(getattr(self, "_charge_delay_unlocked", False))
@@ -1213,7 +1261,10 @@ class ChargeDischargeController:
             "setpoint_active": setpoint_active,
             "delay_until": status.get("estimated_unlock_time"),
             "slot": slot_label,
-            "simultaneous": bool(positive_batteries and negative_batteries),
+            "simultaneous": bool(
+                (positive_batteries and negative_batteries)
+                or action_mask.bit_count() > 1
+            ),
         }
 
     def _daily_operation_battery_inputs(self) -> list[Any]:

@@ -51,7 +51,7 @@ const I18N = {
     dailyOperationTitle: "Daily operation", dailyOperationDescription: "Observed and projected energy · 15 min",
     dailyOperationReal: "Real", dailyOperationCurrent: "Current", dailyOperationForecast: "Forecast",
     dailyOperationStale: "Data may be outdated", dailyOperationNoData: "No daily operation data",
-    dailyOperationSolarCharge: "Solar charge", dailyOperationGridCharge: "Grid charge", dailyOperationDischarge: "Battery discharge",
+    dailyOperationSolarWindow: "Solar window", dailyOperationSolarCharge: "Solar charge", dailyOperationGridCharge: "Grid charge", dailyOperationDischarge: "Battery discharge",
     dailyOperationNotNeeded: "Grid charge not needed", dailyOperationNoAction: "No action", dailyOperationSetpoint: "Until setpoint",
     dailyOperationDelay: "Charge delayed", dailyOperationUnlock: "Estimated unlock: {time}", dailyOperationAxis: "kWh/15 min",
     dailyOperationSolar: "Solar", dailyOperationConsumption: "Consumption", dailyOperationLearned: "Learned profile",
@@ -135,7 +135,7 @@ const I18N = {
     dailyOperationTitle: "Operación diaria", dailyOperationDescription: "Energía real y prevista · 15 min",
     dailyOperationReal: "Real", dailyOperationCurrent: "Actual", dailyOperationForecast: "Previsto",
     dailyOperationStale: "Datos posiblemente obsoletos", dailyOperationNoData: "Sin datos de operación diaria",
-    dailyOperationSolarCharge: "Carga solar", dailyOperationGridCharge: "Carga de red", dailyOperationDischarge: "Descarga de batería",
+    dailyOperationSolarWindow: "Ventana solar", dailyOperationSolarCharge: "Carga solar", dailyOperationGridCharge: "Carga de red", dailyOperationDischarge: "Descarga de batería",
     dailyOperationNotNeeded: "Carga de red no necesaria", dailyOperationNoAction: "Sin acción", dailyOperationSetpoint: "Hasta el setpoint",
     dailyOperationDelay: "Carga retrasada", dailyOperationUnlock: "Desbloqueo estimado: {time}", dailyOperationAxis: "kWh/15 min",
     dailyOperationSolar: "Solar", dailyOperationConsumption: "Consumo", dailyOperationLearned: "Perfil aprendido",
@@ -219,7 +219,7 @@ const I18N = {
     dailyOperationTitle: "Operació diària", dailyOperationDescription: "Energia observada i prevista · 15 min",
     dailyOperationReal: "Real", dailyOperationCurrent: "Actual", dailyOperationForecast: "Previst",
     dailyOperationStale: "Dades possiblement obsoletes", dailyOperationNoData: "Sense dades d'operació diària",
-    dailyOperationSolarCharge: "Càrrega solar", dailyOperationGridCharge: "Càrrega de xarxa", dailyOperationDischarge: "Descàrrega de bateria",
+    dailyOperationSolarWindow: "Finestra solar", dailyOperationSolarCharge: "Càrrega solar", dailyOperationGridCharge: "Càrrega de xarxa", dailyOperationDischarge: "Descàrrega de bateria",
     dailyOperationNotNeeded: "Càrrega de xarxa no necessària", dailyOperationNoAction: "Sense acció", dailyOperationSetpoint: "Fins al setpoint",
     dailyOperationDelay: "Càrrega retardada", dailyOperationUnlock: "Desbloqueig estimat: {time}", dailyOperationAxis: "kWh/15 min",
     dailyOperationSolar: "Solar", dailyOperationConsumption: "Consum", dailyOperationLearned: "Perfil après",
@@ -299,7 +299,7 @@ const I18N = {
     dailyOperationTitle: "Tagesbetrieb", dailyOperationDescription: "Beobachtete und prognostizierte Energie · 15 Min.",
     dailyOperationReal: "Ist", dailyOperationCurrent: "Aktuell", dailyOperationForecast: "Prognose",
     dailyOperationStale: "Daten möglicherweise veraltet", dailyOperationNoData: "Keine Tagesbetriebsdaten",
-    dailyOperationSolarCharge: "Solarladung", dailyOperationGridCharge: "Netzladung", dailyOperationDischarge: "Batterieentladung",
+    dailyOperationSolarWindow: "Solarfenster", dailyOperationSolarCharge: "Solarladung", dailyOperationGridCharge: "Netzladung", dailyOperationDischarge: "Batterieentladung",
     dailyOperationNotNeeded: "Keine Netzladung erforderlich", dailyOperationNoAction: "Keine Aktion", dailyOperationSetpoint: "Bis zum Sollwert",
     dailyOperationDelay: "Laden verzögert", dailyOperationUnlock: "Voraussichtliche Freigabe: {time}", dailyOperationAxis: "kWh/15 Min.",
     dailyOperationSolar: "Solar", dailyOperationConsumption: "Verbrauch", dailyOperationLearned: "Gelerntes Profil",
@@ -379,7 +379,7 @@ const I18N = {
     dailyOperationTitle: "Opération quotidienne", dailyOperationDescription: "Énergie observée et prévue · 15 min",
     dailyOperationReal: "Réel", dailyOperationCurrent: "Actuel", dailyOperationForecast: "Prévision",
     dailyOperationStale: "Données potentiellement obsolètes", dailyOperationNoData: "Aucune donnée d'opération quotidienne",
-    dailyOperationSolarCharge: "Charge solaire", dailyOperationGridCharge: "Charge réseau", dailyOperationDischarge: "Décharge batterie",
+    dailyOperationSolarWindow: "Fenêtre solaire", dailyOperationSolarCharge: "Charge solaire", dailyOperationGridCharge: "Charge réseau", dailyOperationDischarge: "Décharge batterie",
     dailyOperationNotNeeded: "Charge réseau non nécessaire", dailyOperationNoAction: "Aucune action", dailyOperationSetpoint: "Jusqu'au point de consigne",
     dailyOperationDelay: "Charge retardée", dailyOperationUnlock: "Déblocage estimé : {time}", dailyOperationAxis: "kWh/15 min",
     dailyOperationSolar: "Solaire", dailyOperationConsumption: "Consommation", dailyOperationLearned: "Profil appris",
@@ -459,7 +459,7 @@ const I18N = {
     dailyOperationTitle: "Dagelijkse werking", dailyOperationDescription: "Geobserveerde en verwachte energie · 15 min",
     dailyOperationReal: "Werkelijk", dailyOperationCurrent: "Huidig", dailyOperationForecast: "Verwachting",
     dailyOperationStale: "Gegevens zijn mogelijk verouderd", dailyOperationNoData: "Geen gegevens voor dagelijkse werking",
-    dailyOperationSolarCharge: "Laden met zonne-energie", dailyOperationGridCharge: "Laden vanaf net", dailyOperationDischarge: "Batterij ontladen",
+    dailyOperationSolarWindow: "Zonnevenster", dailyOperationSolarCharge: "Laden met zonne-energie", dailyOperationGridCharge: "Laden vanaf net", dailyOperationDischarge: "Batterij ontladen",
     dailyOperationNotNeeded: "Laden vanaf net niet nodig", dailyOperationNoAction: "Geen actie", dailyOperationSetpoint: "Tot setpoint",
     dailyOperationDelay: "Laden vertraagd", dailyOperationUnlock: "Geschatte vrijgave: {time}", dailyOperationAxis: "kWh/15 min",
     dailyOperationSolar: "Zon", dailyOperationConsumption: "Verbruik", dailyOperationLearned: "Geleerd profiel",
@@ -2021,6 +2021,7 @@ class MarstekVenusPanel extends HTMLElement {
     const legend = document.createElement("div");
     legend.className = "daily-op-legend";
     legend.innerHTML =
+      `<span class="daily-op-legend-item"><i class="daily-op-swatch daily-op-swatch-solar-window"></i>${this._t("dailyOperationSolarWindow")}</span>` +
       `<span class="daily-op-legend-item"><i class="daily-op-swatch daily-op-swatch-solar"></i>${this._t("dailyOperationSolarCharge")}</span>` +
       `<span class="daily-op-legend-item"><i class="daily-op-swatch daily-op-swatch-grid"></i>${this._t("dailyOperationGridCharge")}</span>` +
       `<span class="daily-op-legend-item"><i class="daily-op-swatch daily-op-swatch-discharge"></i>${this._t("dailyOperationDischarge")}</span>` +
@@ -2073,7 +2074,7 @@ class MarstekVenusPanel extends HTMLElement {
     const uid = `mv-daily-op-${(this._dailyOpUid = (this._dailyOpUid || 0) + 1)}`;
     const patternIds = {};
     const patternDefs = [
-      ["solar", "var(--daily-op-solar)", false], ["solar", "var(--daily-op-solar)", true],
+      ["solar", "var(--daily-op-solar-charge)", false], ["solar", "var(--daily-op-solar-charge)", true],
       ["grid", "var(--daily-op-grid)", false], ["grid", "var(--daily-op-grid)", true],
       ["discharge", "var(--daily-op-discharge)", false], ["discharge", "var(--daily-op-discharge)", true],
     ].map(([action, color, reverse], ordinal) => {
@@ -2098,10 +2099,17 @@ class MarstekVenusPanel extends HTMLElement {
       `<path class="daily-op-path daily-op-path-solar-actual" fill="none"></path>` +
       `<path class="daily-op-path daily-op-path-solar-forecast" fill="none"></path>` +
       `<path class="daily-op-path daily-op-path-consumption-actual" fill="none"></path>` +
-      `<path class="daily-op-path daily-op-path-consumption-forecast" fill="none"></path>` +
-      `<line class="daily-op-now-line" x1="0" y1="24" x2="0" y2="170"></line>` +
-      `<text class="daily-op-now-text" x="4" y="20"></text>`;
+      `<path class="daily-op-path daily-op-path-consumption-forecast" fill="none"></path>`;
     stage.appendChild(svg);
+
+    // Keep the current-time marker in HTML so its label has a stable pixel
+    // size instead of stretching with the SVG viewBox.
+    const nowMarker = document.createElement("div");
+    nowMarker.className = "daily-op-now-marker";
+    const nowText = document.createElement("span");
+    nowText.className = "daily-op-now-text";
+    nowMarker.appendChild(nowText);
+    stage.appendChild(nowMarker);
 
     const labels = document.createElement("div");
     labels.className = "daily-op-hour-labels";
@@ -2187,11 +2195,13 @@ class MarstekVenusPanel extends HTMLElement {
     tooltip.setAttribute("role", "tooltip");
     tooltip.setAttribute("aria-live", "polite");
     tooltip.hidden = true;
-    stage.appendChild(tooltip);
 
     viewport.appendChild(stage);
     layout.appendChild(viewport);
     card.appendChild(layout);
+    // The tooltip is positioned against the card, outside the horizontally
+    // clipped viewport, so the first and last intervals remain fully visible.
+    card.appendChild(tooltip);
 
     const scrollState = { manual: false, initialized: false, programmaticUntil: 0 };
     viewport.addEventListener("scroll", () => {
@@ -2213,8 +2223,8 @@ class MarstekVenusPanel extends HTMLElement {
         consumptionActual: svg.querySelector(".daily-op-path-consumption-actual"),
         consumptionForecast: svg.querySelector(".daily-op-path-consumption-forecast"),
       },
-      nowLine: svg.querySelector(".daily-op-now-line"),
-      nowText: svg.querySelector(".daily-op-now-text"),
+      nowMarker,
+      nowText,
       patternIds,
       scrollState,
     };
@@ -2357,6 +2367,8 @@ class MarstekVenusPanel extends HTMLElement {
       chargePower: pickOperation(["charge_power_w", "actual_charge_power_w", "planned_charge_power_w"]),
       dischargePower: pickOperation(["discharge_power_w", "actual_discharge_power_w", "planned_discharge_power_w"]),
       coverage: pickSeries(["actual_coverage_s", "coverage_s"]),
+      solarCoverage: pickSeries(["solar_actual_coverage_s", "actual_coverage_s", "coverage_s"]),
+      consumptionCoverage: pickSeries(["consumption_actual_coverage_s", "actual_coverage_s", "coverage_s"]),
       solarToBattery: pickOperation(["solar_to_battery_kwh"]),
       gridToBattery: pickOperation(["grid_to_battery_kwh"]),
       batteryToHome: pickOperation(["battery_to_home_kwh"]),
@@ -2432,7 +2444,12 @@ class MarstekVenusPanel extends HTMLElement {
     const actualMask = this._dailyOperationMaskAt(snapshot.actualMask, index);
     const plannedMask = this._dailyOperationMaskAt(snapshot.plannedMask, index);
     let mask = status === "forecast" ? plannedMask : actualMask;
-    if (status === "current") mask = actualMask == null ? plannedMask : plannedMask == null ? actualMask : actualMask | plannedMask;
+    if (status === "current") {
+      // The open interval contains observed history and a projection for its
+      // remaining minutes. Do not present a projected solar charge as already
+      // active: until it is observed, it is only a solar opportunity.
+      mask = (actualMask || 0) | ((plannedMask || 0) & ~1);
+    }
     if (snapshot.isSkipped[index]) mask = 0;
     const contextActual = this._dailyOperationMaskAt(snapshot.actualContext, index);
     const contextPlanned = this._dailyOperationMaskAt(snapshot.plannedContext, index);
@@ -2441,6 +2458,19 @@ class MarstekVenusPanel extends HTMLElement {
     const decision = this._dailyOperationChoiceAt(snapshot.gridDecision, index) ||
       (status === "forecast" ? this._dailyOperationChoiceAt(snapshot.plannedDecision, index) : this._dailyOperationChoiceAt(snapshot.actualDecision, index));
     const actions = this._dailyOperationActionBits(mask).map((bit) => this._dailyOperationActionKey(bit));
+    const solar = status === "forecast"
+      ? this._dailyOperationValueAt(snapshot.forecastSolar, index)
+      : this._dailyOperationValueAt(snapshot.actualSolar, index);
+    const consumption = status === "forecast"
+      ? this._dailyOperationValueAt(snapshot.forecastConsumption, index)
+      : this._dailyOperationValueAt(snapshot.actualConsumption, index);
+    const projectedSolarChargePending = status === "current"
+      && ((plannedMask || 0) & 1) !== 0
+      && ((actualMask || 0) & 1) === 0;
+    const solarSurplus = solar != null && consumption != null && solar > consumption + 0.000001;
+    const solarWindow = !snapshot.isSkipped[index]
+      && ((mask || 0) & 1) === 0
+      && (projectedSolarChargePending || solarSurplus);
     const delayState = snapshot.delayInfo && String(snapshot.delayInfo.state || snapshot.delayInfo.status || "").toLowerCase();
     const topLevelDelay = index === snapshot.currentIndex && ["delayed", "waiting_for_solar", "waiting", "blocked"].includes(delayState);
     const delayUntil = (Array.isArray(snapshot.delayUntil) ? snapshot.delayUntil[index] : null) ??
@@ -2469,7 +2499,7 @@ class MarstekVenusPanel extends HTMLElement {
     return {
       index, status, statusLabel: this._dailyOperationStatusLabel(status),
       timeRange: this._dailyOperationTimeRange(index),
-      mask: mask || 0, actions, context: context || 0, decision,
+      mask: mask || 0, actions, solarWindow, context: context || 0, decision,
       delay, delayUntil: delayUntil == null ? null : String(delayUntil),
       setpoint: ((context || 0) & 1) !== 0 || topLevelSetpoint,
       skipped: snapshot.isSkipped[index], repeated: snapshot.isRepeated[index],
@@ -2521,6 +2551,7 @@ class MarstekVenusPanel extends HTMLElement {
     if (item.consumptionForecast != null) parts.push(`${this._t("dailyOperationConsumption")} (${this._t("dailyOperationForecast")}): ${this._dailyOperationFormatKwh(item.consumptionForecast)}`);
     if (item.coverage != null) parts.push(`${this._t("dailyOperationCoverage")}: ${Math.round(item.coverage)} s`);
     if (item.actions.length) parts.push(`${this._t("dailyOperationPlan")}: ${item.actions.map((key) => this._dailyOperationActionLabel(key === "solar" ? 1 : key === "grid" ? 2 : 4)).join(", ")}`);
+    else if (item.solarWindow) parts.push(this._t("dailyOperationSolarWindow"));
     else if (item.decision === "not_needed") parts.push(this._t("dailyOperationNotNeeded"));
     else parts.push(this._t("dailyOperationNoAction"));
     if (item.chargePower != null) parts.push(`${this._t("dailyOperationGridCharge")}: ${this._dailyOperationFormatPower(item.chargePower)}`);
@@ -2552,40 +2583,21 @@ class MarstekVenusPanel extends HTMLElement {
   _dailyOperationTooltipHTML(snapshot, item) {
     const escape = (value) => this._dailyOperationEscape(value);
     const row = (label, value) => `<div class="daily-op-tip-row"><span>${escape(label)}</span><strong>${escape(value)}</strong></div>`;
-    const rows = [row(this._t("dailyOperationMode"), item.statusLabel)];
-    if (item.solarActual != null) rows.push(row(`${this._t("dailyOperationSolar")} · ${this._t("dailyOperationReal")}`, this._dailyOperationFormatKwh(item.solarActual)));
-    if (item.solarForecast != null) rows.push(row(`${this._t("dailyOperationSolar")} · ${this._t("dailyOperationForecast")}`, this._dailyOperationFormatKwh(item.solarForecast)));
-    if (item.consumptionActual != null) rows.push(row(`${this._t("dailyOperationConsumption")} · ${this._t("dailyOperationReal")}`, this._dailyOperationFormatKwh(item.consumptionActual)));
-    if (item.consumptionForecast != null) rows.push(row(`${this._t("dailyOperationConsumption")} · ${this._t("dailyOperationForecast")}`, this._dailyOperationFormatKwh(item.consumptionForecast)));
-    if (item.coverage != null) rows.push(row(this._t("dailyOperationCoverage"), `${Math.round(item.coverage)} s`));
+    const rows = [];
+    const useForecast = item.status === "forecast";
+    const solar = useForecast ? item.solarForecast : item.solarActual;
+    const consumption = useForecast ? item.consumptionForecast : item.consumptionActual;
+    if (solar != null) rows.push(row(this._t("dailyOperationSolar"), this._dailyOperationFormatKwh(solar)));
+    if (consumption != null) rows.push(row(this._t("dailyOperationConsumption"), this._dailyOperationFormatKwh(consumption)));
     const actionLabels = item.actions.length
       ? item.actions.map((key) => this._dailyOperationActionLabel(key === "solar" ? 1 : key === "grid" ? 2 : 4)).join(", ")
-      : item.decision === "not_needed" ? this._t("dailyOperationNotNeeded") : this._t("dailyOperationNoAction");
-    rows.push(row(this._t("dailyOperationPlan"), actionLabels));
-    if (item.solarToBattery != null) rows.push(row(this._t("dailyOperationSolarCharge"), this._dailyOperationFormatKwh(item.solarToBattery)));
-    if (item.gridToBattery != null) rows.push(row(this._t("dailyOperationGridCharge"), this._dailyOperationFormatKwh(item.gridToBattery)));
-    if (item.batteryToHome != null) rows.push(row(this._t("dailyOperationDischarge"), this._dailyOperationFormatKwh(item.batteryToHome)));
-    for (const action of item.actions) {
-      if (item.actionSeconds[action] != null) rows.push(row(`${this._t("dailyOperationObserved")} · ${this._dailyOperationActionLabel(action === "solar" ? 1 : action === "grid" ? 2 : 4)}`, `${Math.round(item.actionSeconds[action])} s`));
-    }
-    if (item.chargePower != null) rows.push(row(this._t("dailyOperationGridCharge"), this._dailyOperationFormatPower(item.chargePower)));
-    if (item.dischargePower != null) rows.push(row(this._t("dailyOperationDischarge"), this._dailyOperationFormatPower(item.dischargePower)));
-    if (item.decision) rows.push(row(this._t("dailyOperationMode"), this._dailyOperationDecisionLabel(item.decision)));
-    if (item.setpoint) rows.push(row(this._t("dailyOperationSetpoint"), this._t("dailyOperationSetpoint")));
+      : item.solarWindow ? this._t("dailyOperationSolarWindow")
+        : item.decision === "not_needed" ? this._t("dailyOperationNotNeeded") : this._t("dailyOperationNoAction");
+    rows.push(row(useForecast ? this._t("dailyOperationPlan") : this._t("dailyOperationObserved"), actionLabels));
+    if (item.setpoint) rows.push(row(this._t("dailyOperationMode"), this._t("dailyOperationSetpoint")));
     if (item.delay) rows.push(row(this._t("dailyOperationDelay"), item.delayUntil ? this._t("dailyOperationUnlock", { time: item.delayUntil }) : this._t("dailyOperationDelay")));
-    if (item.socEnd != null) rows.push(row("SOC", `${this._nf(item.socEnd, 1)} %`));
-    const solarSource = this._dailyOperationSourceLabel(snapshot.source("solar"));
-    const consumptionSource = this._dailyOperationSourceLabel(snapshot.source("consumption"));
-    const planSource = this._dailyOperationSourceLabel(snapshot.source("plan"));
-    if (solarSource) rows.push(row(`${this._t("dailyOperationSolar")} · ${this._t("dailyOperationSource")}`, solarSource));
-    if (consumptionSource) rows.push(row(`${this._t("dailyOperationConsumption")} · ${this._t("dailyOperationSource")}`, consumptionSource));
-    if (planSource) rows.push(row(`${this._t("dailyOperationPlan")} · ${this._t("dailyOperationSource")}`, planSource));
-    if (snapshot.planEvaluatedAt) rows.push(row(this._t("dailyOperationPlan"), snapshot.planEvaluatedAt));
-    if (snapshot.generatedAt) rows.push(row(this._t("dailyOperationSource"), snapshot.generatedAt));
-    if (snapshot.mode) rows.push(row(this._t("dailyOperationMode"), snapshot.mode));
-    if (snapshot.stale) rows.push(row(this._t("dailyOperationStale"), snapshot.staleReason || this._t("dailyOperationStale")));
     if (item.repeated) rows.push(row(this._t("dailyOperationDSTRepeated"), this._t("dailyOperationDSTRepeated")));
-    return `<div class="daily-op-tip-head">${escape(item.timeRange)}</div>` + rows.join("");
+    return `<div class="daily-op-tip-head"><strong>${escape(item.timeRange)}</strong><span>${escape(item.statusLabel)}</span></div>` + rows.join("");
   }
 
   _showDailyOperationTooltip(index, cell) {
@@ -2653,6 +2665,22 @@ class MarstekVenusPanel extends HTMLElement {
     ref.next.disabled = ref.viewport.scrollLeft >= max - 2;
   }
 
+  _dailyOperationPlotValues(values, coverage, snapshot, future) {
+    if (!Array.isArray(values)) return values;
+    const plotted = values.slice();
+    if (future) return plotted;
+    const index = snapshot.currentIndex;
+    const value = this._dailyOperationNumber(plotted[index]);
+    const seconds = this._dailyOperationValueAt(coverage, index);
+    // The live capture contains energy accumulated so far. Extrapolate only
+    // the open cell so it remains comparable with the completed 15-minute
+    // cells and does not create a false drop at the now marker.
+    if (value != null && seconds != null && seconds >= 60 && seconds < 900) {
+      plotted[index] = value * 900 / seconds;
+    }
+    return plotted;
+  }
+
   _dailyOperationPath(values, snapshot, yMax, future) {
     if (!Array.isArray(values)) return "";
     const top = 32, bottom = 164;
@@ -2680,18 +2708,23 @@ class MarstekVenusPanel extends HTMLElement {
   _dailyOperationUpdatePaths(snapshot) {
     const ref = this._r.dailyOperation;
     if (!ref) return;
-    const values = [snapshot.actualSolar, snapshot.forecastSolar, snapshot.actualConsumption, snapshot.forecastConsumption];
+    const actualSolar = this._dailyOperationPlotValues(snapshot.actualSolar, snapshot.solarCoverage, snapshot, false);
+    const actualConsumption = this._dailyOperationPlotValues(snapshot.actualConsumption, snapshot.consumptionCoverage, snapshot, false);
+    const values = [actualSolar, snapshot.forecastSolar, actualConsumption, snapshot.forecastConsumption];
     const yMax = Math.max(0.1, ...values.flatMap((array) => Array.isArray(array)
       ? array.map((value) => this._dailyOperationNumber(value)).filter((value) => value != null)
       : []
     )) * 1.12;
-    ref.yAxis.innerHTML = [yMax, yMax * 0.75, yMax * 0.5, yMax * 0.25, 0]
-      .map((value) => `<span>${this._nf(value, 2)}</span>`).join("") +
-      `<small>${this._t("dailyOperationAxis")}</small>`;
+    ref.yAxis.innerHTML =
+      `<small>${this._t("dailyOperationAxis")}</small>` +
+      `<div class="daily-op-yaxis-ticks">` +
+      [yMax, yMax * 0.75, yMax * 0.5, yMax * 0.25, 0]
+        .map((value) => `<span>${this._nf(value, 2)}</span>`).join("") +
+      `</div>`;
     const pathValues = [
-      [ref.paths.solarActual, snapshot.actualSolar, false],
+      [ref.paths.solarActual, actualSolar, false],
       [ref.paths.solarForecast, snapshot.forecastSolar, true],
-      [ref.paths.consumptionActual, snapshot.actualConsumption, false],
+      [ref.paths.consumptionActual, actualConsumption, false],
       [ref.paths.consumptionForecast, snapshot.forecastConsumption, true],
     ];
     for (const [path, series, future] of pathValues) {
@@ -2700,9 +2733,7 @@ class MarstekVenusPanel extends HTMLElement {
       path.style.display = d ? "" : "none";
     }
     const now = (snapshot.currentIndex + snapshot.currentProgress) * 10;
-    ref.nowLine.setAttribute("x1", now.toFixed(2));
-    ref.nowLine.setAttribute("x2", now.toFixed(2));
-    ref.nowText.setAttribute("x", Math.min(936, now + 4).toFixed(2));
+    ref.nowMarker.style.left = `${now / 9.6}%`;
     ref.nowText.textContent = this._t("dailyOperationNow");
   }
 
@@ -2710,7 +2741,7 @@ class MarstekVenusPanel extends HTMLElement {
     const ref = this._r.dailyOperation;
     const cell = ref.cells[index];
     const item = this._dailyOperationItem(snapshot, index);
-    const baseAction = item.actions[0] || (item.decision === "not_needed" ? "not-needed" : "neutral");
+    const baseAction = item.actions[0] || (item.solarWindow ? "solar-window" : item.decision === "not_needed" ? "not-needed" : "neutral");
     cell.className = `daily-op-cell daily-op-base-${baseAction}`;
     cell.classList.toggle("daily-op-real", item.status === "real");
     cell.classList.toggle("daily-op-current", item.status === "current");
@@ -2726,7 +2757,7 @@ class MarstekVenusPanel extends HTMLElement {
     });
     cell.style.backgroundImage = patterns.join(", ");
     cell.setAttribute("aria-label", this._dailyOperationAriaLabel(snapshot, item));
-    cell.title = cell.getAttribute("aria-label");
+    cell.removeAttribute("title");
     const delayMark = cell.querySelector(".daily-op-delay-mark");
     const setpointMark = cell.querySelector(".daily-op-setpoint-mark");
     delayMark.hidden = !item.delay;
@@ -5874,7 +5905,9 @@ class MarstekVenusPanel extends HTMLElement {
         --flow-blue: oklch(0.70 0.15 245);
         --flow-green: oklch(0.78 0.16 150);
         --battery: var(--accent);
-        --daily-op-solar: var(--flow-green);
+        --daily-op-solar-window: var(--solar);
+        --daily-op-solar-charge: var(--flow-green);
+        --daily-op-solar-line: var(--solar);
         --daily-op-grid: var(--flow-purple);
         --daily-op-discharge: var(--flow-blue);
         --daily-op-not-needed: var(--ink-dim);
@@ -6009,19 +6042,20 @@ class MarstekVenusPanel extends HTMLElement {
         pointer-events: none; z-index: 5; }
 
       /* ===== Daily operation timeline ===== */
-      .daily-operation-card { min-width: 0; overflow: visible; }
+      .daily-operation-card { position: relative; min-width: 0; overflow: visible; }
       .daily-operation-card[hidden], .daily-operation-card [hidden] { display: none !important; }
       .daily-op-description { font-size: 12px; line-height: 1.45; margin: -7px 0 12px; }
       .daily-op-toolbar { display: flex; align-items: center; gap: 12px; min-width: 0; margin-bottom: 9px; }
       .daily-op-legend { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; min-width: 0; }
       .daily-op-legend-item { display: inline-flex; align-items: center; gap: 5px; color: var(--ink-mid); font-size: 11px; white-space: nowrap; }
       .daily-op-swatch { display: inline-block; width: 12px; height: 12px; border: 1px solid var(--line-strong); border-radius: 3px; }
-      .daily-op-swatch-solar { background: color-mix(in oklab, var(--daily-op-solar) 55%, transparent); }
+      .daily-op-swatch-solar-window { background: color-mix(in oklab, var(--daily-op-solar-window) 34%, transparent); }
+      .daily-op-swatch-solar { background: color-mix(in oklab, var(--daily-op-solar-charge) 55%, transparent); }
       .daily-op-swatch-grid { background: color-mix(in oklab, var(--daily-op-grid) 55%, transparent); }
       .daily-op-swatch-discharge { background: color-mix(in oklab, var(--daily-op-discharge) 55%, transparent); }
       .daily-op-swatch-not-needed { background: color-mix(in oklab, var(--daily-op-not-needed) 45%, transparent); }
       .daily-op-line { display: inline-block; width: 15px; height: 0; border-top: 2px solid var(--ink); }
-      .daily-op-line-solar { border-color: var(--daily-op-solar); }
+      .daily-op-line-solar { border-color: var(--daily-op-solar-line); }
       .daily-op-line-consumption { border-color: var(--home); border-top-style: dashed; }
       .daily-op-nav { display: inline-flex; gap: 5px; margin-left: auto; flex-shrink: 0; }
       .daily-op-nav-btn { display: grid; place-items: center; width: 29px; height: 29px; padding: 0; border: 1px solid var(--line); border-radius: 8px; background: var(--bg-2); color: var(--ink-mid); cursor: pointer; --mdc-icon-size: 18px; }
@@ -6032,8 +6066,9 @@ class MarstekVenusPanel extends HTMLElement {
       .daily-op-badge-stale { color: oklch(0.82 0.14 75); border-color: oklch(0.82 0.14 75 / .4); background: oklch(0.82 0.14 75 / .1); }
       .daily-op-notice { margin: 0 0 9px; padding: 7px 10px; border: 1px solid oklch(0.82 0.14 75 / .35); border-radius: 9px; color: oklch(0.82 0.14 75); background: oklch(0.82 0.14 75 / .08); font-size: 11px; line-height: 1.4; }
       .daily-op-layout { display: grid; grid-template-columns: 62px minmax(0, 1fr); gap: 0; min-width: 0; }
-      .daily-op-yaxis { display: flex; flex-direction: column; align-items: flex-end; justify-content: space-between; height: 190px; padding: 24px 8px 21px 0; color: var(--ink-dim); font-size: 10px; line-height: 1; white-space: nowrap; }
-      .daily-op-yaxis small { margin-top: -15px; font-size: 9px; writing-mode: vertical-rl; transform: rotate(180deg); }
+      .daily-op-yaxis { position: relative; height: 190px; color: var(--ink-dim); font-size: 10px; line-height: 1; white-space: nowrap; }
+      .daily-op-yaxis small { position: absolute; top: 7px; right: 8px; font-size: 9px; writing-mode: horizontal-tb; transform: none; }
+      .daily-op-yaxis-ticks { position: absolute; top: 32px; right: 8px; bottom: 26px; display: flex; flex-direction: column; align-items: flex-end; justify-content: space-between; }
       .daily-op-viewport { position: relative; min-width: 0; overflow-x: auto; overflow-y: hidden; scroll-snap-type: x proximity; scrollbar-width: thin; overscroll-behavior-x: contain; outline: none; }
       .daily-op-viewport:focus-visible { box-shadow: inset 0 0 0 2px var(--accent-line); border-radius: 8px; }
       .daily-op-stage { position: relative; width: 100%; min-width: 960px; height: 190px; }
@@ -6041,13 +6076,15 @@ class MarstekVenusPanel extends HTMLElement {
       .daily-op-grid-lines line { stroke: var(--line); stroke-width: 1; vector-effect: non-scaling-stroke; }
       .daily-op-grid-lines .daily-op-hour-line { stroke: var(--line-strong); }
       .daily-op-path { stroke-width: 2.2; vector-effect: non-scaling-stroke; stroke-linecap: round; stroke-linejoin: round; }
-      .daily-op-path-solar-actual { stroke: var(--daily-op-solar); }
-      .daily-op-path-solar-forecast { stroke: var(--daily-op-solar); stroke-dasharray: 5 4; opacity: .78; }
+      .daily-op-path-solar-actual { stroke: var(--daily-op-solar-line); }
+      .daily-op-path-solar-forecast { stroke: var(--daily-op-solar-line); stroke-dasharray: 5 4; opacity: .78; }
       .daily-op-path-consumption-actual { stroke: var(--home); }
       .daily-op-path-consumption-forecast { stroke: var(--home); stroke-dasharray: 5 4; opacity: .78; }
-      .daily-op-now-line { stroke: var(--accent); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
-      .daily-op-now-text { fill: var(--accent); font-size: 10px; font-weight: 600; }
       .daily-op-grid { position: absolute; inset: 0; z-index: 2; display: grid; grid-template-rows: 24px 146px 20px; pointer-events: none; }
+      .daily-op-now-marker { position: absolute; z-index: 5; top: 3px; bottom: 20px; width: 0; pointer-events: none; }
+      .daily-op-now-marker::before { content: ""; position: absolute; top: 21px; bottom: 0; left: 0; border-left: 1.5px solid var(--accent); }
+      .daily-op-now-marker::after { content: ""; position: absolute; top: 18px; left: -3px; width: 7px; height: 7px; border: 1px solid var(--bg-1); border-radius: 50%; background: var(--accent); }
+      .daily-op-now-text { position: absolute; top: 0; left: 0; transform: translateX(-50%); padding: 2px 7px; border: 1px solid var(--accent-line); border-radius: 999px; background: var(--bg-2); color: var(--accent); box-shadow: 0 2px 8px oklch(0 0 0 / .22); font-size: 9px; line-height: 14px; font-weight: 700; letter-spacing: .01em; white-space: nowrap; }
       .daily-op-hour-labels, .daily-op-hours { display: grid; grid-template-columns: repeat(24, minmax(0, 1fr)); min-width: 0; }
       .daily-op-hour-label { padding-left: 4px; color: var(--ink-dim); font-size: 10px; font-variant-numeric: tabular-nums; }
       .daily-op-hour { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); min-width: 0; scroll-snap-align: start; border-right: 1px solid var(--line-strong); }
@@ -6056,7 +6093,8 @@ class MarstekVenusPanel extends HTMLElement {
       .daily-op-cell.daily-op-current { box-shadow: inset 0 0 0 1px var(--accent); }
       .daily-op-cell.daily-op-forecast { border-bottom: 1px dashed var(--line-strong); }
       .daily-op-cell.daily-op-stale { opacity: .55; }
-      .daily-op-base-solar { background-color: color-mix(in oklab, var(--daily-op-solar) 48%, transparent); }
+      .daily-op-base-solar-window { background-color: color-mix(in oklab, var(--daily-op-solar-window) 30%, transparent); }
+      .daily-op-base-solar { background-color: color-mix(in oklab, var(--daily-op-solar-charge) 48%, transparent); }
       .daily-op-base-grid { background-color: color-mix(in oklab, var(--daily-op-grid) 48%, transparent); }
       .daily-op-base-discharge { background-color: color-mix(in oklab, var(--daily-op-discharge) 48%, transparent); }
       .daily-op-base-not-needed { background-color: color-mix(in oklab, var(--daily-op-not-needed) 38%, transparent); }
@@ -6067,8 +6105,10 @@ class MarstekVenusPanel extends HTMLElement {
       .daily-op-setpoint-mark { right: 2px; bottom: 3px; color: var(--ink-mid); opacity: .85; }
       .daily-op-dst-skipped { opacity: .25; background-image: repeating-linear-gradient(135deg, transparent 0 4px, var(--line-strong) 4px 5px) !important; }
       .daily-op-dst-repeated { box-shadow: inset 0 0 0 1px var(--ink-dim); }
-      .daily-op-tooltip { position: absolute; z-index: 10; max-width: min(340px, calc(100% - 16px)); min-width: 210px; padding: 9px 11px; border: 1px solid var(--line-strong); border-radius: 10px; background: var(--bg-2); color: var(--ink); box-shadow: 0 8px 24px oklch(0 0 0 / .35); font-size: 11px; line-height: 1.4; pointer-events: none; }
-      .daily-op-tip-head { margin-bottom: 5px; color: var(--ink); font-weight: 700; font-variant-numeric: tabular-nums; }
+      .daily-op-tooltip { position: absolute; z-index: 10; max-width: min(280px, calc(100% - 16px)); min-width: 190px; padding: 8px 10px; border: 1px solid var(--line-strong); border-radius: 10px; background: var(--bg-2); color: var(--ink); box-shadow: 0 8px 24px oklch(0 0 0 / .35); font-size: 11px; line-height: 1.35; pointer-events: none; }
+      .daily-op-tip-head { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-bottom: 5px; font-variant-numeric: tabular-nums; }
+      .daily-op-tip-head strong { color: var(--ink); font-weight: 700; }
+      .daily-op-tip-head span { color: var(--ink-dim); font-size: 10px; font-weight: 600; }
       .daily-op-tip-row { display: flex; justify-content: space-between; gap: 14px; border-top: 1px solid var(--line); padding-top: 3px; margin-top: 3px; }
       .daily-op-tip-row span { color: var(--ink-mid); }
       .daily-op-tip-row strong { color: var(--ink); text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; }

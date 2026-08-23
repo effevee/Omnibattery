@@ -16,13 +16,17 @@ solar and household energy in `kWh/15 min`.
 - Solid curves are measured; dashed curves are forecast. A learned solar shape
   or the active sinusoidal fallback is named in the tooltip.
 
-The colors describe flows, not permissions: green means solar energy is
-assigned to battery charging, purple means a grid-charge decision, blue means
-observed or projected battery discharge, and grey means an explicit
-`grid_charge_not_needed` decision. A cell can contain up to three actions;
-diagonal patterns and the accessible text preserve the distinction in light
-and dark themes. “Charging to setpoint” is context, not another color. Charge
-Delay uses a clock marker and an estimated unlock time.
+Action colors describe flows, not permissions: green means solar energy that
+has charged the battery or is allocated to it by the future plan, purple means
+a grid-charge decision, blue means observed or projected battery discharge,
+and grey means an explicit `grid_charge_not_needed` decision. A soft yellow
+fill indicates a window with available solar surplus in which the battery could
+charge, without presenting that opportunity as an effective charge. In the
+current quarter, a projected solar charge remains yellow until energy entering
+the battery is observed. A cell can contain up to three actions; diagonal
+patterns and the accessible text preserve the distinction in light and dark
+themes. “Charging to setpoint” is context, not another color. Charge Delay uses
+a clock marker and an estimated unlock time.
 
 ## Entity contract
 
