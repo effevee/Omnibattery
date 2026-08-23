@@ -33,7 +33,13 @@ _LOGGER = logging.getLogger(__name__)
 _REQUEST_TIMEOUT_S = 10.0
 # The inverter ignores requests issued immediately after the TCP handshake.
 _WAIT_ON_CONNECT_S = 1.5
-_MESSAGE_WAIT_S = 0.05
+# Pacing between requests. The reference library uses 50 ms, which also covers
+# its serial and SDongle transports. Measured over Modbus TCP with nothing else
+# on the bus: 800 consecutive reads at 10 ms and at 0 ms pacing, zero failures,
+# 3.6 ms median round trip, 6 ms at the 95th percentile. 20 ms keeps roughly a
+# threefold margin over that while cutting a full telemetry sweep from ~1.1 s to
+# ~0.45 s — which matters because a set-point write queues behind it.
+_MESSAGE_WAIT_S = 0.02
 
 
 def decode_u16(regs: list[int], offset: int = 0) -> int:

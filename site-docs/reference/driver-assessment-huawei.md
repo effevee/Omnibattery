@@ -53,9 +53,9 @@ existing driver model, both described in [§13](#13-what-a-dc-coupled-hybrid-bre
 | Discovery | manual |
 | Authentication | none |
 | Maximum simultaneous connections | The inverter tolerates one client; a Modbus proxy fans it out. Verified: this driver read continuously while `huawei_solar` held its own connection |
-| Read latency | **median 3–4 ms**, worst 22 ms over 30 samples (20-register block) |
+| Read latency | **median 3.6 ms, 6 ms at p95** over 800 consecutive reads with nothing else on the bus |
 | Post-connect pause | **1500 ms required.** The first request after the TCP handshake is dropped without it |
-| Request pacing | 50 ms between requests, single in-flight request; the inverter does not tolerate pipelining |
+| Request pacing | Single in-flight request; the inverter does not tolerate pipelining. 800 reads each at 10 ms and 0 ms pacing produced zero failures, so the reference library's 50 ms is conservative for Modbus TCP; the driver uses 20 ms |
 | Telemetry freshness | Battery and PV values refresh every **2–3 s** at the register |
 | Volatile vs persistent | Forcible-charge registers are volatile and carry a duration. SOC cutoffs (47081/47082) are **persistent** |
 | Behaviour without network | Forcible commands expire on their own; see the watchdog below |
@@ -93,9 +93,9 @@ existing driver model, both described in [§13](#13-what-a-dc-coupled-hybrid-bre
 | `has_rs485_control` | `False` | No external-control gate needed |
 | `has_energy_counters` | `True` | 37066/37068 cumulative, 37015/37017 daily |
 | `setpoint_confirm_reliable` | `False` | The command registers echo instantly while the battery is still ramping |
-| `actuator_latency_s` | 15.0 | **Measured 7–14 s** from register write to settled power; declared conservatively |
-| `readback_latency_s` | 15.0 | Telemetry itself is ~4 ms away; the delay is the physical ramp |
-| `engage_grace_s` | 15.0 | Same ramp |
+| `actuator_latency_s` | 25.0 | **Measured 19.7 s** to 90 % of a +1000 W charge from idle, 11.3 s to reverse to −1000 W, sampled at 1 Hz with exclusive access |
+| `readback_latency_s` | 25.0 | Telemetry is milliseconds away; the delay is the physical ramp |
+| `engage_grace_s` | 25.0 | Same ramp |
 
 ## 4. Telemetry mapping worksheet
 
@@ -142,17 +142,24 @@ permanently-missing entities.
 
 ## 5. Control mapping worksheet
 
-Set-points go through the `huawei_solar` integration rather than raw registers.
-A forcible charge is a four-register sequence whose ordering and safety
-semantics that integration already owns; duplicating it would mean
-re-implementing a control path against undocumented registers. The practical
-consequence is a hard dependency: `huawei_solar` must stay installed and hold
-the battery device.
+Set-points take either of two paths, selected per battery.
+
+By default they go through the `huawei_solar` services. Optionally the driver
+writes the same four-register sequence itself via FC16 — same registers, same
+order — which removes the dependency for control. Verified on hardware: a no-op
+FC16 write was acknowledged through the Modbus proxy while another client held
+its own connection, and a full charge/reverse/release cycle drove the battery as
+commanded.
+
+Writing directly means reimplementing two things the services provided: the
+power is clamped to the register maximum (`huawei_solar` refuses an over-range
+value outright, aborting the control cycle), and the mode register is written
+last so a sequence failing earlier leaves the inverter untouched.
 
 | Operation | Call | Range | Persistence | Latency | Safe failure | Tested |
 |---|---|---|---|---|---|---|
-| Charge at W | `huawei_solar.forcible_charge` | 0…37046, duration 1–1440 min | volatile | 7–14 s | expires | [x] |
-| Discharge at W | `huawei_solar.forcible_discharge` | 0…37048 | volatile | 7–14 s | expires | [x] |
+| Charge at W | `forcible_charge`, or FC16 47247/47083/47246/47100 | 0…37046, duration 1–1440 min | volatile | 19.7 s | expires | [x] |
+| Discharge at W | `forcible_discharge`, or FC16 47249/47083/47246/47100 | 0…37048 | volatile | 11.3 s from charge | expires | [x] |
 | Idle | `huawei_solar.stop_forcible_charge` | — | volatile | — | already released | [x] |
 | Shutdown | same as idle, from `standby()` | — | — | — | — | [x] |
 | Max/min SOC | `number.set_value` on the cutoff entities | 90–100 % / 0–20 % | **persistent** | — | skipped when out of range | [x] |
@@ -316,7 +323,7 @@ Blocking items:
 - Freshness:       2-3 s at the register; failed blocks omit their keys
 
 Omnibattery adaptations:
-- Split transport: native Modbus for telemetry, huawei_solar services for control
+- Split transport: native Modbus for telemetry, services or direct registers for control
 - Dynamic discharge limit from the inverter's AC headroom
 - Per-string power derived from separate voltage and current registers
 - Inverter status refined by measured direction
@@ -327,7 +334,7 @@ Disabled features:
 
 Open risks:
 - One installation, one firmware pair
-- Native Modbus writes never tested; control depends on huawei_solar
+- Direct Modbus writes verified on one installation only; off by default
 - Two regulators share the meter whenever the battery is released
 
 Pending hardware tests:

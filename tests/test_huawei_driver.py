@@ -107,7 +107,10 @@ def test_capabilities():
     assert caps.has_daily_energy_counters is True
     # The command registers echo before the battery has ramped.
     assert caps.setpoint_confirm_reliable is False
-    assert caps.actuator_latency_s == 15.0
+    # Measured: 19.7 s to reach 90 % of a charge set-point from idle. The
+    # control layer judges non-delivery once this elapses, so it must not sit
+    # below the real ramp.
+    assert caps.actuator_latency_s == 25.0
 
 
 def test_power_envelope_is_clamped_to_the_hardware_ceiling():
@@ -1219,3 +1222,65 @@ def test_u32_splits_high_word_first():
     assert _u32(70000) == [1, 4464]
     # Negative power never reaches a magnitude register.
     assert _u32(-5) == [0, 0]
+
+
+@pytest.mark.asyncio
+async def test_direct_mode_needs_no_huawei_solar_battery_device():
+    """Found by the first hardware run: the guard sat before the branch.
+
+    Requiring huawei_solar's battery device in the mode whose entire purpose is
+    doing without that integration blocked every set-point with
+    no_battery_device.
+    """
+    client = _fake_client()
+    client.async_write_registers = AsyncMock(return_value=True)
+    driver = _driver(client, hass=_hass_with_services(), direct_write=True, device_id="")
+    result = await driver.apply_setpoint(500, read_back=False)
+    assert result.ok is True
+    assert result.failure_reason is None
+    assert _written(client)[0] == (47247, [0, 500])
+
+
+@pytest.mark.asyncio
+async def test_the_service_path_still_requires_the_device():
+    driver = _driver(hass=_hass_with_services(), device_id="")
+    result = await driver.apply_setpoint(500, read_back=False)
+    assert result.ok is False
+    assert result.failure_reason == "no_battery_device"
+
+
+@pytest.mark.asyncio
+async def test_direct_mode_writes_cutoffs_to_their_registers():
+    """Otherwise the device id would still be needed for the SOC window."""
+    client = _fake_client()
+    client.async_write_registers = AsyncMock(return_value=True)
+    driver = _driver(client, hass=_hass_with_services(), direct_write=True, device_id="")
+    assert await driver.set_charge_cutoff(95) is True
+    assert await driver._write_cutoff("discharging", 10) is True
+    assert _written(client) == [(47081, [950]), (47082, [100])]
+
+
+@pytest.mark.asyncio
+async def test_direct_mode_still_refuses_an_unrepresentable_cutoff():
+    client = _fake_client()
+    client.async_write_registers = AsyncMock(return_value=True)
+    driver = _driver(client, hass=_hass_with_services(), direct_write=True, device_id="")
+    # 47081 accepts 90-100 % only; a clamped write would move the backstop.
+    assert await driver.set_charge_cutoff(80) is False
+    client.async_write_registers.assert_not_awaited()
+
+
+def test_the_write_interval_sits_under_the_declared_ramp():
+    """Measured on hardware: ~20 s to land a charge set-point, 11 s to reverse.
+
+    Re-issuing before the previous command lands moves a target the battery is
+    still travelling towards; waiting past the ramp makes the loop slower than
+    the hardware needs.
+    """
+    from custom_components.omnibattery.drivers.huawei import (
+        _ACTUATOR_LATENCY_S,
+        _MIN_WRITE_INTERVAL_S,
+    )
+
+    assert _MIN_WRITE_INTERVAL_S <= _ACTUATOR_LATENCY_S
+    assert _MIN_WRITE_INTERVAL_S >= 15.0

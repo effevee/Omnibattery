@@ -77,6 +77,8 @@ _REG_FORCIBLE_TARGET_MODE = 47246      # u16, 0 = by time
 _REG_FORCIBLE_CHARGE_POWER = 47247     # u32, W
 _REG_FORCIBLE_DISCHARGE_POWER = 47249  # u32, W
 _REG_FORCIBLE_MODE = 47100             # u16, see the constants above
+_REG_CHARGE_CUTOFF = 47081             # u16, tenths of a percent
+_REG_DISCHARGE_CUTOFF = 47082          # u16, tenths of a percent
 _TARGET_MODE_TIME = 0
 
 # Working mode (register 47086), StorageWorkingModesC.
@@ -129,7 +131,10 @@ _COMMAND_DURATION_MIN = 10
 # into a 2 s write rate. Re-issue only on a meaningful change, a direction
 # change, or once the command is old enough to be worth refreshing.
 _WRITE_DEADBAND_W = 250
-_MIN_WRITE_INTERVAL_S = 15.0
+# Just under the measured ramp: by then the previous command has essentially
+# landed, and revising it earlier only moves a target the battery is still
+# travelling towards.
+_MIN_WRITE_INTERVAL_S = 20.0
 _COMMAND_REFRESH_S = 240.0
 
 # Documented ranges of the inverter's own cutoff registers. They are narrower
@@ -138,10 +143,16 @@ _COMMAND_REFRESH_S = 240.0
 _CHARGE_CUTOFF_RANGE = (90.0, 100.0)      # register 47081
 _DISCHARGE_CUTOFF_RANGE = (0.0, 20.0)     # register 47082
 
-# Measured ramp from register write to settled power (7-14 s observed); declared
-# conservatively. Telemetry itself is ~4 ms away, so the readback delay is the
-# physical ramp, not the transport.
-_ACTUATOR_LATENCY_S = 15.0
+# Measured on hardware, sampled at 1 Hz with nothing else talking to the
+# inverter: 19.7 s from register write to 90 % of a +1000 W charge set-point,
+# 11.3 s to reverse from +1000 W to -1000 W. Charging from idle is the slow
+# case, so this is declared against it, with margin. Telemetry itself is
+# milliseconds away — the delay is the physical ramp, not the transport.
+#
+# An earlier 15 s here came from coarser sampling and was optimistic. The
+# control layer starts judging non-delivery once this elapses, so a value below
+# the real ramp reports a healthy battery as unresponsive.
+_ACTUATOR_LATENCY_S = 25.0
 
 # --- register blocks (all FC03 holding, all verified on hardware) ------------
 # (start, count, scan_interval, {key: (offset, decoder, scale)})
@@ -579,11 +590,6 @@ class HuaweiSolarDriver(BatteryDriver):
             -self._capabilities.max_discharge_power_w,
             min(self._capabilities.max_charge_power_w, int(net_power_w)),
         )
-        if not self._battery_device_id:
-            return SetpointResult(
-                ok=False, net_power_w=applied, confirmed=False,
-                failure_reason="no_battery_device",
-            )
 
         if not self._should_write(applied):
             # Nothing was sent, so report what is actually in force rather than
@@ -599,6 +605,15 @@ class HuaweiSolarDriver(BatteryDriver):
 
         if self._direct_write:
             return await self._write_setpoint_registers(applied, read_back=read_back)
+
+        # Only the service path needs huawei_solar's battery device; direct
+        # writes address the inverter themselves, which is the whole point of
+        # that option.
+        if not self._battery_device_id:
+            return SetpointResult(
+                ok=False, net_power_w=applied, confirmed=False,
+                failure_reason="no_battery_device",
+            )
 
         if applied == 0:
             # Zero means "no work for you", and for a DC-coupled hybrid that has
@@ -869,6 +884,13 @@ class HuaweiSolarDriver(BatteryDriver):
     async def set_charge_cutoff(self, soc_pct: float) -> bool:
         return await self._write_cutoff("charging", soc_pct)
 
+    async def _write_cutoff_register(self, which: str, soc_pct: float) -> bool:
+        """Write a cutoff straight to its register (47081/47082, tenths of a percent)."""
+        address = _REG_CHARGE_CUTOFF if which == "charging" else _REG_DISCHARGE_CUTOFF
+        return await self._client.async_write_registers(
+            address, [int(round(float(soc_pct) * 10))]
+        )
+
     async def _write_cutoff(self, which: str, soc_pct: float) -> bool:
         """Write a cutoff through the huawei_solar number entity for it.
 
@@ -886,6 +908,8 @@ class HuaweiSolarDriver(BatteryDriver):
                 which, float(soc_pct), low, high,
             )
             return False
+        if self._direct_write:
+            return await self._write_cutoff_register(which, soc_pct)
         entity_id = self._resolve_entity(f"storage_{which}_cutoff_capacity")
         if entity_id is None:
             return False
