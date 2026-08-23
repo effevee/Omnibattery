@@ -591,6 +591,11 @@ class MarstekVenusDataUpdateCoordinator(DataUpdateCoordinator):
                 else "Venus"
             ),
         }
+        # The registry shows this on the device page, and the panel prefers it
+        # over the sensor. Drivers that cannot read one report None.
+        serial = getattr(getattr(self, "driver", None), "serial", None)
+        if serial:
+            info["serial_number"] = str(serial)
         # getattr: several tests build a stub coordinator and read this
         # property off it, so the attribute cannot be assumed present.
         if getattr(self, "mac", None):

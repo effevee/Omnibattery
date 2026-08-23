@@ -659,6 +659,14 @@ def test_device_info_reports_huawei_as_the_manufacturer():
     info = MarstekVenusDataUpdateCoordinator.battery_device_info.fget(coordinator)
     assert info["manufacturer"] == "Huawei"
     assert info["model"] == "SUN2000-8K-MAP0"
+    # No serial read yet, so the field stays out rather than going in empty.
+    assert "serial_number" not in info
+
+    coordinator.driver = SimpleNamespace(
+        model_label="SUN2000-8K-MAP0", serial="TA2470074124"
+    )
+    info = MarstekVenusDataUpdateCoordinator.battery_device_info.fget(coordinator)
+    assert info["serial_number"] == "TA2470074124"
 
 
 # ----------------------------------------------------------------------
