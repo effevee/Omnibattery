@@ -888,3 +888,87 @@ def test_cross_block_derivation_is_scheduled_exactly_once():
     assert len(carrying) == 1
     # Attached to the group holding its first source, not the one holding ac_power.
     assert "off_grid_state" in carrying[0].keys
+
+
+# ----------------------------------------------------------------------
+# string count
+#
+# SUN2000 models range from two strings to many. Register 30071 says how many
+# this one has, so a two-string inverter does not sprout entities for strings
+# it does not own — and a four-string one is not silently truncated.
+# ----------------------------------------------------------------------
+def _strings_block(count):
+    # Four strings wired, each at 100 V and 1 A -> 100 W.
+    return {**_LIVE_BLOCKS, 30071: [count], 32016: [1000, 100] * 4}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("count,expected", [(2, 2), (3, 3), (4, 4)])
+async def test_only_the_reported_strings_are_published(count, expected):
+    data = await _driver(_fake_client(_strings_block(count))).read_telemetry()
+    published = [k for k in data if k.startswith("mppt")]
+    assert sorted(published) == sorted(f"mppt{i}_power" for i in range(1, expected + 1))
+    assert data["mppt1_power"] == 100
+
+
+@pytest.mark.asyncio
+async def test_more_strings_than_the_panel_shows_are_capped():
+    """The battery panel's MPPT card stops at four.
+
+    Reading further would create entities nothing displays.
+    """
+    data = await _driver(_fake_client(_strings_block(8))).read_telemetry()
+    published = [k for k in data if k.startswith("mppt")]
+    assert len(published) == 4
+
+
+@pytest.mark.asyncio
+async def test_string_count_trims_the_entity_definitions():
+    driver = _driver(_fake_client(_strings_block(2)))
+    await driver.read_telemetry()
+    keys = {d["key"] for d in driver.sensor_definitions}
+    assert "mppt2_power" in keys
+    assert "mppt3_power" not in keys
+    assert "pv3_voltage" not in keys
+
+
+@pytest.mark.asyncio
+async def test_string_count_is_known_before_the_entities_are_built():
+    """connect() has to learn it, or setup would build the default two."""
+    driver = _driver(_fake_client(_strings_block(4)))
+    assert await driver.connect() is True
+    assert {"mppt3_power", "mppt4_power"} <= {d["key"] for d in driver.sensor_definitions}
+
+
+# ----------------------------------------------------------------------
+# firmware
+# ----------------------------------------------------------------------
+@pytest.mark.asyncio
+async def test_pack_and_inverter_firmware_are_exposed():
+    v200 = [0x5632, 0x3030] + [0] * 13  # "V200"
+    blocks = {**_LIVE_BLOCKS, 30050: v200, 38252: v200, 38294: v200}
+    data = await _driver(_fake_client(blocks)).read_telemetry()
+    assert data["inverter_software_version"] == "V200"
+    assert data["pack2_firmware_version"] == "V200"
+    assert data["pack3_firmware_version"] == "V200"
+
+
+@pytest.mark.asyncio
+async def test_a_pack_reporting_an_empty_string_is_omitted():
+    """Pack 1 answers with nothing but padding on the reference hardware."""
+    blocks = {**_LIVE_BLOCKS, 38210: [0] * 15}
+    data = await _driver(_fake_client(blocks)).read_telemetry()
+    assert "pack1_firmware_version" not in data
+
+
+@pytest.mark.asyncio
+async def test_unwired_strings_leave_nothing_in_the_cache():
+    """The block read covers four strings whatever the inverter has.
+
+    Leaving the unused pairs in the telemetry cache would put keys with no
+    entity behind them into diagnostics.
+    """
+    data = await _driver(_fake_client(_strings_block(2))).read_telemetry()
+    assert "pv2_voltage" in data
+    assert "pv3_voltage" not in data
+    assert "pv4_current" not in data

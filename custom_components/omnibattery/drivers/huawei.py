@@ -169,11 +169,17 @@ _BLOCK_PV = (32064, 18, "high", {
 _BLOCK_STATE3 = (32003, 2, "medium", {
     "off_grid_state": (0, "u32", 1),
 })
-_BLOCK_STRINGS = (32016, 4, "high", {
-    "pv1_voltage": (0, "i16", 0.1),
-    "pv1_current": (1, "i16", 0.01),
-    "pv2_voltage": (2, "i16", 0.1),
-    "pv2_current": (3, "i16", 0.01),
+# SUN2000 lays its strings out as voltage/current pairs from 32016. The map goes
+# to 24 strings; four is where the battery panel's MPPT card stops, so reading
+# further would produce entities nothing displays.
+_MAX_PV_STRINGS = 4
+_BLOCK_STRINGS = (32016, _MAX_PV_STRINGS * 2, "high", {
+    key: (offset, kind, scale)
+    for index in range(1, _MAX_PV_STRINGS + 1)
+    for key, offset, kind, scale in (
+        (f"pv{index}_voltage", (index - 1) * 2, "i16", 0.1),
+        (f"pv{index}_current", (index - 1) * 2 + 1, "i16", 0.01),
+    )
 })
 _BLOCK_CONFIG = (47081, 7, "low", {
     "charging_cutoff_capacity": (0, "u16", 0.1),
@@ -188,6 +194,9 @@ _BLOCK_FORCIBLE_POWER = (47246, 5, "medium", {
     "set_charge_power": (1, "u32", 1),
     "set_discharge_power": (3, "u32", 1),
 })
+# 30071 reports how many strings this inverter actually has, so a two-string
+# model does not sprout entities for strings it does not own.
+_BLOCK_STRING_COUNT = (30071, 1, "very_low", {"pv_string_count": (0, "u16", 1)})
 _BLOCK_RATING = (30073, 4, "very_low", {
     "inverter_rated_power": (0, "u32", 1),
     # 30075 is the ceiling the inverter actually enforces on its AC side; the
@@ -197,12 +206,19 @@ _BLOCK_RATING = (30073, 4, "very_low", {
 _BLOCK_MODEL = (30000, 15, "very_low", {"device_name": (0, "str", 15)})
 _BLOCK_SERIAL = (37052, 10, "very_low", {"serial_number": (0, "str", 10)})
 _BLOCK_STORAGE_SW = (37814, 15, "very_low", {"software_version": (0, "str", 15)})
+_BLOCK_INVERTER_SW = (30050, 15, "very_low", {"inverter_software_version": (0, "str", 15)})
+# Each pack answers on its own address run; there is no contiguous block.
+_BLOCK_PACK1_SW = (38210, 15, "very_low", {"pack1_firmware_version": (0, "str", 15)})
+_BLOCK_PACK2_SW = (38252, 15, "very_low", {"pack2_firmware_version": (0, "str", 15)})
+_BLOCK_PACK3_SW = (38294, 15, "very_low", {"pack3_firmware_version": (0, "str", 15)})
 
 _BLOCKS = (
     _BLOCK_LIVE, _BLOCK_PV, _BLOCK_STATE3, _BLOCK_STRINGS,
     _BLOCK_FORCIBLE_MODE, _BLOCK_FORCIBLE_POWER,
     _BLOCK_DAILY, _BLOCK_LIMITS, _BLOCK_TOTALS, _BLOCK_CONFIG,
-    _BLOCK_CAPACITY, _BLOCK_RATING, _BLOCK_MODEL, _BLOCK_SERIAL, _BLOCK_STORAGE_SW,
+    _BLOCK_CAPACITY, _BLOCK_STRING_COUNT, _BLOCK_RATING, _BLOCK_MODEL, _BLOCK_SERIAL,
+    _BLOCK_STORAGE_SW, _BLOCK_INVERTER_SW,
+    _BLOCK_PACK1_SW, _BLOCK_PACK2_SW, _BLOCK_PACK3_SW,
 )
 
 _DECODERS = {"u16": decode_u16, "i16": decode_i16, "u32": decode_u32, "i32": decode_i32}
@@ -213,8 +229,10 @@ _DECODERS = {"u16": decode_u16, "i16": decode_i16, "u32": decode_u32, "i32": dec
 # The first source decides which read group carries the derived key, so a
 # derivation whose inputs span two blocks still gets scheduled exactly once.
 _DERIVED_FROM = {
-    "mppt1_power": ("pv1_voltage", "pv1_current"),
-    "mppt2_power": ("pv2_voltage", "pv2_current"),
+    **{
+        f"mppt{index}_power": (f"pv{index}_voltage", f"pv{index}_current")
+        for index in range(1, _MAX_PV_STRINGS + 1)
+    },
     "ac_offgrid_power": ("off_grid_state", "ac_power"),
     "backup_function": ("off_grid_state",),
 }
@@ -232,13 +250,22 @@ SENSOR_DEFINITIONS = [
     {"key": "battery_voltage", "name": "Battery Voltage", "unit": "V", "device_class": "voltage", "state_class": "measurement", "scale": 1, "precision": 1, "scan_interval": "high", "enabled_by_default": True},
     {"key": "battery_total_energy", "name": "Battery Total Energy", "unit": "kWh", "device_class": "energy_storage", "state_class": "measurement", "scale": 1, "precision": 2, "scan_interval": "very_low", "enabled_by_default": True},
     {"key": "solar_power", "name": "Solar Power", "unit": "W", "device_class": "power", "state_class": "measurement", "scale": 1, "precision": 0, "scan_interval": "high", "enabled_by_default": True},
-    {"key": "mppt1_power", "name": "MPPT1 Power", "unit": "W", "device_class": "power", "state_class": "measurement", "scale": 1, "precision": 0, "scan_interval": "high", "enabled_by_default": True},
-    {"key": "mppt2_power", "name": "MPPT2 Power", "unit": "W", "device_class": "power", "state_class": "measurement", "scale": 1, "precision": 0, "scan_interval": "high", "enabled_by_default": True},
-    {"key": "pv1_voltage", "name": "PV1 Voltage", "unit": "V", "device_class": "voltage", "state_class": "measurement", "scale": 1, "precision": 1, "category": "diagnostic", "scan_interval": "high", "enabled_by_default": False},
-    {"key": "pv2_voltage", "name": "PV2 Voltage", "unit": "V", "device_class": "voltage", "state_class": "measurement", "scale": 1, "precision": 1, "category": "diagnostic", "scan_interval": "high", "enabled_by_default": False},
+    *[
+        row
+        for index in range(1, _MAX_PV_STRINGS + 1)
+        for row in (
+            {"key": f"mppt{index}_power", "name": f"MPPT{index} Power", "unit": "W", "device_class": "power", "state_class": "measurement", "scale": 1, "precision": 0, "scan_interval": "high", "enabled_by_default": True},
+            {"key": f"pv{index}_voltage", "name": f"PV{index} Voltage", "unit": "V", "device_class": "voltage", "state_class": "measurement", "scale": 1, "precision": 1, "category": "diagnostic", "scan_interval": "high", "enabled_by_default": False},
+        )
+    ],
     {"key": "ac_offgrid_power", "name": "Off-grid Power", "unit": "W", "device_class": "power", "state_class": "measurement", "scale": 1, "precision": 0, "scan_interval": "medium", "enabled_by_default": True},
     {"key": "backup_function", "name": "Backup Function", "data_type": "char", "icon": "mdi:home-lightning-bolt-outline", "category": "diagnostic", "scan_interval": "medium", "enabled_by_default": True},
     {"key": "software_version", "name": "Storage Firmware", "data_type": "char", "icon": "mdi:ticket-confirmation-outline", "category": "diagnostic", "scan_interval": "very_low", "enabled_by_default": True},
+    {"key": "inverter_software_version", "name": "Inverter Firmware", "data_type": "char", "icon": "mdi:ticket-confirmation-outline", "category": "diagnostic", "scan_interval": "very_low", "enabled_by_default": True},
+    *[
+        {"key": f"pack{index}_firmware_version", "name": f"Battery Pack {index} Firmware", "data_type": "char", "icon": "mdi:ticket-confirmation-outline", "category": "diagnostic", "scan_interval": "very_low", "enabled_by_default": True}
+        for index in (1, 2, 3)
+    ],
     {"key": "ac_power", "name": "Inverter Active Power", "unit": "W", "device_class": "power", "state_class": "measurement", "scale": 1, "precision": 0, "scan_interval": "high", "enabled_by_default": True},
     {"key": "internal_temperature", "name": "Battery Temperature", "unit": "°C", "device_class": "temperature", "state_class": "measurement", "scale": 1, "precision": 1, "scan_interval": "low", "enabled_by_default": True},
     {"key": "total_charging_energy", "name": "Total Charging Energy", "unit": "kWh", "device_class": "energy", "state_class": "total_increasing", "scale": 1, "precision": 2, "scan_interval": "low", "enabled_by_default": True},
@@ -278,6 +305,9 @@ class HuaweiSolarDriver(BatteryDriver):
         self._client = client if client is not None else HuaweiModbusClient(host, port, slave_id)
         self._shutting_down = False
         self._model: Optional[str] = None
+        # Refined from register 30071 on the first poll; two is the common case
+        # and keeps the entity list sane until the inverter has answered.
+        self._pv_strings = 2
         self._serial: Optional[str] = None
         # Last command actually written, so the deadband can compare against what
         # the hardware was told rather than against what it currently delivers.
@@ -341,7 +371,13 @@ class HuaweiSolarDriver(BatteryDriver):
 
     @property
     def sensor_definitions(self) -> list[dict]:
-        return SENSOR_DEFINITIONS
+        """Definitions for this unit, without the strings it does not have."""
+        unused = {
+            key
+            for index in range(self._pv_strings + 1, _MAX_PV_STRINGS + 1)
+            for key in (f"mppt{index}_power", f"pv{index}_voltage")
+        }
+        return [d for d in SENSOR_DEFINITIONS if d["key"] not in unused]
 
     @property
     def number_definitions(self) -> list[dict]:
@@ -365,7 +401,7 @@ class HuaweiSolarDriver(BatteryDriver):
 
     @property
     def all_definitions(self) -> list[dict]:
-        return SENSOR_DEFINITIONS
+        return self.sensor_definitions
 
     # --- connection lifecycle ----------------------------------------------
 
@@ -374,7 +410,9 @@ class HuaweiSolarDriver(BatteryDriver):
             return False
         # Identity is cheap and only read here; it also proves the slave id
         # points at an inverter rather than at the EMMA or a charger.
-        identity = await self.read_telemetry(["device_name", "serial_number"])
+        identity = await self.read_telemetry(
+            ["device_name", "serial_number", "pv_string_count"]
+        )
         self._model = identity.get("device_name") or self._model
         self._serial = identity.get("serial_number") or self._serial
         return True
@@ -426,9 +464,22 @@ class HuaweiSolarDriver(BatteryDriver):
 
         # Huawei reports each string as voltage and current; the panel and the
         # control layer want power, so derive it where both parts arrived.
-        for index in (1, 2):
-            volts = snapshot.get(f"pv{index}_voltage")
-            amps = snapshot.get(f"pv{index}_current")
+        # The read covers every string the map defines; only the ones this
+        # inverter actually has are published, so an unused pair does not become
+        # a permanent 0 W entity.
+        if snapshot.get("pv_string_count") is not None:
+            self._pv_strings = max(0, min(_MAX_PV_STRINGS, int(snapshot["pv_string_count"])))
+        for index in range(1, _MAX_PV_STRINGS + 1):
+            volts = snapshot.pop(f"pv{index}_voltage", None)
+            amps = snapshot.pop(f"pv{index}_current", None)
+            if index > self._pv_strings:
+                # Read as part of the block but not wired on this inverter, so
+                # it is dropped rather than left in the cache unexplained.
+                continue
+            if volts is not None:
+                snapshot[f"pv{index}_voltage"] = volts
+            if amps is not None:
+                snapshot[f"pv{index}_current"] = amps
             if volts is not None and amps is not None:
                 snapshot[f"mppt{index}_power"] = round(volts * amps)
 
