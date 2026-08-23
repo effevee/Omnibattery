@@ -1284,3 +1284,74 @@ def test_the_write_interval_sits_under_the_declared_ramp():
 
     assert _MIN_WRITE_INTERVAL_S <= _ACTUATOR_LATENCY_S
     assert _MIN_WRITE_INTERVAL_S >= 15.0
+
+
+# ----------------------------------------------------------------------
+# slave-id discovery
+#
+# The slave id is not derivable and differs between setups: on the reference
+# installation the inverter answers on 4, while 0 is the energy manager, 2 a
+# backup switch and 9 a charger. Asking a user to guess is the least friendly
+# part of the setup.
+# ----------------------------------------------------------------------
+def _bus(monkeypatch, **by_id):
+    """Fake a Modbus bus where each slave id answers with its own blocks."""
+    import custom_components.omnibattery.drivers.huawei as mod
+
+    def factory(host, port, slave_id):
+        blocks = by_id.get(str(slave_id))
+        client = _fake_client(blocks if blocks is not None else {})
+        client.unit_id = slave_id
+        return client
+
+    monkeypatch.setattr(mod, "HuaweiModbusClient", factory)
+    return mod
+
+
+@pytest.mark.asyncio
+async def test_scan_reports_every_inverter_on_the_bus(monkeypatch):
+    """Huawei inverters can be cascaded, so the scan must not stop at the first."""
+    inverter_without_battery = {30000: _LIVE_BLOCKS[30000]}
+    mod = _bus(monkeypatch, **{"1": {}, "4": _LIVE_BLOCKS, "5": inverter_without_battery})
+    monkeypatch.setattr(mod, "_SLAVE_ID_CANDIDATES", (1, 4, 5))
+
+    found = await mod.HuaweiSolarDriver.scan_slave_ids(MagicMock(), "1.2.3.4", 502)
+    assert [(sid, batt) for sid, _model, batt in found] == [(4, True), (5, False)]
+    assert found[0][1] == "SUN2000-8K-MAP0"
+
+
+@pytest.mark.asyncio
+async def test_scan_ignores_ids_that_are_not_inverters(monkeypatch):
+    """0 is the energy manager on the reference bus, 2 a backup switch."""
+    mod = _bus(monkeypatch, **{"4": _LIVE_BLOCKS})
+    monkeypatch.setattr(mod, "_SLAVE_ID_CANDIDATES", (1, 0, 2, 4))
+    found = await mod.HuaweiSolarDriver.scan_slave_ids(MagicMock(), "1.2.3.4", 502)
+    assert [sid for sid, _m, _b in found] == [4]
+
+
+@pytest.mark.asyncio
+async def test_scan_stops_when_the_address_itself_is_unreachable(monkeypatch):
+    """No point walking nine ids when nothing is listening at all."""
+    import custom_components.omnibattery.drivers.huawei as mod
+
+    tried = []
+
+    def factory(host, port, slave_id):
+        tried.append(slave_id)
+        client = _fake_client({})
+        client.async_connect = AsyncMock(return_value=False)
+        return client
+
+    monkeypatch.setattr(mod, "HuaweiModbusClient", factory)
+    monkeypatch.setattr(mod, "_SLAVE_ID_CANDIDATES", (1, 2, 3, 4))
+    assert await mod.HuaweiSolarDriver.scan_slave_ids(MagicMock(), "1.2.3.4", 502) == []
+    assert tried == [1]
+
+
+def test_the_candidate_list_covers_the_known_layouts():
+    from custom_components.omnibattery.drivers.huawei import _SLAVE_ID_CANDIDATES
+
+    # 1 is the factory default for a direct connection; 4 is where the
+    # reference installation's inverter sits behind its energy manager.
+    assert _SLAVE_ID_CANDIDATES[0] == 1
+    assert 4 in _SLAVE_ID_CANDIDATES

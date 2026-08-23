@@ -81,6 +81,12 @@ _REG_CHARGE_CUTOFF = 47081             # u16, tenths of a percent
 _REG_DISCHARGE_CUTOFF = 47082          # u16, tenths of a percent
 _TARGET_MODE_TIME = 0
 
+# Slave ids worth trying when scanning. 1 is the factory default for a direct
+# connection; the rest are what dongles and energy managers hand out. Kept short
+# because each one costs a connection, and the inverter needs 1.5 s of silence
+# after every handshake.
+_SLAVE_ID_CANDIDATES = (1, 0, 2, 3, 4, 5, 6, 11, 16)
+
 # Working mode (register 47086), StorageWorkingModesC.
 _WORKING_MODE_LABELS = {
     0: "Adaptive",
@@ -979,6 +985,41 @@ class HuaweiSolarDriver(BatteryDriver):
         return None
 
     # --- config-flow probe ---------------------------------------------------
+
+    @classmethod
+    async def scan_slave_ids(
+        cls, hass: HomeAssistant, host: str, port: int = 502
+    ) -> list[tuple[int, str, bool]]:
+        """Find inverters on the bus and say which carry a battery.
+
+        The slave id is not derivable and not the same everywhere: on the
+        reference installation the inverter answers on 4 while 0 is the energy
+        manager, 2 a backup switch and 9 a charger. Asking a user to guess that
+        is the least friendly part of the setup, so the flow offers to look.
+
+        Returns ``(slave_id, model, has_battery)`` for every id that identified
+        itself, so the caller can tell "no inverter here" from "an inverter with
+        no battery attached".
+        """
+        found: list[tuple[int, str, bool]] = []
+        for slave_id in _SLAVE_ID_CANDIDATES:
+            driver = cls(hass, host, port=port, slave_id=slave_id)
+            try:
+                if not await driver.connect():
+                    # The address itself is unreachable; no point trying the rest.
+                    break
+                data = await driver.read_telemetry(["device_name", "battery_soc"])
+            except Exception:  # a dead id must not end the scan
+                continue
+            finally:
+                await driver.close()
+            model = data.get("device_name")
+            if model and model.upper().startswith("SUN2000"):
+                # No early exit: Huawei inverters can be cascaded, so several
+                # may answer on one bus, each with its own battery. The caller
+                # needs all of them to offer a choice.
+                found.append((slave_id, model, "battery_soc" in data))
+        return found
 
     @classmethod
     async def probe(
