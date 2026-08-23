@@ -346,11 +346,27 @@ async def test_small_change_inside_the_deadband_is_not_rewritten():
 
 
 @pytest.mark.asyncio
-async def test_direction_change_always_writes_however_small():
+async def test_direction_change_skips_the_deadband_but_not_the_ramp():
+    """A reversal is material, but it still waits for the previous one to land.
+
+    Live logs showed the control loop flip-flopping between a held zero and a
+    discharge every few seconds while the battery was still ramping. Letting
+    each reversal through because the sign changed meant a new forced command
+    every ~15 s at swings up to 4 kW, and the inverter answered by derating its
+    PV to almost nothing.
+    """
     hass = _hass_with_services()
     driver = _driver(hass=hass)
     await driver.apply_setpoint(10, read_back=False)
     hass.services.async_call.reset_mock()
+
+    # Mid-ramp reversal: suppressed.
+    await driver.apply_setpoint(-10, read_back=False)
+    hass.services.async_call.assert_not_awaited()
+
+    # Once the ramp has had its time, the reversal goes through — and a tiny
+    # one at that, which the deadband alone would have rejected.
+    driver._last_write_monotonic -= 60.0
     await driver.apply_setpoint(-10, read_back=False)
     _domain, service, _data = hass.services.async_call.await_args.args[:3]
     assert service == "forcible_discharge"
@@ -373,6 +389,7 @@ async def test_leaving_a_held_zero_is_written_immediately():
     hass = _hass_with_services()
     driver = _driver(hass=hass)
     await driver.apply_setpoint(0, read_back=False)
+    driver._last_write_monotonic -= 60.0
     hass.services.async_call.reset_mock()
     # Idle -> charging is a change of state, not a change of magnitude.
     await driver.apply_setpoint(3000, read_back=False)

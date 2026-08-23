@@ -603,14 +603,19 @@ class HuaweiSolarDriver(BatteryDriver):
         """Whether this set-point is worth four Modbus writes and a 10 s ramp."""
         if self._last_written_w is None:
             return True
-        # A change of direction — including leaving or entering a held zero — is
-        # the most material change there is, and the control layer has already
-        # applied its own hysteresis before asking. Deferring it would keep the
-        # battery pushing the wrong way across the meter for the whole interval,
-        # so this is checked before any rate limit.
-        if self._direction(applied) != self._direction(self._last_written_w):
-            return True
         since = asyncio.get_running_loop().time() - self._last_write_monotonic
+        # A change of direction is the most material change there is — but only
+        # once the previous command has actually landed. This battery needs
+        # ~15 s to reach a target, and a 2 s control loop that sees no response
+        # yet will keep revising its request; letting every one of those through
+        # because the sign flipped means a new forced command every few seconds,
+        # which the inverter answers by derating its PV. So a reversal still
+        # skips the deadband, but never the ramp.
+        if (
+            self._direction(applied) != self._direction(self._last_written_w)
+            and since >= _MIN_WRITE_INTERVAL_S
+        ):
+            return True
         # Refresh before the command's own duration runs out, so the battery
         # never silently falls back to inverter control mid-regulation.
         if since >= _COMMAND_REFRESH_S:
