@@ -123,6 +123,7 @@ All registers FC03 holding, unit id 4, verified against the corresponding
 | `mppt1..4_power` | O | 32016+2n | i16 ×2 | V × I → W | high | D | [x] |
 | `inverter_ac_power` | O | 32080 | i32 | → W | high | N | [x] |
 | `inverter_max_power` | R | 30075 | u32 | → W | very_low | N | [x] |
+| `grid_power` | O | 31657 | i32 | → W, +import/−export | high | N | [x] |
 | `off_grid_state` | O | 32003 | u32 | bitfield | medium | N | [x] |
 | `ac_offgrid_power` | O | — | — | derived (§13.5) | medium | D | [x] |
 | `device_name` | O | 30000 | str(15) | inverter model | very_low | N | [x] |
@@ -249,6 +250,22 @@ The Modbus endpoint can be a fourth device again: on the reference installation
 the address answers as `SmartHEMS` (an EMMA-A02, serial NS24A1211290) on slave 0,
 with the inverter behind it on slave 4. That is the gateway, not the battery, and
 it appears nowhere in the telemetry.
+
+**An EMMA carries the grid meter, and it is worth reading here.** Register
+31657 on the EMMA's own unit id is its built-in meter's active power, already in
+the sign convention Omnibattery uses. It answers live on every request — 25 ms
+per read, 20 of 20 on the reference installation — where `huawei_solar`
+publishes the same figure on a 30 s coordinator, far too slow to control
+against. An installation with an EMMA is metered by it and may well have no
+other meter, so the setup looks for one by model name (`SmartHEMS`) and wires it
+up without asking. No EMMA means no entity, rather than one that reads unknown.
+
+Its neighbour `load_power` (30356) is **not** usable as a house-load figure,
+despite the name. The EMMA derives it from its own PV, battery and meter, so
+storage it does not control is invisible to it: while a second battery covered
+the whole house, 30356 read 0 W against a real 660 W. Feeding that back into a
+controller would oscillate — the value collapses precisely when the controller
+acts on it.
 
 **The battery's reported power caps are a starting value, not a ceiling.**
 37046/37048 say what the battery permits right now, and that moves with the pack
