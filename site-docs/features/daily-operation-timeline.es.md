@@ -17,7 +17,8 @@ superpuestas muestran energía solar y del hogar en `kWh/15 min`.
 - Las curvas continuas son medidas y las discontinuas son previstas. Solar y
   consumo usan el eje izquierdo en `kWh/15 min`; el SOC total usa el eje derecho
   de `0–100 %`. El tooltip muestra el SOC observado o proyectado del intervalo e
-  identifica la forma solar aprendida o el fallback sinusoidal activo.
+  identifica la forma solar aprendida o el fallback sinusoidal activo. El diario
+  conserva el SOC observado y el panel completa el día desde Recorder al abrirse.
 
 Los colores de acción representan flujos, no permisos: verde significa energía
 solar que ha cargado la batería o que el plan futuro le asigna, morado una
@@ -33,9 +34,9 @@ cambió de sentido dentro del cuarto de hora, se muestra la acción observada
 durante más tiempo. El intervalo actual nunca presenta como observada una acción
 que solo está proyectada para sus minutos restantes. «Carga hasta el setpoint»
 es contexto, no otro color. El Retraso de
-Carga usa un reloj y una hora estimada de desbloqueo. El tooltip de una franja
-de carga muestra también la energía que ha entrado realmente en la batería o,
-para una franja futura, la energía total proyectada desde solar y red.
+Carga usa un reloj y una hora estimada de desbloqueo. El tooltip muestra también
+la energía que ha entrado o salido realmente de la batería durante una franja
+observada. Para una franja futura muestra la carga o descarga proyectada.
 
 ## Contrato de la entidad
 

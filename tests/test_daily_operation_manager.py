@@ -4,13 +4,17 @@ from __future__ import annotations
 import asyncio
 import copy
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
 import pytest
 
 from custom_components.omnibattery import ChargeDischargeController
+from custom_components.omnibattery.pricing.daily_timeline import (
+    BatteryProjectionInput,
+    ProjectionIntervalInput,
+)
 from custom_components.omnibattery.tracking.daily_timeline import (
     ACTION_DISCHARGE,
     ACTION_GRID_CHARGE,
@@ -218,6 +222,72 @@ def test_projection_keeps_manual_battery_as_fixed_soc_capacity():
     assert inputs[1].stored_kwh == pytest.approx(4)
 
 
+def test_projection_starts_from_measured_soc_now_instead_of_replaying_the_day():
+    now = datetime(2026, 8, 23, 12, 7, tzinfo=MADRID)
+    midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    plan = SimpleNamespace(
+        allocations=[],
+        intervals=[
+            ProjectionIntervalInput(
+                start=midnight,
+                end=midnight + timedelta(minutes=15),
+                consumption_kwh=0,
+                solar_kwh=10,
+            ),
+            ProjectionIntervalInput(
+                start=now.replace(minute=0),
+                end=now.replace(minute=0) + timedelta(minutes=15),
+                consumption_kwh=0,
+                solar_kwh=1,
+            ),
+            ProjectionIntervalInput(
+                start=now.replace(minute=15),
+                end=now.replace(minute=15) + timedelta(minutes=15),
+                consumption_kwh=0,
+                solar_kwh=0,
+            ),
+        ],
+    )
+    controller = SimpleNamespace(
+        _daily_operation_mode=lambda: "normal",
+        _daily_operation_float=ChargeDischargeController._daily_operation_float,
+        _daily_operation_battery_inputs=lambda: [
+            BatteryProjectionInput(
+                key="battery-a",
+                stored_kwh=6.4,
+                capacity_kwh=10,
+                min_soc_pct=10,
+                max_soc_pct=100,
+                charge_power_w=10_000,
+                discharge_power_w=10_000,
+            )
+        ],
+        _consumption_tracker=object(),
+        _pricing_mgr=SimpleNamespace(
+            _build_chronological_plan=lambda **_kwargs: plan
+        ),
+        _last_decision_data={},
+        _last_chronological_diagnostics={},
+        _dynamic_pricing_schedule=None,
+        predictive_charging_enabled=False,
+        charge_delay_enabled=False,
+        _delay_soc_setpoint_enabled=False,
+        _delay_setpoint_reached=False,
+        _charge_delay_unlocked=False,
+    )
+
+    result = ChargeDischargeController._daily_operation_build_projection(
+        controller, now
+    )
+
+    assert result is not None
+    intervals = result["intervals"]
+    assert [item["index"] for item in intervals] == [48, 49]
+    assert intervals[0]["solar_kwh"] == pytest.approx(8 / 15)
+    assert intervals[0]["soc_end_pct"] == pytest.approx(68.5333333333)
+    assert intervals[1]["soc_end_pct"] == pytest.approx(68.5333333333)
+
+
 @pytest.mark.asyncio
 async def test_fake_persistence_restores_current_day_and_actions():
     clock = MutableClock(datetime(2026, 8, 23, 10, 7, tzinfo=MADRID))
@@ -320,6 +390,31 @@ def test_future_charge_energy_combines_solar_and_grid_flows():
     )
     assert snapshot["operations"]["planned_soc_pct"][41] == pytest.approx(72.5)
     assert snapshot["operations"]["soc_pct"][41] == pytest.approx(72.5)
+
+
+def test_actual_charge_and_discharge_energy_are_accumulated_separately():
+    clock = MutableClock(datetime(2026, 8, 23, 10, 7, tzinfo=MADRID))
+    manager = _manager(clock)
+    manager.record_runtime_decision(
+        action_mask=ACTION_SOLAR_CHARGE | ACTION_DISCHARGE,
+        charge_power_w=1200,
+        discharge_power_w=600,
+        duration_s=300,
+        simultaneous=True,
+    )
+
+    snapshot = manager.build_public_snapshot()
+
+    assert snapshot["operations"]["actual_charge_to_battery_kwh"][40] == pytest.approx(
+        0.1
+    )
+    assert snapshot["operations"]["actual_discharge_from_battery_kwh"][40] == pytest.approx(
+        0.05
+    )
+    assert snapshot["operations"]["charge_to_battery_kwh"][40] == pytest.approx(0.1)
+    assert snapshot["operations"]["discharge_from_battery_kwh"][40] == pytest.approx(
+        0.05
+    )
 
 
 @pytest.mark.asyncio

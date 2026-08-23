@@ -1772,6 +1772,25 @@ def _daily_operation_timeline_attributes(controller: object) -> dict[str, object
                 _timeline_energy,
                 None,
             ),
+            "discharge_from_battery_kwh": _timeline_array(
+                _timeline_find(source, ("discharge_from_battery_kwh",), operations),
+                _timeline_energy,
+                None,
+            ),
+            "actual_discharge_from_battery_kwh": _timeline_array(
+                _timeline_find(
+                    source, ("actual_discharge_from_battery_kwh",), operations
+                ),
+                _timeline_energy,
+                None,
+            ),
+            "planned_discharge_from_battery_kwh": _timeline_array(
+                _timeline_find(
+                    source, ("planned_discharge_from_battery_kwh",), operations
+                ),
+                _timeline_energy,
+                None,
+            ),
             "soc_pct": _timeline_array(
                 _timeline_find(source, ("soc_pct",), operations),
                 _timeline_soc,

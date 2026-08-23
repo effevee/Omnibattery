@@ -16,7 +16,8 @@ solar and household energy in `kWh/15 min`.
 - Solid curves are measured; dashed curves are forecast. Solar and consumption
   use the left `kWh/15 min` axis; total SOC uses the right `0–100%` axis. The
   tooltip shows the interval's observed or projected SOC and names the learned
-  solar shape or active sinusoidal fallback.
+  solar shape or active sinusoidal fallback. Observed SOC is retained by the
+  daily diary and backfilled from Home Assistant Recorder when the panel opens.
 
 Action colors describe flows, not permissions: green means solar energy that
 has charged the battery or is allocated to it by the future plan, purple means
@@ -32,9 +33,9 @@ battery changed direction within the quarter-hour, the action observed for the
 longest time is shown. The current interval never presents an action projected
 for its remaining minutes as observed. “Charging to setpoint” is context, not
 another color. Charge Delay uses
-a clock marker and an estimated unlock time. A charging interval's tooltip also
-shows the energy that actually entered the battery or, for a future interval,
-the total energy projected from solar and grid.
+a clock marker and an estimated unlock time. The tooltip also shows the energy
+that actually entered or left the battery during an observed interval. For a
+future interval it shows the corresponding projected charge or discharge.
 
 ## Entity contract
 

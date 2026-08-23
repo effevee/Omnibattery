@@ -660,6 +660,7 @@ class _TimelineCell:
     actual_discharge_power_w: float | None = None
     planned_discharge_power_w: float | None = None
     actual_charge_to_battery_kwh: float | None = None
+    actual_discharge_from_battery_kwh: float | None = None
     actual_soc_pct: float | None = None
     planned_solar_to_battery_kwh: float | None = None
     planned_grid_to_battery_kwh: float | None = None
@@ -711,6 +712,7 @@ class _TimelineCell:
             "actual_discharge_power_w": self.actual_discharge_power_w,
             "planned_discharge_power_w": self.planned_discharge_power_w,
             "actual_charge_to_battery_kwh": self.actual_charge_to_battery_kwh,
+            "actual_discharge_from_battery_kwh": self.actual_discharge_from_battery_kwh,
             "actual_soc_pct": self.actual_soc_pct,
             "planned_solar_to_battery_kwh": self.planned_solar_to_battery_kwh,
             "planned_grid_to_battery_kwh": self.planned_grid_to_battery_kwh,
@@ -1654,6 +1656,17 @@ class DailyOperationTimelineManager:
                 (cell.actual_charge_to_battery_kwh or 0.0)
                 + charge_power * duration / 3_600_000.0,
             )
+        if (
+            duration > 0.0
+            and discharge_power is not None
+            and discharge_power > POWER_DEADBAND_W
+            and parsed_action_mask & ACTION_DISCHARGE
+        ):
+            cell.actual_discharge_from_battery_kwh = min(
+                1_000_000.0,
+                (cell.actual_discharge_from_battery_kwh or 0.0)
+                + discharge_power * duration / 3_600_000.0,
+            )
         delay_value = kwargs.get("delay_until", mapping.get("delay_until"))
         if delay_value is not None:
             cell.actual_delay_until = self._format_delay_until(delay_value, event_time)
@@ -2145,6 +2158,7 @@ class DailyOperationTimelineManager:
             "actual_discharge_power_w",
             "planned_discharge_power_w",
             "actual_charge_to_battery_kwh",
+            "actual_discharge_from_battery_kwh",
             "actual_soc_pct",
         ):
             parsed = _finite_non_negative(raw.get(name))
@@ -2581,6 +2595,15 @@ class DailyOperationTimelineManager:
             else planned_charge_to_battery[index]
             for index, cell in enumerate(self._cells)
         ]
+        planned_discharge_from_battery = [
+            cell.planned_battery_to_home_kwh for cell in self._cells
+        ]
+        visible_discharge_from_battery = [
+            cell.actual_discharge_from_battery_kwh
+            if index <= self._current_index
+            else planned_discharge_from_battery[index]
+            for index, cell in enumerate(self._cells)
+        ]
         actual_soc_pct = [cell.actual_soc_pct for cell in self._cells]
         planned_soc_pct = [cell.planned_soc_end_pct for cell in self._cells]
         visible_soc_pct = [
@@ -2637,6 +2660,11 @@ class DailyOperationTimelineManager:
                     cell.actual_charge_to_battery_kwh for cell in self._cells
                 ],
                 "planned_charge_to_battery_kwh": planned_charge_to_battery,
+                "discharge_from_battery_kwh": visible_discharge_from_battery,
+                "actual_discharge_from_battery_kwh": [
+                    cell.actual_discharge_from_battery_kwh for cell in self._cells
+                ],
+                "planned_discharge_from_battery_kwh": planned_discharge_from_battery,
                 "soc_pct": visible_soc_pct,
                 "actual_soc_pct": actual_soc_pct,
                 "planned_soc_pct": planned_soc_pct,

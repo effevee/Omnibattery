@@ -66,6 +66,9 @@ def _snapshot() -> dict:
             "charge_to_battery_kwh": [0.1] * 96,
             "actual_charge_to_battery_kwh": [0.05] * 96,
             "planned_charge_to_battery_kwh": [0.1] * 96,
+            "discharge_from_battery_kwh": [0.04] * 96,
+            "actual_discharge_from_battery_kwh": [0.03] * 96,
+            "planned_discharge_from_battery_kwh": [0.04] * 96,
             "soc_pct": [50.5] * 96,
             "actual_soc_pct": [49.5] * 96,
             "planned_soc_pct": [51.5] * 96,
@@ -132,6 +135,8 @@ def test_timeline_entity_publishes_fixed_96_element_json_safe_dto():
     assert attrs["operations"]["actual_soc_pct"][0] == 49.5
     assert attrs["operations"]["planned_soc_pct"][0] == 51.5
     assert attrs["operations"]["charge_to_battery_kwh"][0] == 0.1
+    assert attrs["operations"]["actual_discharge_from_battery_kwh"][0] == 0.03
+    assert attrs["operations"]["discharge_from_battery_kwh"][0] == 0.04
     json.dumps(attrs, allow_nan=False)
 
 

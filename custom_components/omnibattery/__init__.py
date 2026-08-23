@@ -1439,6 +1439,36 @@ class ChargeDischargeController:
         if not plan_intervals:
             return None
 
+        # The battery inputs describe the measured state *now*. Replaying the
+        # plan from midnight with that state would apply all past solar and
+        # charging a second time, producing an inflated SOC at the current
+        # boundary. Keep only the remaining part of the current quarter and
+        # future quarters, scaling the current quarter's energy accordingly.
+        remaining_intervals: list[tuple[Any, datetime, float]] = []
+        for interval in plan_intervals:
+            start = getattr(interval, "start", None)
+            end = getattr(interval, "end", None)
+            if not isinstance(start, datetime) or not isinstance(end, datetime):
+                continue
+            try:
+                if end <= now:
+                    continue
+                duration_s = (end - start).total_seconds()
+                remaining_start = max(start, now)
+                remaining_ratio = (
+                    max(0.0, (end - remaining_start).total_seconds()) / duration_s
+                    if duration_s > 0.0
+                    else 0.0
+                )
+            except (TypeError, ValueError):
+                continue
+            if remaining_ratio > 0.0:
+                remaining_intervals.append(
+                    (interval, remaining_start, min(1.0, remaining_ratio))
+                )
+        if not remaining_intervals:
+            return None
+
         setpoint_enabled = bool(getattr(self, "_delay_soc_setpoint_enabled", False))
         setpoint_reached = bool(getattr(self, "_delay_setpoint_reached", False))
         delay_active = bool(
@@ -1457,7 +1487,7 @@ class ChargeDischargeController:
         )
         context_masks = []
         grid_decisions = []
-        for interval in plan_intervals:
+        for interval, remaining_start, _remaining_ratio in remaining_intervals:
             context = mode_context if getattr(self, "predictive_charging_enabled", False) else 0
             if delay_active:
                 context |= PROJECTION_CONTEXT_CHARGE_DELAY
@@ -1465,7 +1495,7 @@ class ChargeDischargeController:
                 context |= PROJECTION_CONTEXT_SETPOINT
             scheduled = any(
                 allocation.slot.start < interval.end
-                and allocation.slot.end > interval.start
+                and allocation.slot.end > remaining_start
                 for allocation in allocations
             )
             if scheduled:
@@ -1482,16 +1512,18 @@ class ChargeDischargeController:
 
         projection_inputs = [
             ProjectionIntervalInput(
-                start=interval.start,
+                start=remaining_start,
                 end=interval.end,
-                consumption_kwh=interval.consumption_kwh,
-                solar_kwh=interval.solar_kwh,
+                consumption_kwh=interval.consumption_kwh * remaining_ratio,
+                solar_kwh=interval.solar_kwh * remaining_ratio,
                 state="future",
                 context_mask=context_masks[index],
                 grid_charge_decision=grid_decisions[index],
                 projected=True,
             )
-            for index, interval in enumerate(plan_intervals)
+            for index, (interval, remaining_start, remaining_ratio) in enumerate(
+                remaining_intervals
+            )
         ]
         result = simulate_battery_projection(
             projection_inputs,
