@@ -3308,8 +3308,8 @@ class MarstekVenusPanel extends HTMLElement {
     const coverageAt = this._dailyOperationValueAt(snapshot.solarCoverage, index);
     const currentSolar = this._dailyOperationValueAt(actual, index);
     // A provider curve can remain optimistic after the live PV capture has
-    // already reached zero. Require two covered zero intervals and prior
-    // production so a single cloudy sample does not erase a genuine forecast.
+    // already reached zero. Require one covered zero interval and prior
+    // production so an unobserved cell does not erase a genuine forecast.
     if (currentSolar == null || currentSolar > 0.000001 || coverageAt == null || coverageAt < 60) {
       return plotted;
     }
@@ -3323,7 +3323,7 @@ class MarstekVenusPanel extends HTMLElement {
     const priorProduction = actual
       .slice(0, index)
       .some((value) => (this._dailyOperationNumber(value) || 0) > 0.000001);
-    if (zeroIntervals < 2 || !priorProduction) return plotted;
+    if (zeroIntervals < 1 || !priorProduction) return plotted;
 
     // Keep the optional next-day extension intact; only today's impossible
     // post-sunset forecast is removed from the graph.
