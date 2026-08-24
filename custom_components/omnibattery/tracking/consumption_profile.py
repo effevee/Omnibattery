@@ -35,10 +35,11 @@ MIN_INTERVAL_COVERAGE_S = INTERVAL_SECONDS * 0.75
 MAX_SAMPLE_GAP_SECONDS = 5 * 60
 PROFILE_STORE_VERSION = 1
 PROFILE_STORE_KEY = "consumption_profile"
-# Raw days captured before the balance-validation guard may contain false
-# near-zero energy during battery charging.  Rebuild those days from Recorder
-# after upgrading instead of allowing contaminated intervals to survive.
-PROFILE_CAPTURE_VERSION = 2
+# Increment whenever persisted raw-day semantics change. Rebuilding from
+# Recorder prevents previously contaminated intervals—such as profiles whose
+# external-load backfill used the wrong energy conversion—from surviving an
+# upgrade.
+PROFILE_CAPTURE_VERSION = 3
 # Temporary household-shape fallback used until the learned profile is mature.
 # Values are relative hourly demand, not kWh.  The six quiet overnight hours
 # stay at the lowest level, breakfast has a small lift, daytime demand rises
@@ -468,6 +469,34 @@ def _series_to_bins(states: list[Any], tz: Any = None) -> dict[date, ProfileDay]
     return result
 
 
+def _apply_external_load_to_day(
+    adjusted: ProfileDay,
+    device_day: ProfileDay,
+    factor: float,
+) -> None:
+    """Apply one external load to a home profile day in place.
+
+    ``ProfileDay.energy_kwh`` stores energy, not power.  Normalize the device
+    energy to the home interval's covered duration by scaling the two coverage
+    values directly.  ``factor`` is negative for excluded loads and positive
+    for additional loads.
+    """
+    for index in range(INTERVAL_COUNT):
+        device_coverage = device_day.coverage_s[index]
+        home_coverage = adjusted.coverage_s[index]
+        if device_coverage <= 0.0 or home_coverage <= 0.0:
+            continue
+        matched_device_energy = (
+            device_day.energy_kwh[index]
+            * home_coverage
+            / device_coverage
+        )
+        adjusted.energy_kwh[index] = max(
+            0.0,
+            adjusted.energy_kwh[index] + factor * matched_device_energy,
+        )
+
+
 class ConsumptionProfileTracker:
     """Capture and query the 28-day local quarter-hour profile."""
 
@@ -651,11 +680,11 @@ class ConsumptionProfileTracker:
             self._days = {}
             self._invalidated = True
             self._active_fingerprint = expected_fingerprint
-            self._last_error = "profile invalidated after balance validation change"
+            self._last_error = "profile invalidated after capture contract change"
             self._loaded = True
             _LOGGER.info(
-                "Consumption profile: discarded raw days after balance "
-                "validation change; Recorder backfill will rebuild them"
+                "Consumption profile: discarded raw days after capture contract "
+                "change; Recorder backfill will rebuild them"
             )
             await self.async_save()
             return False
@@ -1473,17 +1502,7 @@ class ConsumptionProfileTracker:
                     sign = -exclusion_factor
                 else:
                     sign = 1.0
-                for index in range(INTERVAL_COUNT):
-                    device_coverage = device_day.coverage_s[index]
-                    home_coverage = adjusted.coverage_s[index]
-                    if device_coverage <= 0.0 or home_coverage <= 0.0:
-                        continue
-                    device_power = device_day.energy_kwh[index] / device_coverage
-                    adjusted.energy_kwh[index] = max(
-                        0.0,
-                        adjusted.energy_kwh[index]
-                        + sign * device_power * home_coverage / 3600.0,
-                    )
+                _apply_external_load_to_day(adjusted, device_day, sign)
             before = self._days.get(local_date)
             for index in range(INTERVAL_COUNT):
                 if (

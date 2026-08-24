@@ -14,6 +14,7 @@ from custom_components.omnibattery.tracking.consumption_profile import (
     MIN_INTERVAL_COVERAGE_S,
     ConsumptionProfileTracker,
     ProfileDay,
+    _apply_external_load_to_day,
     _series_to_bins,
     adjust_remaining_fallback_energy,
     fallback_daily_intervals,
@@ -150,6 +151,30 @@ def test_recorder_utc_timestamps_are_binned_in_configured_local_timezone():
     assert list(days) == [date(2026, 8, 11)]
     assert days[date(2026, 8, 11)].coverage_s[3] == pytest.approx(60)
     assert days[date(2026, 8, 11)].coverage_s[4] == pytest.approx(60)
+
+
+@pytest.mark.parametrize(
+    ("factor", "expected_kwh"),
+    [
+        (-1.0, 0.25),
+        (-0.6, 0.35),
+        (1.0, 0.75),
+    ],
+)
+def test_recorder_external_load_adjustment_preserves_energy_units(
+    factor,
+    expected_kwh,
+):
+    """Backfill must subtract/add kWh, not treat kWh/s as kW."""
+    local_date = date(2026, 8, 10)
+    home = _single_interval_day(local_date, 0.5)
+    device = ProfileDay(local_date)
+    device.energy_kwh[40] = 0.125
+    device.coverage_s[40] = INTERVAL_SECONDS / 2
+
+    _apply_external_load_to_day(home, device, factor)
+
+    assert home.energy_kwh[40] == pytest.approx(expected_kwh)
 
 
 def test_capture_breaks_continuity_after_unknown_and_long_gap():
