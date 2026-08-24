@@ -427,6 +427,13 @@ def _make_engine_out_of_window(*, grid_charging_active, last_evaluation_soc):
         hass=SimpleNamespace(services=SimpleNamespace(async_call=_async_call)),
         controller=controller,
     )
+
+    async def _skip_preview(*, now):
+        return None
+
+    # These tests isolate slot-exit cleanup; preview evaluation has its own
+    # coverage in test_chronological_pricing.py.
+    engine._ensure_time_slot_chronological_preview = _skip_preview
     return engine, controller, dismissed
 
 

@@ -2536,14 +2536,19 @@ class PricingManager:
     async def _ensure_time_slot_chronological_preview(
         self, *, now: datetime
     ) -> None:
-        """Build today's fixed-window plan before the first window starts."""
+        """Build today's Time Slot balance and any remaining-window plan."""
         controller = self._controller
         if getattr(controller, "_time_slot_chronological_preview_date", None) == now.date():
             return
         evaluation_start = now.replace(
             hour=0, minute=5, second=0, microsecond=0
         )
-        if now < evaluation_start or not self._time_slot_price_slots(now):
+        # The balance diagnostics remain useful after the final configured
+        # window.  In particular, an integration reload must not leave the
+        # predictive status entity with only timeline fields and ``unknown``
+        # SOC/consumption/deficit attributes until tomorrow.  The planner below
+        # already treats an empty candidate list as a balance-only evaluation.
+        if now < evaluation_start:
             return
         forecast_configured = bool(
             get_configured_solar_forecast_sensor(controller, "remaining")

@@ -241,3 +241,38 @@ def test_time_slot_preview_is_built_before_the_first_window():
     assert controller._time_slot_chronological_preview_date == BASE.date()
     assert controller._last_decision_data["deadline_shortfall_kwh"] == 0.4
     assert len(notifications) == 1
+
+
+def test_time_slot_preview_keeps_balance_diagnostics_after_last_window():
+    now = BASE + timedelta(hours=2)
+    controller = SimpleNamespace(
+        charging_time_slots=[
+            {"start_time": "00:30", "end_time": "01:00", "days": ["tue"]},
+        ],
+        _time_slot_chronological_preview_date=None,
+        _active_time_slot_quota_kwh=None,
+        solar_forecast_remaining_sensor=None,
+        solar_forecast_sensor=None,
+        _last_decision_data=None,
+    )
+    manager = PricingManager(SimpleNamespace(), controller)
+    evaluations = []
+
+    async def decision():
+        evaluations.append(True)
+        return {
+            "should_charge": False,
+            "stored_energy_kwh": 4.2,
+            "avg_consumption_kwh": 7.1,
+            "energy_deficit_kwh": 0.0,
+        }
+
+    manager._current_horizon_grid_charging_decision = decision
+
+    asyncio.run(manager._ensure_time_slot_chronological_preview(now=now))
+
+    assert evaluations == [True]
+    assert controller._time_slot_chronological_preview_date == BASE.date()
+    assert controller._last_decision_data["stored_energy_kwh"] == pytest.approx(4.2)
+    assert controller._last_decision_data["avg_consumption_kwh"] == pytest.approx(7.1)
+    assert controller._last_decision_data["energy_deficit_kwh"] == pytest.approx(0.0)
