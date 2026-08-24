@@ -30,6 +30,10 @@
 
 const FALLBACK_DOMAIN = "omnibattery";
 const FALLBACK_TITLE = "Omnibattery";
+const DAILY_OPERATION_BASE_INTERVALS = 96;
+const DAILY_OPERATION_EXTENSION_INTERVALS = 48;
+const DAILY_OPERATION_TOTAL_INTERVALS = DAILY_OPERATION_BASE_INTERVALS + DAILY_OPERATION_EXTENSION_INTERVALS;
+const DAILY_OPERATION_TOTAL_HOURS = DAILY_OPERATION_TOTAL_INTERVALS / 4;
 
 // --- i18n ------------------------------------------------------------------
 // All user-facing panel strings, keyed by a stable id and resolved at render
@@ -2346,13 +2350,13 @@ class MarstekVenusPanel extends HTMLElement {
 
     const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
     svg.classList.add("daily-op-svg");
-    svg.setAttribute("viewBox", "0 0 960 190");
+    svg.setAttribute("viewBox", `0 0 ${DAILY_OPERATION_TOTAL_INTERVALS * 10} 190`);
     svg.setAttribute("preserveAspectRatio", "none");
     svg.setAttribute("aria-hidden", "true");
     svg.innerHTML =
       `<g class="daily-op-grid-lines">` +
-      Array.from({ length: 6 }, (_, i) => `<line x1="0" y1="${32 + i * 26.4}" x2="960" y2="${32 + i * 26.4}"/>`).join("") +
-      Array.from({ length: 25 }, (_, i) => `<line class="daily-op-hour-line" x1="${i * 40}" y1="24" x2="${i * 40}" y2="170"/>`).join("") +
+      Array.from({ length: 6 }, (_, i) => `<line x1="0" y1="${32 + i * 26.4}" x2="${DAILY_OPERATION_TOTAL_INTERVALS * 10}" y2="${32 + i * 26.4}"/>`).join("") +
+      Array.from({ length: DAILY_OPERATION_TOTAL_HOURS + 1 }, (_, i) => `<line class="daily-op-hour-line" x1="${i * 40}" y1="24" x2="${i * 40}" y2="170"/>`).join("") +
       `</g>` +
       `<path class="daily-op-path daily-op-path-solar-actual" fill="none"></path>` +
       `<path class="daily-op-path daily-op-path-solar-forecast" fill="none"></path>` +
@@ -2376,10 +2380,12 @@ class MarstekVenusPanel extends HTMLElement {
     const hours = document.createElement("div");
     hours.className = "daily-op-hours";
     const cells = [];
-    for (let hour = 0; hour < 24; hour++) {
+    for (let hour = 0; hour < DAILY_OPERATION_TOTAL_HOURS; hour++) {
+      const dayOffset = Math.floor(hour / 24);
+      const clockHour = hour % 24;
       const label = document.createElement("span");
       label.className = "daily-op-hour-label";
-      label.textContent = String(hour).padStart(2, "0");
+      label.textContent = dayOffset ? `${String(clockHour).padStart(2, "0")} +${dayOffset}` : String(clockHour).padStart(2, "0");
       labels.appendChild(label);
 
       const group = document.createElement("div");
@@ -2392,7 +2398,7 @@ class MarstekVenusPanel extends HTMLElement {
         cell.className = "daily-op-cell daily-op-base-neutral";
         cell.dataset.index = String(index);
         cell.tabIndex = 0;
-        cell.setAttribute("aria-label", `${String(hour).padStart(2, "0")}:${String(quarter * 15).padStart(2, "0")}`);
+        cell.setAttribute("aria-label", this._dailyOperationTimeRange(index));
         const delay = document.createElement("span");
         delay.className = "daily-op-delay-mark";
         delay.hidden = true;
@@ -2435,7 +2441,7 @@ class MarstekVenusPanel extends HTMLElement {
           }
           if (event.key === "Home" || event.key === "End") {
             event.preventDefault();
-            const target = this._r.dailyOperation && this._r.dailyOperation.cells[event.key === "Home" ? 0 : 95];
+            const target = this._r.dailyOperation && this._r.dailyOperation.cells[event.key === "Home" ? 0 : DAILY_OPERATION_TOTAL_INTERVALS - 1];
             if (target) target.focus();
           }
         });
@@ -2562,7 +2568,8 @@ class MarstekVenusPanel extends HTMLElement {
   _dailyOperationArray(value) {
     const values = Array.isArray(value) ? value : value && Array.isArray(value.values) ? value.values : null;
     if (!values) return null;
-    return Array.from({ length: 96 }, (_, index) => values[index] == null ? null : values[index]);
+    const count = arguments.length > 1 ? arguments[1] : DAILY_OPERATION_BASE_INTERVALS;
+    return Array.from({ length: count }, (_, index) => values[index] == null ? null : values[index]);
   }
 
   _dailyOperationPick(source, keys) {
@@ -2584,6 +2591,36 @@ class MarstekVenusPanel extends HTMLElement {
     return Number.isFinite(number) ? number : null;
   }
 
+  _dailyOperationExtensionItems(data) {
+    const raw = data && (
+      data.extended_projection
+      || data.forecast_extension
+      || data.extended_intervals
+    );
+    return Array.isArray(raw) ? raw.filter((item) => item && typeof item === "object") : [];
+  }
+
+  _dailyOperationExtensionIndex(item, fallback) {
+    const candidate = this._dailyOperationNumber(
+      item && (item.extension_index ?? item.index)
+    );
+    const index = Math.floor(candidate ?? fallback);
+    return Math.max(0, Math.min(DAILY_OPERATION_EXTENSION_INTERVALS - 1, index));
+  }
+
+  _dailyOperationExtendedArray(base, extension, keys) {
+    const result = Array.from({ length: DAILY_OPERATION_TOTAL_INTERVALS }, (_, index) =>
+      Array.isArray(base) && index < DAILY_OPERATION_BASE_INTERVALS ? base[index] : null
+    );
+    extension.forEach((item, fallback) => {
+      const value = this._dailyOperationPick(item, keys);
+      if (value === undefined) return;
+      const index = DAILY_OPERATION_BASE_INTERVALS + this._dailyOperationExtensionIndex(item, fallback);
+      result[index] = value;
+    });
+    return result;
+  }
+
   _dailyOperationState() {
     const entityId = this._dailyOperationEntityId();
     if (!entityId) return null;
@@ -2594,17 +2631,30 @@ class MarstekVenusPanel extends HTMLElement {
     const unavailable = !stateObj || ["unknown", "unavailable"].includes(String(stateObj.state).toLowerCase());
     const series = data.series && typeof data.series === "object" ? data.series : data;
     const operations = data.operations && typeof data.operations === "object" ? data.operations : data;
+    const extension = this._dailyOperationExtensionItems(data);
     const pickSeries = (keys) => this._dailyOperationArray(this._dailyOperationPick(series, keys));
     const pickOperation = (keys) => this._dailyOperationArray(this._dailyOperationPick(operations, keys));
-    const actualSolar = pickSeries(["solar_actual_kwh", "solar_actual"]);
-    const forecastSolar = pickSeries(["solar_forecast_kwh", "solar_forecast"]);
-    const actualConsumption = pickSeries(["consumption_actual_kwh", "consumption_actual", "home_actual_kwh"]);
-    const forecastConsumption = pickSeries(["consumption_forecast_kwh", "consumption_forecast", "home_forecast_kwh"]);
-    const storedActualSoc = pickOperation(["actual_soc_pct"]);
-    const forecastSoc = pickOperation(["planned_soc_pct", "soc_end_pct", "stored_soc_end_pct"]);
+    const actualSolarBase = pickSeries(["solar_actual_kwh", "solar_actual"]);
+    const forecastSolarBase = pickSeries(["solar_forecast_kwh", "solar_forecast"]);
+    const actualConsumptionBase = pickSeries(["consumption_actual_kwh", "consumption_actual", "home_actual_kwh"]);
+    const forecastConsumptionBase = pickSeries(["consumption_forecast_kwh", "consumption_forecast", "home_forecast_kwh"]);
+    const storedActualSocBase = pickOperation(["actual_soc_pct"]);
+    const forecastSocBase = pickOperation(["planned_soc_pct", "soc_end_pct", "stored_soc_end_pct"]);
+    const actualSolar = this._dailyOperationExtendedArray(actualSolarBase, [], []);
+    const forecastSolar = this._dailyOperationExtendedArray(
+      forecastSolarBase, extension, ["solar_kwh", "solar_forecast_kwh"]
+    );
+    const actualConsumption = this._dailyOperationExtendedArray(actualConsumptionBase, [], []);
+    const forecastConsumption = this._dailyOperationExtendedArray(
+      forecastConsumptionBase, extension, ["consumption_kwh", "consumption_forecast_kwh"]
+    );
+    const storedActualSoc = this._dailyOperationExtendedArray(storedActualSocBase, [], []);
+    const forecastSoc = this._dailyOperationExtendedArray(
+      forecastSocBase, extension, ["soc_end_pct", "planned_soc_pct", "stored_soc_end_pct"]
+    );
     const currentFallback = this._dateParts();
     const fallbackIndex = currentFallback.hour * 4 + Math.floor(currentFallback.minute / 15);
-    const currentIndex = Math.max(0, Math.min(95,
+    const currentIndex = Math.max(0, Math.min(DAILY_OPERATION_BASE_INTERVALS - 1,
       Math.floor(this._dailyOperationNumber(data.current_index) ?? fallbackIndex)));
     const currentProgress = this._clamp(
       this._dailyOperationNumber(data.current_progress) ?? (currentFallback.minute % 15) / 15,
@@ -2612,27 +2662,38 @@ class MarstekVenusPanel extends HTMLElement {
     );
     const recorderSoc = data.local_date && data.local_date === this._dailyOperationSocHistoryDate
       ? this._dailyOperationSocHistory : null;
-    const actualSoc = Array.from({ length: 96 }, (_, index) => {
+    const actualSoc = Array.from({ length: DAILY_OPERATION_TOTAL_INTERVALS }, (_, index) => {
       const stored = this._dailyOperationValueAt(storedActualSoc, index);
       if (stored != null) return stored;
       return index <= currentIndex ? this._dailyOperationValueAt(recorderSoc, index) : null;
     });
     const rawDecision = this._dailyOperationPick(operations, ["grid_charge_decision"]);
-    const actualDecision = this._dailyOperationArray(this._dailyOperationPick(operations, ["actual_grid_charge_decision"]));
-    const plannedDecision = this._dailyOperationArray(this._dailyOperationPick(operations, ["planned_grid_charge_decision"]));
-    let gridDecision = null;
-    if (Array.isArray(rawDecision)) gridDecision = this._dailyOperationArray(rawDecision);
+    const actualDecisionBase = this._dailyOperationArray(this._dailyOperationPick(operations, ["actual_grid_charge_decision"]));
+    const plannedDecisionBase = this._dailyOperationArray(this._dailyOperationPick(operations, ["planned_grid_charge_decision"]));
+    let gridDecisionBase = null;
+    if (Array.isArray(rawDecision)) gridDecisionBase = this._dailyOperationArray(rawDecision);
     else if (rawDecision && typeof rawDecision === "object") {
-      gridDecision = this._dailyOperationArray(rawDecision.values || rawDecision.planned || rawDecision.actual);
+      gridDecisionBase = this._dailyOperationArray(rawDecision.values || rawDecision.planned || rawDecision.actual);
     }
+    const actualDecision = this._dailyOperationExtendedArray(actualDecisionBase, [], []);
+    const plannedDecision = this._dailyOperationExtendedArray(
+      plannedDecisionBase, extension, ["planned_grid_charge_decision", "grid_charge_decision"]
+    );
+    const gridDecision = this._dailyOperationExtendedArray(
+      gridDecisionBase, extension, ["grid_charge_decision", "planned_grid_charge_decision"]
+    );
     const flags = this._dailyOperationPick(data, ["dst_flags", "local_time_flags"]);
-    const flagArray = Array.isArray(flags) ? flags : Array(96).fill(null);
-    const skipped = this._dailyOperationArray(this._dailyOperationPick(data, ["dst_skipped"]));
-    const repeated = this._dailyOperationArray(this._dailyOperationPick(data, ["dst_repeated"]));
-    const isSkipped = Array.from({ length: 96 }, (_, index) =>
+    const flagArray = Array.from({ length: DAILY_OPERATION_TOTAL_INTERVALS }, (_, index) =>
+      Array.isArray(flags) && index < DAILY_OPERATION_BASE_INTERVALS ? flags[index] : null
+    );
+    const skippedBase = this._dailyOperationArray(this._dailyOperationPick(data, ["dst_skipped"]));
+    const repeatedBase = this._dailyOperationArray(this._dailyOperationPick(data, ["dst_repeated"]));
+    const skipped = this._dailyOperationExtendedArray(skippedBase, [], []);
+    const repeated = this._dailyOperationExtendedArray(repeatedBase, [], []);
+    const isSkipped = Array.from({ length: DAILY_OPERATION_TOTAL_INTERVALS }, (_, index) =>
       this._dailyOperationBool(skipped && skipped[index]) || String(flagArray[index] || "").toLowerCase() === "dst_skipped"
     );
-    const isRepeated = Array.from({ length: 96 }, (_, index) =>
+    const isRepeated = Array.from({ length: DAILY_OPERATION_TOTAL_INTERVALS }, (_, index) =>
       this._dailyOperationBool(repeated && repeated[index]) || String(flagArray[index] || "").toLowerCase() === "dst_repeated"
     );
     const sourceData = data.sources && typeof data.sources === "object" ? data.sources : {};
@@ -2652,7 +2713,59 @@ class MarstekVenusPanel extends HTMLElement {
       ) ?? data[`${kind}_fallback_reason`];
       return value == null || value === "" ? null : String(value);
     };
-    const plannedActions = pickOperation(["planned_action_mask"]);
+    const operationArray = (keys, extensionKeys = keys) =>
+      this._dailyOperationExtendedArray(
+        pickOperation(keys), extension, extensionKeys
+      );
+    const actualMask = operationArray(["actual_action_mask"], []);
+    const plannedActions = operationArray(
+      ["planned_action_mask"], ["planned_action_mask", "action_mask"]
+    );
+    const actualCoexistence = operationArray(["actual_coexistence_mask"], []);
+    const plannedCoexistence = operationArray(
+      ["planned_coexistence_mask"], ["planned_coexistence_mask", "coexistence_mask"]
+    );
+    const actualContext = operationArray(["actual_context_mask"], []);
+    const plannedContext = operationArray(
+      ["planned_context_mask"], ["planned_context_mask", "context_mask"]
+    );
+    const actualSource = operationArray(["actual_source", "actual_sources"], []);
+    const plannedSource = operationArray(
+      ["planned_source", "planned_sources"], ["planned_source", "source"]
+    );
+    const delayUntil = operationArray(["delay_until", "planned_delay_until"], ["delay_until"]);
+    const chargePower = operationArray(
+      ["charge_power_w", "actual_charge_power_w", "planned_charge_power_w"],
+      ["charge_power_w"]
+    );
+    const dischargePower = operationArray(
+      ["discharge_power_w", "actual_discharge_power_w", "planned_discharge_power_w"],
+      ["discharge_power_w"]
+    );
+    const solarToBattery = operationArray(["solar_to_battery_kwh"], ["solar_to_battery_kwh"]);
+    const gridToBattery = operationArray(["grid_to_battery_kwh"], ["grid_to_battery_kwh"]);
+    const chargeToBattery = operationArray(
+      ["charge_to_battery_kwh"], ["charge_to_battery_kwh"]
+    );
+    const actualChargeToBattery = operationArray(["actual_charge_to_battery_kwh"], []);
+    const plannedChargeToBattery = operationArray(
+      ["planned_charge_to_battery_kwh"], ["charge_to_battery_kwh"]
+    );
+    const dischargeFromBattery = operationArray(
+      ["discharge_from_battery_kwh"], ["discharge_from_battery_kwh"]
+    );
+    const actualDischargeFromBattery = operationArray(["actual_discharge_from_battery_kwh"], []);
+    const plannedDischargeFromBattery = operationArray(
+      ["planned_discharge_from_battery_kwh", "battery_to_home_kwh"],
+      ["discharge_from_battery_kwh", "battery_to_home_kwh"]
+    );
+    const batteryToHome = operationArray(["battery_to_home_kwh"], ["battery_to_home_kwh"]);
+    const storedEnergyEnd = operationArray(
+      ["stored_energy_end_kwh"], ["stored_energy_end_kwh"]
+    );
+    const socEnd = operationArray(
+      ["soc_end_pct", "stored_soc_end_pct"], ["soc_end_pct"]
+    );
     const realtimeMode = ["real_time", "realtime_price", "realtime"].some((mode) =>
       String(data.mode || "").toLowerCase().replace(/[- ]/g, "_").includes(mode)
     );
@@ -2666,7 +2779,7 @@ class MarstekVenusPanel extends HTMLElement {
     // evidence, but zero masks alone must not make an empty DTO look valid.
     const hasSeriesEvidence = [actualSolar, forecastSolar, actualConsumption, forecastConsumption, actualSoc, forecastSoc]
       .some((array) => Array.isArray(array) && array.some((value) => this._dailyOperationNumber(value) != null));
-    const hasActionEvidence = [pickOperation(["actual_action_mask"]), plannedActions]
+    const hasActionEvidence = [actualMask, plannedActions]
       .some((array) => Array.isArray(array) && array.some((value) => (this._dailyOperationNumber(value) || 0) !== 0));
     const hasValues = data.timeline_available !== false && (hasSeriesEvidence || hasActionEvidence);
     return {
@@ -2682,32 +2795,32 @@ class MarstekVenusPanel extends HTMLElement {
       stale: this._dailyOperationBool(data.stale),
       staleReason: data.stale_reason == null ? null : String(data.stale_reason),
       actualSolar, forecastSolar, actualConsumption, forecastConsumption, actualSoc, forecastSoc,
-      actualMask: pickOperation(["actual_action_mask"]),
+      actualMask,
       plannedMask: plannedActions,
-      actualCoexistence: pickOperation(["actual_coexistence_mask"]),
-      plannedCoexistence: pickOperation(["planned_coexistence_mask"]),
-      actualContext: pickOperation(["actual_context_mask"]),
-      plannedContext: pickOperation(["planned_context_mask"]),
-      actualSource: pickOperation(["actual_source", "actual_sources"]),
-      plannedSource: pickOperation(["planned_source", "planned_sources"]),
+      actualCoexistence,
+      plannedCoexistence,
+      actualContext,
+      plannedContext,
+      actualSource,
+      plannedSource,
       gridDecision, actualDecision, plannedDecision,
-      delayUntil: pickOperation(["delay_until", "planned_delay_until"]),
-      chargePower: pickOperation(["charge_power_w", "actual_charge_power_w", "planned_charge_power_w"]),
-      dischargePower: pickOperation(["discharge_power_w", "actual_discharge_power_w", "planned_discharge_power_w"]),
+      delayUntil,
+      chargePower,
+      dischargePower,
       coverage: pickSeries(["actual_coverage_s", "coverage_s"]),
       solarCoverage: pickSeries(["solar_actual_coverage_s", "actual_coverage_s", "coverage_s"]),
       consumptionCoverage: pickSeries(["consumption_actual_coverage_s", "actual_coverage_s", "coverage_s"]),
-      solarToBattery: pickOperation(["solar_to_battery_kwh"]),
-      gridToBattery: pickOperation(["grid_to_battery_kwh"]),
-      chargeToBattery: pickOperation(["charge_to_battery_kwh"]),
-      actualChargeToBattery: pickOperation(["actual_charge_to_battery_kwh"]),
-      plannedChargeToBattery: pickOperation(["planned_charge_to_battery_kwh"]),
-      dischargeFromBattery: pickOperation(["discharge_from_battery_kwh"]),
-      actualDischargeFromBattery: pickOperation(["actual_discharge_from_battery_kwh"]),
-      plannedDischargeFromBattery: pickOperation(["planned_discharge_from_battery_kwh", "battery_to_home_kwh"]),
-      batteryToHome: pickOperation(["battery_to_home_kwh"]),
-      storedEnergyEnd: pickOperation(["stored_energy_end_kwh"]),
-      socEnd: pickOperation(["soc_end_pct", "stored_soc_end_pct"]),
+      solarToBattery,
+      gridToBattery,
+      chargeToBattery,
+      actualChargeToBattery,
+      plannedChargeToBattery,
+      dischargeFromBattery,
+      actualDischargeFromBattery,
+      plannedDischargeFromBattery,
+      batteryToHome,
+      storedEnergyEnd,
+      socEnd,
       observedSeconds: this._dailyOperationPick(operations, [
         "observed_seconds_by_action_by_interval",
         "observed_seconds_by_action",
@@ -2759,8 +2872,11 @@ class MarstekVenusPanel extends HTMLElement {
     const start = index * 15;
     const end = start + 15;
     const clock = (minutes) => {
-      const hour = Math.floor(minutes / 60);
-      return `${String(hour).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
+      const absoluteHour = Math.floor(minutes / 60);
+      const dayOffset = Math.floor(absoluteHour / 24);
+      const hour = absoluteHour % 24;
+      const suffix = dayOffset ? ` (+${dayOffset})` : "";
+      return `${String(hour).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}${suffix}`;
     };
     return `${clock(start)}–${clock(end)}`;
   }
@@ -3121,10 +3237,14 @@ class MarstekVenusPanel extends HTMLElement {
     const center = () => {
       if (ref.scrollState.initialized || ref.scrollState.manual) return;
       if (!ref.viewport.clientWidth) return;
-      const hourWidth = ref.stage.scrollWidth / 24;
+      const hourWidth = ref.stage.scrollWidth / DAILY_OPERATION_TOTAL_HOURS;
       const target = snapshot.currentIndex / 4 * hourWidth - (ref.viewport.clientWidth - hourWidth) / 2;
+      // Keep the optional post-midnight extension outside the initial view.
+      // The existing navigation buttons are the deliberate way to reveal it.
+      const baseEnd = ref.stage.scrollWidth * DAILY_OPERATION_BASE_INTERVALS / DAILY_OPERATION_TOTAL_INTERVALS;
+      const baseMax = Math.max(0, baseEnd - ref.viewport.clientWidth);
       ref.scrollState.programmaticUntil = Date.now() + 250;
-      ref.viewport.scrollLeft = Math.max(0, target);
+      ref.viewport.scrollLeft = Math.max(0, Math.min(baseMax, target));
       ref.scrollState.initialized = true;
       this._updateDailyOperationNav();
     };
@@ -3236,7 +3356,7 @@ class MarstekVenusPanel extends HTMLElement {
       path.style.display = d ? "" : "none";
     }
     const now = (snapshot.currentIndex + snapshot.currentProgress) * 10;
-    ref.nowMarker.style.left = `${now / 9.6}%`;
+    ref.nowMarker.style.left = `${now / (DAILY_OPERATION_TOTAL_INTERVALS * 0.1)}%`;
     ref.nowText.textContent = this._t("dailyOperationNow");
   }
 
@@ -3318,7 +3438,7 @@ class MarstekVenusPanel extends HTMLElement {
     ref.notice.textContent = notices.join(" · ");
     ref.notice.hidden = !notices.length;
     ref.viewport.setAttribute("aria-label", `${this._t("dailyOperationTitle")}. ${badgeText}`);
-    for (let index = 0; index < 96; index++) this._dailyOperationUpdateCell(snapshot, index);
+    for (let index = 0; index < DAILY_OPERATION_TOTAL_INTERVALS; index++) this._dailyOperationUpdateCell(snapshot, index);
     this._dailyOperationUpdatePaths(snapshot);
     this._centerDailyOperationNow(snapshot);
     this._updateDailyOperationNav();
@@ -6624,7 +6744,7 @@ class MarstekVenusPanel extends HTMLElement {
       .daily-op-soc-axis-ticks { position: absolute; top: 32px; left: 8px; bottom: 26px; display: flex; flex-direction: column; align-items: flex-start; justify-content: space-between; }
       .daily-op-viewport { position: relative; min-width: 0; overflow-x: auto; overflow-y: hidden; scroll-snap-type: x proximity; scrollbar-width: thin; overscroll-behavior-x: contain; outline: none; }
       .daily-op-viewport:focus-visible { box-shadow: inset 0 0 0 2px var(--accent-line); border-radius: 8px; }
-      .daily-op-stage { position: relative; width: 100%; min-width: 960px; height: 190px; }
+      .daily-op-stage { position: relative; width: 200%; min-width: 1920px; height: 190px; }
       .daily-op-svg { position: absolute; inset: 0; z-index: 1; display: block; width: 100%; height: 190px; overflow: visible; pointer-events: none; }
       .daily-op-grid-lines line { stroke: var(--line); stroke-width: 1; vector-effect: non-scaling-stroke; }
       .daily-op-grid-lines .daily-op-hour-line { stroke: var(--line-strong); }
@@ -6640,7 +6760,7 @@ class MarstekVenusPanel extends HTMLElement {
       .daily-op-now-marker::before { content: ""; position: absolute; top: 21px; bottom: 0; left: 0; border-left: 1.5px solid var(--accent); }
       .daily-op-now-marker::after { content: ""; position: absolute; top: 18px; left: -3px; width: 7px; height: 7px; border: 1px solid var(--bg-1); border-radius: 50%; background: var(--accent); }
       .daily-op-now-text { position: absolute; top: 0; left: 0; transform: translateX(-50%); padding: 2px 7px; border: 1px solid var(--accent-line); border-radius: 999px; background: var(--bg-2); color: var(--accent); box-shadow: 0 2px 8px oklch(0 0 0 / .22); font-size: 9px; line-height: 14px; font-weight: 700; letter-spacing: .01em; white-space: nowrap; }
-      .daily-op-hour-labels, .daily-op-hours { display: grid; grid-template-columns: repeat(24, minmax(0, 1fr)); min-width: 0; }
+      .daily-op-hour-labels, .daily-op-hours { display: grid; grid-template-columns: repeat(36, minmax(0, 1fr)); min-width: 0; }
       .daily-op-hour-label { padding-left: 4px; color: var(--ink-dim); font-size: 10px; font-variant-numeric: tabular-nums; }
       .daily-op-hour { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); min-width: 0; scroll-snap-align: start; border-right: 1px solid var(--line-strong); }
       .daily-op-cell { position: relative; display: block; min-width: 0; height: 146px; padding: 0; border: 0; border-left: 1px solid var(--line); border-radius: 0; background-color: transparent; background-repeat: repeat; background-size: 8px 8px; cursor: pointer; pointer-events: auto; transition: filter .12s, opacity .12s; }

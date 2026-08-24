@@ -1,8 +1,9 @@
 # Daily operation timeline
 
 The Overview tab includes a 24-hour operation timeline with 96 fixed
-quarter-hour cells. Cells describe battery actions; the overlaid curves show
-solar and household energy in `kWh/15 min`.
+quarter-hour cells. The forecast also continues to 12:00 on the next local day
+(48 additional cells), initially outside the viewport. Cells describe battery
+actions; the overlaid curves show solar and household energy in `kWh/15 min`.
 
 ## Reading the card
 
@@ -43,9 +44,11 @@ The diagnostic entity is
 `sensor.omnibattery_daily_operation_timeline`. Its state is the local snapshot
 date. Attributes include `schema_version`, timezone, freshness, profile
 sources, 96-value energy series, observed and projected total SOC, operation masks, grid decisions and delay
-metadata. Arrays are bounded to the current local day and are excluded from
-Recorder; the entity is safe to use from a dashboard without causing control
-reevaluations.
+metadata. The daily series and operation arrays remain 96 values to preserve
+the existing contract. The extension is published separately as
+`extended_horizon` and `extended_projection`, bounded to 48 intervals and
+excluded from Recorder; the entity is safe to use from a dashboard without
+causing control reevaluations.
 
 The backend keeps completed quarter-hours immutable. A plan reevaluation may
 replace only the open current interval and the future. Store restoration is
@@ -54,11 +57,13 @@ degrades to an empty timeline and never blocks battery control.
 
 ## Mobile and missing data
 
-On narrow screens the 96 cells keep a readable minimum width and scroll
-horizontally by hour. Keyboard arrows, touch and mouse tooltips expose the same
-interval details. Missing telemetry remains `null`; it is not silently turned
-into zero. When a forecast is unavailable or stale, the card keeps the observed
-past and marks only unjustified future values as unavailable.
+On narrow screens the 144 cells keep a readable minimum width and scroll
+horizontally by hour. The initial view stays on the first 24 hours; press the
+right navigation arrow to reveal the additional 12 hours. Keyboard arrows,
+touch and mouse tooltips expose the same interval details. Missing telemetry
+remains `null`; it is not silently turned into zero. When a forecast is
+unavailable or stale, the card keeps the observed past and marks only
+unjustified future values as unavailable.
 
 See [consumption estimate](consumption-estimate.md), [solar charge delay](solar-charge-delay.md),
 [Dynamic Pricing](../configuration/predictive-charging/dynamic-pricing.md),

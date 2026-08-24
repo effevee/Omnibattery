@@ -105,6 +105,22 @@ def _snapshot() -> dict:
             "status": "delayed",
             "estimated_unlock_time": "2026-08-22T16:15:00+02:00",
         },
+        "extended_horizon": {
+            "start": "2026-08-23T00:00:00+02:00",
+            "end": "2026-08-23T12:00:00+02:00",
+            "interval_minutes": 15,
+            "interval_count": 48,
+        },
+        "extended_projection": [
+            {
+                "extension_index": 0,
+                "start": "2026-08-23T00:00:00+02:00",
+                "end": "2026-08-23T00:15:00+02:00",
+                "solar_kwh": 0.03,
+                "action_mask": 4,
+                "soc_end_pct": 47.25,
+            }
+        ],
     }
 
 
@@ -149,6 +165,10 @@ def test_timeline_entity_publishes_fixed_96_element_json_safe_dto():
     assert attrs["operations"]["charge_to_battery_kwh"][0] == 0.1
     assert attrs["operations"]["actual_discharge_from_battery_kwh"][0] == 0.03
     assert attrs["operations"]["discharge_from_battery_kwh"][0] == 0.04
+    assert attrs["extended_horizon"]["interval_count"] == 48
+    assert attrs["extended_projection"][0]["extension_index"] == 0
+    assert attrs["extended_projection"][0]["solar_kwh"] == pytest.approx(0.03)
+    assert attrs["extended_projection"][0]["soc_end_pct"] == pytest.approx(47.25)
     json.dumps(attrs, allow_nan=False)
 
 

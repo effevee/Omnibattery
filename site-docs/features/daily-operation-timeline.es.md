@@ -1,8 +1,10 @@
 # Línea temporal de operación diaria
 
 La pestaña Resumen incluye una línea temporal de 24 horas con 96 celdas fijas
-de quince minutos. Las celdas describen acciones de las baterías y las curvas
-superpuestas muestran energía solar y del hogar en `kWh/15 min`.
+de quince minutos. La previsión continúa además hasta las 12:00 del día local
+siguiente (48 celdas adicionales), inicialmente fuera de la vista. Las celdas
+describen acciones de las baterías y las curvas superpuestas muestran energía
+solar y del hogar en `kWh/15 min`.
 
 ## Cómo leer la tarjeta
 
@@ -44,8 +46,11 @@ La entidad de diagnóstico es
 `sensor.omnibattery_daily_operation_timeline`. Su estado es la fecha local del
 snapshot. Los atributos contienen `schema_version`, zona horaria, frescura,
 fuentes de perfiles, series energéticas de 96 valores, máscaras de operación,
-SOC total observado y proyectado, decisiones de red y metadatos del retraso. Las listas se limitan al día local y
-se excluyen de Recorder; consultar la entidad desde el dashboard no provoca
+SOC total observado y proyectado, decisiones de red y metadatos del retraso.
+Las series diarias y las listas de operación mantienen 96 valores para
+conservar el contrato existente. La ampliación se publica aparte en
+`extended_horizon` y `extended_projection`, limitada a 48 intervalos y
+excluida de Recorder; consultar la entidad desde el dashboard no provoca
 reevaluaciones del control.
 
 El backend deja inmutables los cuartos cerrados. Una reevaluación solo puede
@@ -55,9 +60,10 @@ produce una línea vacía y nunca bloquea el control de las baterías.
 
 ## Móvil y datos ausentes
 
-En pantallas estrechas las 96 celdas conservan un ancho mínimo legible y se
-desplazan horizontalmente por hora. Las flechas del teclado, el toque y el
-ratón muestran los mismos detalles. La telemetría ausente permanece como
+En pantallas estrechas las 144 celdas conservan un ancho mínimo legible y se
+desplazan horizontalmente por hora. La vista inicial se queda en las primeras
+24 horas; pulsa la flecha de desplazamiento hacia la derecha para revelar las
+12 horas adicionales. Las flechas del teclado, el toque y el ratón muestran los mismos detalles. La telemetría ausente permanece como
 `null`, no se convierte silenciosamente en cero. Si una previsión no está
 disponible u obsoleta, la tarjeta conserva el pasado observado y marca solo el
 futuro que ya no puede justificarse.

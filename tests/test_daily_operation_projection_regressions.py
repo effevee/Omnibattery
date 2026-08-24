@@ -32,14 +32,21 @@ def _controller_for_projection(
     **overrides,
 ):
     plan = SimpleNamespace(intervals=intervals, allocations=allocations)
+    planner_calls = []
+
+    def build_plan(**kwargs):
+        planner_calls.append(kwargs)
+        return plan
+
     values = {
         "_daily_operation_mode": lambda: "normal",
         "_daily_operation_float": ChargeDischargeController._daily_operation_float,
         "_daily_operation_battery_inputs": lambda: batteries,
         "_consumption_tracker": object(),
         "_pricing_mgr": SimpleNamespace(
-            _build_chronological_plan=lambda **_kwargs: plan
+            _build_chronological_plan=build_plan
         ),
+        "_planner_calls": planner_calls,
         "_last_decision_data": {},
         "_last_chronological_diagnostics": {},
         "_dynamic_pricing_schedule": None,
@@ -84,6 +91,39 @@ def test_projection_respects_combined_system_charge_limit():
     item = result["intervals"][0]
     assert item["grid_to_battery_kwh"] == pytest.approx(0.5)
     assert item["charge_power_w"] == pytest.approx(2000.0)
+
+
+def test_projection_exposes_the_cross_midnight_extension():
+    now = datetime(2026, 8, 24, 23, 45, tzinfo=MADRID)
+    midnight = now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
+    intervals = [
+        ProjectionIntervalInput(now, midnight, consumption_kwh=0.1),
+        ProjectionIntervalInput(
+            midnight,
+            midnight + timedelta(minutes=15),
+            consumption_kwh=0.1,
+        ),
+    ]
+    controller = _controller_for_projection(
+        now,
+        intervals,
+        [],
+        [BatteryProjectionInput("a", 0, 10, 50, 100, 4000, 4000)],
+    )
+
+    result = ChargeDischargeController._daily_operation_build_projection(
+        controller, now
+    )
+
+    assert result is not None
+    assert len(result["intervals"]) == 1
+    assert len(result["extended_intervals"]) == 1
+    assert result["extended_horizon"]["interval_count"] == 48
+    assert result["extended_intervals"][0]["extension_index"] == 0
+    assert result["extended_intervals"][0]["start"] == midnight
+    assert controller._planner_calls[0]["horizon_end"] == midnight + timedelta(
+        hours=12
+    )
 
 
 def test_global_manual_mode_omits_automatic_future_projection():

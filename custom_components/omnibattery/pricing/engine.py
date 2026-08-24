@@ -2136,20 +2136,34 @@ class PricingManager:
         decision_data: dict[str, Any],
         price_ceiling: float | None,
         diagnostic_only: bool = False,
+        horizon_end: datetime | None = None,
     ) -> ChronologicalPlan | None:
         """Adapt live controller forecasts to the pure chronological planner.
 
         A diagnostic-only build simulates the same horizon without claiming
         that an executable chronological charge calendar is active.  This is
         useful when the balance is already sufficient: the projection is still
-        valuable even though no grid charge will be scheduled.
+        valuable even though no grid charge will be scheduled.  ``horizon_end``
+        is intentionally opt-in: the control planner keeps its established
+        end-of-local-day contract, while dashboard-only callers can request a
+        bounded cross-midnight preview.
         """
         tracker = getattr(self._controller, "_consumption_tracker", None)
         profile = getattr(tracker, "consumption_profile", None)
         if profile is None:
             return None
 
-        horizon_end = now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
+        daily_horizon_end = now.replace(
+            hour=0, minute=0, second=0, microsecond=0
+        ) + timedelta(days=1)
+        if horizon_end is None:
+            horizon_end = daily_horizon_end
+        elif horizon_end.tzinfo is None:
+            horizon_end = horizon_end.replace(tzinfo=now.tzinfo)
+        elif now.tzinfo is None:
+            horizon_end = horizon_end.replace(tzinfo=None)
+        else:
+            horizon_end = horizon_end.astimezone(now.tzinfo)
         if horizon_end <= now:
             return None
         try:
@@ -2177,13 +2191,17 @@ class PricingManager:
                 )
                 consumption_raw.append(max(0.0, bucket * fraction))
 
-            consumption_total = max(
-                0.0,
-                float(
-                    decision_data.get("avg_consumption_kwh", forecast.energy_kwh)
-                    or 0.0
-                ),
+            # The normal planner receives a remaining-day balance from the
+            # controller.  An explicitly extended diagnostic horizon instead
+            # needs the profile's energy for the whole requested range;
+            # otherwise tomorrow's intervals would merely dilute today's
+            # remainder across the extra hours.
+            forecast_total = (
+                forecast.energy_kwh
+                if horizon_end > daily_horizon_end
+                else decision_data.get("avg_consumption_kwh", forecast.energy_kwh)
             )
+            consumption_total = max(0.0, float(forecast_total or 0.0))
             consumption = normalize_energy_shape(consumption_raw, consumption_total)
 
             solar_input = self._solar_timeline_input(now, decision_data)

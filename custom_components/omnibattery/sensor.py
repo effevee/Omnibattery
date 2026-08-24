@@ -1097,6 +1097,7 @@ class NonResponsiveBatteriesSensor(SensorEntity):
 
 _DAILY_OPERATION_INTERVAL_COUNT = 96
 _DAILY_OPERATION_INTERVAL_MINUTES = 15
+_DAILY_OPERATION_EXTENDED_INTERVAL_COUNT = 48
 _DAILY_OPERATION_EVENT_THROTTLE_S = 5.0
 _TIMELINE_MISSING = object()
 
@@ -1313,6 +1314,101 @@ def _timeline_power(value: object) -> float:
 def _timeline_text(value: object) -> str | None:
     safe = _timeline_scalar(value, 64)
     return None if safe is None else str(safe)
+
+
+def _timeline_projection_extension(value: object) -> list[dict[str, object]]:
+    """Copy the optional 12-hour cross-midnight projection safely."""
+    if isinstance(value, Mapping):
+        value = (
+            value.get("extended_intervals")
+            or value.get("extended_projection")
+            or value.get("intervals")
+        )
+    if not isinstance(value, (list, tuple)):
+        return []
+
+    numeric_fields = {
+        "solar_kwh",
+        "consumption_kwh",
+        "solar_to_battery_kwh",
+        "grid_to_battery_kwh",
+        "battery_to_home_kwh",
+        "grid_to_home_kwh",
+        "solar_to_home_kwh",
+        "charge_to_battery_kwh",
+        "discharge_from_battery_kwh",
+        "stored_energy_end_kwh",
+        "soc_end_pct",
+        "charge_power_w",
+        "discharge_power_w",
+    }
+    mask_fields = {
+        "action_mask",
+        "planned_action_mask",
+        "context_mask",
+        "planned_context_mask",
+        "coexistence_mask",
+        "planned_coexistence_mask",
+    }
+    text_fields = {
+        "start",
+        "end",
+        "delay_until",
+        "source",
+        "slot",
+        "grid_charge_decision",
+        "planned_grid_charge_decision",
+    }
+    boolean_fields = {"setpoint_active", "delay_active", "simultaneous"}
+    result: list[dict[str, object]] = []
+    for raw in value[:_DAILY_OPERATION_EXTENDED_INTERVAL_COUNT]:
+        if not isinstance(raw, Mapping):
+            continue
+        item: dict[str, object] = {}
+        for name in ("index", "extension_index"):
+            if name in raw:
+                number = _timeline_number(raw.get(name), 0)
+                if number is not None:
+                    item[name] = max(0, int(number))
+        for name in numeric_fields:
+            if name in raw:
+                number = _timeline_number(raw.get(name))
+                if number is not None and number >= 0.0:
+                    item[name] = number
+        for name in mask_fields:
+            if name in raw:
+                number = _timeline_number(raw.get(name), 0)
+                if number is not None:
+                    item[name] = max(0, int(number))
+        for name in text_fields:
+            if name in raw:
+                text = _timeline_text(raw.get(name))
+                if text is not None:
+                    item[name] = text
+        for name in boolean_fields:
+            if name in raw:
+                boolean = _timeline_bool(raw.get(name))
+                if boolean is not None:
+                    item[name] = boolean
+        if item.get("start") is not None and item.get("end") is not None:
+            result.append(item)
+    return result
+
+
+def _timeline_horizon(value: object) -> dict[str, object]:
+    """Copy the small metadata object describing the hidden extension."""
+    if not isinstance(value, Mapping):
+        return {}
+    result: dict[str, object] = {}
+    for key in ("start", "end"):
+        text = _timeline_text(value.get(key))
+        if text is not None:
+            result[key] = text
+    for key in ("interval_minutes", "interval_count"):
+        number = _timeline_number(value.get(key), 0)
+        if number is not None:
+            result[key] = max(0, int(number))
+    return result
 
 
 def _timeline_small_mapping(value: object, max_items: int = 16) -> dict[str, object]:
@@ -1893,6 +1989,15 @@ def _daily_operation_timeline_attributes(controller: object) -> dict[str, object
         "setpoint": setpoint,
         "delay": delay,
         "counts": counts,
+        "extended_horizon": _timeline_horizon(
+            _timeline_find(source, ("extended_horizon", "forecast_extension_horizon"))
+        ),
+        "extended_projection": _timeline_projection_extension(
+            _timeline_find(
+                source,
+                ("extended_projection", "forecast_extension", "extended_intervals"),
+            )
+        ),
     }
 
 
@@ -1908,7 +2013,15 @@ class DailyOperationTimelineSensor(SensorEntity):
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_should_poll = True
     _unrecorded_attributes = frozenset(
-        {"series", "operations", "dst_skipped", "dst_repeated", "dst_flags"}
+        {
+            "series",
+            "operations",
+            "dst_skipped",
+            "dst_repeated",
+            "dst_flags",
+            "extended_horizon",
+            "extended_projection",
+        }
     )
 
     def __init__(self, controller) -> None:

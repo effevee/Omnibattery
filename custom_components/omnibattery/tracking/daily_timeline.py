@@ -5,10 +5,11 @@ and the dashboard.  It records what the runtime observed and accepts a future
 projection that was already produced by an authoritative planner.  It does
 not select prices, write battery registers, or infer a future schedule.
 
-Only the local day currently being displayed is kept.  Once a quarter-hour
-has elapsed its cell is closed and later refreshes may not rewrite it.  The
-current cell remains open so cumulative telemetry and the latest runtime
-decision can be refreshed without changing the historical evidence.
+Only the local day currently being displayed is kept as a diary.  A bounded
+next-day forecast is stored separately for the dashboard extension.  Once a
+quarter-hour has elapsed its cell is closed and later refreshes may not rewrite
+it.  The current cell remains open so cumulative telemetry and the latest
+runtime decision can be refreshed without changing the historical evidence.
 """
 from __future__ import annotations
 
@@ -34,6 +35,8 @@ _LOGGER = logging.getLogger(__name__)
 INTERVAL_MINUTES = 15
 INTERVAL_SECONDS = INTERVAL_MINUTES * 60
 INTERVAL_COUNT = 96
+EXTENDED_HORIZON_HOURS = 12
+EXTENDED_INTERVAL_COUNT = EXTENDED_HORIZON_HOURS * 60 // INTERVAL_MINUTES
 
 DAILY_TIMELINE_SCHEMA_VERSION = 1
 DAILY_TIMELINE_STORE_VERSION = 1
@@ -582,6 +585,8 @@ class DailyOperationTimelineSnapshot(Mapping[str, Any]):
     operations: Mapping[str, Any]
     sources: Mapping[str, Any]
     interval_grid: Mapping[str, Any] = field(default_factory=dict)
+    extended_horizon: Mapping[str, Any] = field(default_factory=dict)
+    extended_projection: tuple[Mapping[str, Any], ...] = ()
 
     @classmethod
     def from_dict(cls, payload: Mapping[str, Any]) -> DailyOperationTimelineSnapshot:
@@ -602,6 +607,12 @@ class DailyOperationTimelineSnapshot(Mapping[str, Any]):
             operations=payload.get("operations", {}),
             sources=payload.get("sources", {}),
             interval_grid=payload.get("interval_grid", {}),
+            extended_horizon=payload.get("extended_horizon", {}),
+            extended_projection=tuple(
+                item
+                for item in (payload.get("extended_projection") or ())
+                if isinstance(item, Mapping)
+            ),
         )
 
     def as_dict(self) -> dict[str, Any]:
@@ -623,6 +634,8 @@ class DailyOperationTimelineSnapshot(Mapping[str, Any]):
                 "operations": dict(self.operations),
                 "sources": dict(self.sources),
                 "interval_grid": dict(self.interval_grid),
+                "extended_horizon": dict(self.extended_horizon),
+                "extended_projection": list(self.extended_projection),
             }
         )
 
@@ -792,6 +805,7 @@ class DailyOperationTimelineManager:
         self._planned_solar_kwh: list[float | None] = []
         self._planned_consumption_kwh: list[float | None] = []
         self._planned_stored_energy_end_kwh: list[float | None] = []
+        self._extended_projection: list[dict[str, Any]] = []
         self._current_index = 0
         self._current_progress = 0.0
         self._last_clock_timestamp: float | None = None
@@ -1095,6 +1109,7 @@ class DailyOperationTimelineManager:
         self._planned_solar_kwh = [None] * INTERVAL_COUNT
         self._planned_consumption_kwh = [None] * INTERVAL_COUNT
         self._planned_stored_energy_end_kwh = [None] * INTERVAL_COUNT
+        self._extended_projection = []
         self._current_index = 0
         self._current_progress = 0.0
         self._last_clock_timestamp = None
@@ -1849,6 +1864,125 @@ class DailyOperationTimelineManager:
         return fallback if 0 <= fallback < INTERVAL_COUNT else None
 
     @staticmethod
+    def _projection_extension_items(projection: Any) -> list[Any]:
+        """Return the optional cross-midnight dashboard projection items."""
+        mapping = _object_mapping(projection)
+        if mapping is None:
+            return []
+        for name in (
+            "extended_intervals",
+            "extended_projection",
+            "forecast_extension",
+        ):
+            value = mapping.get(name)
+            if isinstance(value, Sequence) and not isinstance(
+                value, (str, bytes, bytearray)
+            ):
+                return list(value)
+        return []
+
+    def _normalise_projection_extension_item(
+        self, item: Any
+    ) -> dict[str, Any] | None:
+        """Keep one bounded, JSON-safe interval after the local day."""
+        mapping = _object_mapping(item)
+        if mapping is None:
+            return None
+        start = _parse_datetime(
+            mapping.get("start", mapping.get("interval_start")), self._timezone()
+        )
+        end = _parse_datetime(
+            mapping.get("end", mapping.get("interval_end")), self._timezone()
+        )
+        if start is None or end is None or end <= start:
+            return None
+        local_start = start.astimezone(self._timezone())
+        local_end = end.astimezone(self._timezone())
+        extension_start = datetime.combine(
+            self._local_date + timedelta(days=1),
+            time.min,
+            tzinfo=self._timezone(),
+        )
+        extension_end = extension_start + timedelta(hours=EXTENDED_HORIZON_HOURS)
+        if (
+            local_start < extension_start
+            or local_start >= extension_end
+            or local_end > extension_end
+        ):
+            return None
+
+        raw_index = mapping.get(
+            "extension_index",
+            mapping.get("index", local_start.hour * 4 + local_start.minute // INTERVAL_MINUTES),
+        )
+        try:
+            extension_index = int(raw_index)
+        except (TypeError, ValueError, OverflowError):
+            extension_index = local_start.hour * 4 + local_start.minute // INTERVAL_MINUTES
+        if not 0 <= extension_index < EXTENDED_INTERVAL_COUNT:
+            extension_index = local_start.hour * 4 + local_start.minute // INTERVAL_MINUTES
+        if not 0 <= extension_index < EXTENDED_INTERVAL_COUNT:
+            return None
+
+        result: dict[str, Any] = {
+            "index": extension_index,
+            "extension_index": extension_index,
+            "start": local_start.isoformat(),
+            "end": local_end.isoformat(),
+        }
+        for name in (
+            "solar_kwh",
+            "consumption_kwh",
+            "solar_to_battery_kwh",
+            "grid_to_battery_kwh",
+            "battery_to_home_kwh",
+            "grid_to_home_kwh",
+            "solar_to_home_kwh",
+            "charge_to_battery_kwh",
+            "discharge_from_battery_kwh",
+            "stored_energy_end_kwh",
+            "soc_end_pct",
+            "charge_power_w",
+            "discharge_power_w",
+        ):
+            if name in mapping:
+                parsed = _finite_non_negative(mapping.get(name))
+                if parsed is not None:
+                    result[name] = parsed
+        for name in (
+            "action_mask",
+            "planned_action_mask",
+            "context_mask",
+            "planned_context_mask",
+            "coexistence_mask",
+            "planned_coexistence_mask",
+        ):
+            if name in mapping:
+                result[name] = _safe_mask(
+                    mapping.get(name),
+                    ACTION_MASK_ALL
+                    if "action" in name or "coexistence" in name
+                    else CONTEXT_MASK_ALL,
+                )
+        for name in (
+            "grid_charge_decision",
+            "planned_grid_charge_decision",
+        ):
+            if name in mapping:
+                result[name] = _normalize_grid_decision(mapping.get(name))
+        for name in ("source", "slot"):
+            if name in mapping:
+                result[name] = _safe_text(mapping.get(name), max_length=64)
+        if mapping.get("delay_until") is not None:
+            result["delay_until"] = self._format_delay_until(
+                mapping.get("delay_until"), local_start
+            )
+        for name in ("setpoint_active", "delay_active", "simultaneous"):
+            if name in mapping:
+                result[name] = bool(mapping.get(name))
+        return result
+
+    @staticmethod
     def _projection_array_value(
         projection: Any,
         section_names: Sequence[str],
@@ -1945,6 +2079,7 @@ class DailyOperationTimelineManager:
             self._sources["operation_plan"] = _safe_text(kwargs["source"], max_length=128)
 
         old = self._projection_signature()
+        self._extended_projection = []
         for cell_index in range(index, INTERVAL_COUNT):
             if self._closed[cell_index]:
                 continue
@@ -2110,6 +2245,14 @@ class DailyOperationTimelineManager:
                 cell.planned_slot = _safe_text(
                     item_value("slot", "slot_id", default=None), max_length=64
                 )
+
+            extension_items: list[dict[str, Any]] = []
+            for raw_item in self._projection_extension_items(projection):
+                parsed_item = self._normalise_projection_extension_item(raw_item)
+                if parsed_item is not None:
+                    extension_items.append(parsed_item)
+            extension_items.sort(key=lambda value: value["extension_index"])
+            self._extended_projection = extension_items[:EXTENDED_INTERVAL_COUNT]
             if self._sources.get("operation_plan") is None:
                 self._sources["operation_plan"] = "projection"
 
@@ -2146,6 +2289,10 @@ class DailyOperationTimelineManager:
                 )
                 for cell in self._cells
             ),
+            tuple(
+                json.dumps(item, sort_keys=True, separators=(",", ":"), default=str)
+                for item in self._extended_projection
+            ),
             self._mode,
             self._plan_evaluated_at,
             self._stale,
@@ -2179,6 +2326,7 @@ class DailyOperationTimelineManager:
                     "consumption_kwh": list(self._planned_consumption_kwh),
                     "stored_energy_end_kwh": list(self._planned_stored_energy_end_kwh),
                 },
+                "extended_projection": list(self._extended_projection),
                 "cells": [cell.as_dict() for cell in self._cells],
                 "metadata": {
                     "mode": self._mode,
@@ -2388,6 +2536,14 @@ class DailyOperationTimelineManager:
             # current-day diary; its evidence is conservatively empty.
             parsed_cells.append(parsed_cell or _TimelineCell())
         self._local_date = expected_date
+        restored_extension: list[dict[str, Any]] = []
+        raw_extension = data.get("extended_projection")
+        if isinstance(raw_extension, list):
+            for raw_item in raw_extension[:EXTENDED_INTERVAL_COUNT]:
+                parsed_item = self._normalise_projection_extension_item(raw_item)
+                if parsed_item is not None:
+                    restored_extension.append(parsed_item)
+        restored_extension.sort(key=lambda value: value["extension_index"])
         self._closed = [bool(value) for value in closed]
         self._cells = parsed_cells
         self._actual_solar_kwh = actual_solar
@@ -2397,6 +2553,7 @@ class DailyOperationTimelineManager:
         self._planned_solar_kwh = planned_solar
         self._planned_consumption_kwh = planned_consumption
         self._planned_stored_energy_end_kwh = stored_end
+        self._extended_projection = restored_extension
         metadata = data.get("metadata")
         if isinstance(metadata, Mapping):
             self._mode = _normalize_mode(metadata.get("mode", self._controller_mode()))
@@ -2645,6 +2802,17 @@ class DailyOperationTimelineManager:
             "dst_skipped": [item["dst_skipped"] for item in grid],
             "dst_repeated": [item["dst_repeated"] for item in grid],
         }
+        extended_start = datetime.combine(
+            self._local_date + timedelta(days=1),
+            time.min,
+            tzinfo=self._timezone(),
+        )
+        extended_horizon = {
+            "start": extended_start.isoformat(),
+            "end": (extended_start + timedelta(hours=EXTENDED_HORIZON_HOURS)).isoformat(),
+            "interval_minutes": INTERVAL_MINUTES,
+            "interval_count": EXTENDED_INTERVAL_COUNT,
+        }
         actual_samples = [
             {
                 "solar_kwh": self._actual_solar_kwh[index],
@@ -2838,6 +3006,8 @@ class DailyOperationTimelineManager:
             "counts": counts,
             "intervals": intervals,
             "interval_grid": interval_grid,
+            "extended_horizon": extended_horizon,
+            "extended_projection": list(self._extended_projection),
         }
         safe_payload = _json_safe(payload)
         if as_dto:
@@ -2880,6 +3050,8 @@ __all__ = [
     "INTERVAL_COUNT",
     "INTERVAL_MINUTES",
     "INTERVAL_SECONDS",
+    "EXTENDED_HORIZON_HOURS",
+    "EXTENDED_INTERVAL_COUNT",
     "SCHEMA_VERSION",
     "STATE_CURRENT",
     "STATE_FUTURE",

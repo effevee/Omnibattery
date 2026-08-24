@@ -1492,6 +1492,11 @@ class ChargeDischargeController:
             except (AttributeError, TypeError, ValueError):
                 slots = []
 
+        local_midnight = now.replace(
+            hour=0, minute=0, second=0, microsecond=0
+        ) + timedelta(days=1)
+        projection_horizon_end = local_midnight + timedelta(hours=12)
+
         try:
             plan = planner._build_chronological_plan(
                 now=now,
@@ -1499,6 +1504,7 @@ class ChargeDischargeController:
                 decision_data=decision_data,
                 price_ceiling=getattr(self, "max_price_threshold", None),
                 diagnostic_only=True,
+                horizon_end=projection_horizon_end,
             )
         except Exception as exc:  # noqa: BLE001 - dashboard projection is optional
             _LOGGER.debug("Daily operation timeline projection failed: %s", exc)
@@ -1688,17 +1694,37 @@ class ChargeDischargeController:
             or decision_data.get("solar_timeline_source")
             or "profile_projection"
         )
-        aggregates: dict[int, dict[str, Any]] = {}
+        aggregates: dict[tuple[Any, int], dict[str, Any]] = {}
         for flow in result.intervals:
             if flow.start is None:
                 continue
-            interval_index = flow.start.hour * 4 + flow.start.minute // 15
-            if not 0 <= interval_index < 96:
+
+            flow_start = flow.start
+            flow_end = flow.end
+            if flow_start.tzinfo is None and now.tzinfo is not None:
+                flow_start = flow_start.replace(tzinfo=now.tzinfo)
+            elif flow_start.tzinfo is not None and now.tzinfo is not None:
+                flow_start = flow_start.astimezone(now.tzinfo)
+            if flow_end is not None:
+                if flow_end.tzinfo is None and now.tzinfo is not None:
+                    flow_end = flow_end.replace(tzinfo=now.tzinfo)
+                elif flow_end.tzinfo is not None and now.tzinfo is not None:
+                    flow_end = flow_end.astimezone(now.tzinfo)
+
+            interval_index = flow_start.hour * 4 + flow_start.minute // 15
+            is_extended = (
+                flow_start >= local_midnight
+                and flow_start < projection_horizon_end
+            )
+            if flow_start.date() != now.date() and not is_extended:
                 continue
+            aggregate_key = (flow_start.date(), interval_index)
             item = aggregates.setdefault(
-                interval_index,
+                aggregate_key,
                 {
                     "index": interval_index,
+                    "extension_index": interval_index if is_extended else None,
+                    "_extended": is_extended,
                     "solar_kwh": 0.0,
                     "consumption_kwh": 0.0,
                     "solar_to_battery_kwh": 0.0,
@@ -1712,18 +1738,18 @@ class ChargeDischargeController:
                     "stored_energy_end_kwh": 0.0,
                     "duration_s": 0.0,
                     "source": str(source),
-                    "_start": flow.start,
-                    "_end": flow.end,
+                    "_start": flow_start,
+                    "_end": flow_end,
                 },
             )
-            if flow.start is not None and (
-                item["_start"] is None or flow.start < item["_start"]
+            if flow_start is not None and (
+                item["_start"] is None or flow_start < item["_start"]
             ):
-                item["_start"] = flow.start
-            if flow.end is not None and (
-                item["_end"] is None or flow.end > item["_end"]
+                item["_start"] = flow_start
+            if flow_end is not None and (
+                item["_end"] is None or flow_end > item["_end"]
             ):
-                item["_end"] = flow.end
+                item["_end"] = flow_end
             for key in (
                 "solar_kwh",
                 "consumption_kwh",
@@ -1800,6 +1826,8 @@ class ChargeDischargeController:
         for item in aggregates.values():
             interval_start = item.pop("_start", None)
             interval_end = item.pop("_end", None)
+            item["start"] = interval_start
+            item["end"] = interval_end
             if (
                 delay_starts_at is not None
                 and delay_ends_at is not None
@@ -1824,6 +1852,10 @@ class ChargeDischargeController:
                 if duration > 0.0
                 else 0.0
             )
+            item["charge_to_battery_kwh"] = (
+                item["solar_to_battery_kwh"] + item["grid_to_battery_kwh"]
+            )
+            item["discharge_from_battery_kwh"] = item["battery_to_home_kwh"]
             if capacity > 0.0:
                 item["soc_end_pct"] = item["stored_energy_end_kwh"] / capacity * 100.0
             item["setpoint_active"] = bool(
@@ -1832,6 +1864,15 @@ class ChargeDischargeController:
             item["delay_active"] = bool(
                 item["context_mask"] & PROJECTION_CONTEXT_CHARGE_DELAY
             )
+
+        base_intervals = [
+            item for item in aggregates.values() if not item.get("_extended")
+        ]
+        extended_intervals = [
+            item for item in aggregates.values() if item.get("_extended")
+        ]
+        for item in aggregates.values():
+            item.pop("_extended", None)
 
         diagnostics = getattr(self, "_last_chronological_diagnostics", None) or {}
         sources = {
@@ -1850,7 +1891,17 @@ class ChargeDischargeController:
             else now
         )
         return {
-            "intervals": sorted(aggregates.values(), key=lambda item: item["index"]),
+            "intervals": sorted(base_intervals, key=lambda item: item["index"]),
+            "extended_intervals": sorted(
+                extended_intervals,
+                key=lambda item: item.get("extension_index", item["index"]),
+            ),
+            "extended_horizon": {
+                "start": local_midnight,
+                "end": projection_horizon_end,
+                "interval_minutes": 15,
+                "interval_count": 48,
+            },
             "mode": mode,
             "plan_evaluated_at": evaluated_at,
             "stale": False,

@@ -756,6 +756,73 @@ def test_future_charge_energy_combines_solar_and_grid_flows():
     assert snapshot["operations"]["soc_pct"][41] == pytest.approx(72.5)
 
 
+def test_extended_projection_keeps_the_next_twelve_hours_separate_from_daily_arrays():
+    clock = MutableClock(datetime(2026, 8, 23, 10, 7, tzinfo=MADRID))
+    manager = _manager(clock)
+    manager.rebuild_future_projection(
+        {
+            "intervals": [
+                {"index": 41, "solar_kwh": 0.1},
+            ],
+            "extended_intervals": [
+                {
+                    "extension_index": 0,
+                    "start": "2026-08-24T00:00:00+02:00",
+                    "end": "2026-08-24T00:15:00+02:00",
+                    "consumption_kwh": 0.2,
+                    "action_mask": ACTION_DISCHARGE,
+                    "soc_end_pct": 48.5,
+                },
+                {
+                    "extension_index": 48,
+                    "start": "2026-08-24T12:00:00+02:00",
+                    "end": "2026-08-24T12:15:00+02:00",
+                    "consumption_kwh": 9.9,
+                },
+            ],
+        },
+        mode="dynamic_pricing",
+    )
+
+    snapshot = manager.build_public_snapshot()
+
+    assert snapshot["interval_count"] == 96
+    assert len(snapshot["series"]["consumption_forecast_kwh"]) == 96
+    assert snapshot["extended_horizon"]["interval_count"] == 48
+    assert snapshot["extended_horizon"]["start"].startswith("2026-08-24T00:00")
+    assert len(snapshot["extended_projection"]) == 1
+    assert snapshot["extended_projection"][0]["extension_index"] == 0
+    assert snapshot["extended_projection"][0]["consumption_kwh"] == pytest.approx(0.2)
+    assert snapshot["extended_projection"][0]["soc_end_pct"] == pytest.approx(48.5)
+
+
+@pytest.mark.asyncio
+async def test_extended_projection_survives_store_round_trip():
+    clock = MutableClock(datetime(2026, 8, 23, 10, 7, tzinfo=MADRID))
+    store = FakeStore()
+    manager = _manager(clock, store)
+    manager.rebuild_future_projection(
+        {
+            "extended_intervals": [
+                {
+                    "extension_index": 4,
+                    "start": "2026-08-24T01:00:00+02:00",
+                    "end": "2026-08-24T01:15:00+02:00",
+                    "solar_kwh": 0.12,
+                }
+            ]
+        },
+        mode="dynamic_pricing",
+    )
+    await manager.async_save_all()
+
+    restored = _manager(clock, store)
+    assert await restored.async_load() is True
+    projection = restored.build_public_snapshot()["extended_projection"]
+    assert projection[0]["extension_index"] == 4
+    assert projection[0]["solar_kwh"] == pytest.approx(0.12)
+
+
 def test_actual_charge_and_discharge_energy_are_accumulated_separately():
     clock = MutableClock(datetime(2026, 8, 23, 10, 7, tzinfo=MADRID))
     manager = _manager(clock)
