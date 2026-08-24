@@ -194,15 +194,24 @@ class ConsumptionTracker:
                 {"start": str(item["start"]), "end": item.get("end")}
                 for item in periods if isinstance(item, dict) and item.get("start")
             ]
-            self._vacation_nights = [
-                {"date": str(item["date"]), "energy_kwh": float(item["energy_kwh"]),
-                 "coverage_s": float(item["coverage_s"])}
-                for item in nights if isinstance(item, dict) and item.get("date")
-                and float(item.get("coverage_s", 0)) >= VACATION_NIGHT_MIN_COVERAGE_S
-            ][-30:]
+            restored_nights = []
+            for item in nights if isinstance(nights, list) else []:
+                try:
+                    record = {
+                        "date": str(item["date"]),
+                        "energy_kwh": float(item["energy_kwh"]),
+                        "coverage_s": float(item["coverage_s"]),
+                    }
+                    if record["coverage_s"] > 0 and record["energy_kwh"] >= 0:
+                        restored_nights.append(record)
+                except (KeyError, TypeError, ValueError):
+                    continue
+            self._vacation_nights = restored_nights[-30:]
             await self.async_reconcile_vacation_mode()
         except Exception as exc:  # Store must never prevent entry setup
             _LOGGER.warning("Could not restore vacation learning state: %s", exc)
+            # A failed read must not leave an active switch without its mask.
+            await self.async_reconcile_vacation_mode()
 
     async def _save_vacation_state(self) -> None:
         try:
@@ -358,6 +367,7 @@ class ConsumptionTracker:
         baseline_kw, source = self._vacation_baseline_kw()
         return {
             "active": self.is_vacation_active(),
+            "learning_paused": self.is_vacation_active(),
             "baseline_kw": round(baseline_kw, 4),
             "baseline_daily_kwh": round(baseline_kw * 24.0, 3),
             "baseline_source": source,
@@ -1800,16 +1810,17 @@ class ConsumptionTracker:
                 # night that starts at 01:00, so no cross-midnight ambiguity.
                 cursor = previous_time
                 end = local_time
-                night_start = datetime.combine(cursor.date(), VACATION_NIGHT_START, tzinfo=cursor.tzinfo)
-                night_end = datetime.combine(cursor.date(), VACATION_NIGHT_END, tzinfo=cursor.tzinfo)
-                overlap_start = max(cursor, night_start)
-                overlap_end = min(end, night_end)
+                cursor_ts, end_ts = cursor.timestamp(), end.timestamp()
+                night_start = datetime.combine(cursor.date(), VACATION_NIGHT_START, tzinfo=cursor.tzinfo).timestamp()
+                night_end = datetime.combine(cursor.date(), VACATION_NIGHT_END, tzinfo=cursor.tzinfo).timestamp()
+                overlap_start = max(cursor_ts, night_start)
+                overlap_end = min(end_ts, night_end)
                 if overlap_end > overlap_start:
-                    fraction_start = (overlap_start - cursor).total_seconds() / max(1e-9, (end - cursor).total_seconds())
-                    fraction_end = (overlap_end - cursor).total_seconds() / max(1e-9, (end - cursor).total_seconds())
+                    fraction_start = (overlap_start - cursor_ts) / max(1e-9, end_ts - cursor_ts)
+                    fraction_end = (overlap_end - cursor_ts) / max(1e-9, end_ts - cursor_ts)
                     start_power = previous_power + (parsed - previous_power) * fraction_start
                     end_power = previous_power + (parsed - previous_power) * fraction_end
-                    coverage = (overlap_end - overlap_start).total_seconds()
+                    coverage = overlap_end - overlap_start
                     key = cursor.date().isoformat()
                     record = next((item for item in self._vacation_nights if item["date"] == key), None)
                     if record is None:

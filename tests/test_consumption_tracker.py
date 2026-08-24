@@ -170,6 +170,21 @@ async def test_vacation_reconcile_starts_a_new_session_without_old_nights():
     assert tracker._vacation_periods[-1]["end"] is None
 
 
+def test_vacation_night_uses_absolute_dst_duration():
+    tracker = _make_tracker([])
+    tracker._vacation_nights = []
+    tracker._vacation_save_task = None
+    start = datetime(2026, 3, 29, 1, 0, tzinfo=timezone.utc)
+    # The helper receives absolute timestamps, so a 3-hour covered sample is
+    # never inflated to four hours by a local spring-forward transition.
+    tracker._vacation_last_sample_time = start
+    tracker._vacation_last_sample_mono = 0.0
+    tracker._vacation_last_power_kw = 1.0
+    tracker._request_vacation_save = lambda: None
+    tracker._record_vacation_night_sample(1.0, start + timedelta(hours=3), 10800.0)
+    assert tracker._vacation_nights[0]["coverage_s"] == pytest.approx(10800.0)
+
+
 # ----------------------------------------------------------------------
 # Every calendar day belongs in consumption history. Predictive grid-charging
 # windows schedule charging; they do not make the home or battery inactive.

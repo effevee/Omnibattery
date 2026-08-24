@@ -580,13 +580,24 @@ class ConsumptionProfileTracker:
     def _interval_is_excluded(self, local_date: date, index: int) -> bool:
         if not self._excluded_periods:
             return False
-        start = datetime.combine(
-            local_date, time(index // INTERVALS_PER_HOUR, (index % INTERVALS_PER_HOUR) * INTERVAL_MINUTES),
-            tzinfo=self._timezone(),
+        wall_start = datetime.combine(
+            local_date,
+            time(index // INTERVALS_PER_HOUR, (index % INTERVALS_PER_HOUR) * INTERVAL_MINUTES),
         )
-        end = start + timedelta(seconds=INTERVAL_SECONDS)
-        return any(period_start < end and (period_end is None or period_end > start)
-                   for period_start, period_end in self._excluded_periods)
+        # Test both folds: on the autumn transition the same wall-clock bin
+        # occurs twice, and an away period in fold=1 must mask it as well.
+        for fold in (0, 1):
+            start = wall_start.replace(tzinfo=self._timezone(), fold=fold)
+            end = (wall_start + timedelta(seconds=INTERVAL_SECONDS)).replace(
+                tzinfo=self._timezone(), fold=fold
+            )
+            start_ts, end_ts = start.timestamp(), end.timestamp()
+            for period_start, period_end in self._excluded_periods:
+                period_start_ts = period_start.timestamp()
+                period_end_ts = period_end.timestamp() if period_end else None
+                if period_start_ts < end_ts and (period_end_ts is None or period_end_ts > start_ts):
+                    return True
+        return False
 
     def _training_interval(self, day: ProfileDay, index: int) -> float | None:
         """Return usable learning data while leaving the physical raw day intact."""

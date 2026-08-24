@@ -310,6 +310,16 @@ def test_vacation_mask_keeps_raw_capture_but_excludes_profile_training():
     assert forecast.total_days == 0
 
 
+def test_vacation_mask_covers_second_dst_fold():
+    local_date = date(2026, 10, 25)
+    profile = _profile()
+    profile.set_excluded_periods([{
+        "start": datetime(2026, 10, 25, 2, 5, tzinfo=MADRID, fold=1).isoformat(),
+        "end": datetime(2026, 10, 25, 2, 10, tzinfo=MADRID, fold=1).isoformat(),
+    }])
+    assert profile._interval_is_excluded(local_date, 8)  # 02:00–02:15
+
+
 def test_current_day_capture_is_unavailable_without_covered_samples():
     profile = _profile()
     today = date.today()

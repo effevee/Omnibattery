@@ -4639,17 +4639,26 @@ class ChargeDischargeController:
                 "consumption_scope": consumption_scope,
                 "consumption_forecast_source": (
                     profile_forecast.source
-                    if profile_forecast is not None and profile_forecast.mature
+                    if profile_forecast is not None and (
+                        profile_forecast.mature
+                        or profile_forecast.source == "vacation_baseline"
+                    )
                     else "legacy_daily"
                 ),
                 "profile_coverage_ratio": (
                     profile_forecast.coverage_ratio
-                    if profile_forecast is not None and profile_forecast.mature
+                    if profile_forecast is not None and (
+                        profile_forecast.mature
+                        or profile_forecast.source == "vacation_baseline"
+                    )
                     else 0.0
                 ),
                 "profile_days": (
                     profile_forecast.total_days
-                    if profile_forecast is not None and profile_forecast.mature
+                    if profile_forecast is not None and (
+                        profile_forecast.mature
+                        or profile_forecast.source == "vacation_baseline"
+                    )
                     else 0
                 ),
                 "profile_fallback_reason": (
@@ -4733,18 +4742,27 @@ class ChargeDischargeController:
             "floor_active": floor_active,
             "consumption_scope": consumption_scope,
             "consumption_forecast_source": (
-                "profile"
-                if profile_forecast is not None and profile_forecast.mature
+                profile_forecast.source
+                if profile_forecast is not None and (
+                    profile_forecast.mature
+                    or profile_forecast.source == "vacation_baseline"
+                )
                 else "legacy_daily"
             ),
             "profile_coverage_ratio": (
                 profile_forecast.coverage_ratio
-                if profile_forecast is not None and profile_forecast.mature
+                if profile_forecast is not None and (
+                    profile_forecast.mature
+                    or profile_forecast.source == "vacation_baseline"
+                )
                 else 0.0
             ),
             "profile_days": (
                 profile_forecast.total_days
-                if profile_forecast is not None and profile_forecast.mature
+                if profile_forecast is not None and (
+                    profile_forecast.mature
+                    or profile_forecast.source == "vacation_baseline"
+                )
                 else 0
             ),
             "profile_fallback_reason": (
