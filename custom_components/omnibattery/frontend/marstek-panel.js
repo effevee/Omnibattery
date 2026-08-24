@@ -3300,6 +3300,39 @@ class MarstekVenusPanel extends HTMLElement {
     return plotted;
   }
 
+  _dailyOperationSolarForecastPlotValues(values, actual, snapshot) {
+    const plotted = this._dailyOperationForecastPlotValues(values, actual, snapshot);
+    if (!Array.isArray(plotted) || !Array.isArray(actual)) return plotted;
+
+    const index = snapshot.currentIndex;
+    const coverageAt = this._dailyOperationValueAt(snapshot.solarCoverage, index);
+    const currentSolar = this._dailyOperationValueAt(actual, index);
+    // A provider curve can remain optimistic after the live PV capture has
+    // already reached zero. Require two covered zero intervals and prior
+    // production so a single cloudy sample does not erase a genuine forecast.
+    if (currentSolar == null || currentSolar > 0.000001 || coverageAt == null || coverageAt < 60) {
+      return plotted;
+    }
+    let zeroIntervals = 0;
+    for (let cursor = index; cursor >= 0; cursor--) {
+      const sample = this._dailyOperationValueAt(actual, cursor);
+      const coverage = this._dailyOperationValueAt(snapshot.solarCoverage, cursor);
+      if (sample == null || coverage == null || coverage < 60 || sample > 0.000001) break;
+      zeroIntervals++;
+    }
+    const priorProduction = actual
+      .slice(0, index)
+      .some((value) => (this._dailyOperationNumber(value) || 0) > 0.000001);
+    if (zeroIntervals < 2 || !priorProduction) return plotted;
+
+    // Keep the optional next-day extension intact; only today's impossible
+    // post-sunset forecast is removed from the graph.
+    for (let cursor = index + 1; cursor < DAILY_OPERATION_BASE_INTERVALS; cursor++) {
+      plotted[cursor] = null;
+    }
+    return plotted;
+  }
+
   _dailyOperationPath(values, snapshot, yMax, future) {
     if (!Array.isArray(values)) return "";
     const top = 32, bottom = 164;
@@ -3329,7 +3362,7 @@ class MarstekVenusPanel extends HTMLElement {
     if (!ref) return;
     const actualSolar = this._dailyOperationPlotValues(snapshot.actualSolar, snapshot.solarCoverage, snapshot, false);
     const actualConsumption = this._dailyOperationPlotValues(snapshot.actualConsumption, snapshot.consumptionCoverage, snapshot, false);
-    const forecastSolar = this._dailyOperationForecastPlotValues(snapshot.forecastSolar, actualSolar, snapshot);
+    const forecastSolar = this._dailyOperationSolarForecastPlotValues(snapshot.forecastSolar, actualSolar, snapshot);
     const forecastConsumption = this._dailyOperationForecastPlotValues(snapshot.forecastConsumption, actualConsumption, snapshot);
     const projectedSoc = Array.isArray(snapshot.forecastSoc) ? snapshot.forecastSoc.slice() : snapshot.forecastSoc;
     const currentSoc = this._dailyOperationValueAt(snapshot.actualSoc, snapshot.currentIndex);
@@ -6723,19 +6756,19 @@ class MarstekVenusPanel extends HTMLElement {
         pointer-events: none; z-index: 5; }
 
       /* ===== Daily operation timeline ===== */
-      .daily-operation-card { position: relative; min-width: 0; overflow: visible; }
+      .daily-operation-card { position: relative; min-width: 0; overflow: visible; --daily-op-shade-opacity: 50%; }
       .daily-operation-card[hidden], .daily-operation-card [hidden] { display: none !important; }
       .daily-op-description { font-size: 12px; line-height: 1.45; margin: -7px 0 12px; }
       .daily-op-toolbar { display: flex; align-items: center; gap: 12px; min-width: 0; margin-bottom: 9px; }
       .daily-op-legend { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; min-width: 0; }
       .daily-op-legend-item { display: inline-flex; align-items: center; gap: 5px; color: var(--ink-mid); font-size: 11px; white-space: nowrap; }
       .daily-op-swatch { display: inline-block; width: 12px; height: 12px; border: 1px solid var(--line-strong); border-radius: 3px; }
-      .daily-op-swatch-solar-window { background: color-mix(in oklab, var(--daily-op-solar-window) 34%, transparent); }
-      .daily-op-swatch-solar { background: color-mix(in oklab, var(--daily-op-solar-charge) 55%, transparent); }
-      .daily-op-swatch-grid { background: color-mix(in oklab, var(--daily-op-grid) 55%, transparent); }
-      .daily-op-swatch-hourly-balance { background: repeating-linear-gradient(135deg, transparent 0 3px, var(--daily-op-hourly-balance) 3px 5px); border-color: var(--daily-op-hourly-balance); }
-      .daily-op-swatch-discharge { background: color-mix(in oklab, var(--daily-op-discharge) 55%, transparent); }
-      .daily-op-swatch-not-needed { background: color-mix(in oklab, var(--daily-op-not-needed) 45%, transparent); }
+      .daily-op-swatch-solar-window { background: color-mix(in oklab, var(--daily-op-solar-window) var(--daily-op-shade-opacity), transparent); }
+      .daily-op-swatch-solar { background: color-mix(in oklab, var(--daily-op-solar-charge) var(--daily-op-shade-opacity), transparent); }
+      .daily-op-swatch-grid { background: color-mix(in oklab, var(--daily-op-grid) var(--daily-op-shade-opacity), transparent); }
+      .daily-op-swatch-hourly-balance { background: repeating-linear-gradient(135deg, transparent 0 3px, color-mix(in oklab, var(--daily-op-hourly-balance) var(--daily-op-shade-opacity), transparent) 3px 5px); border-color: var(--daily-op-hourly-balance); }
+      .daily-op-swatch-discharge { background: color-mix(in oklab, var(--daily-op-discharge) var(--daily-op-shade-opacity), transparent); }
+      .daily-op-swatch-not-needed { background: color-mix(in oklab, var(--daily-op-not-needed) var(--daily-op-shade-opacity), transparent); }
       .daily-op-line { display: inline-block; width: 15px; height: 0; border-top: 2px solid var(--ink); }
       .daily-op-line-solar { border-color: var(--daily-op-solar-line); }
       .daily-op-line-consumption { border-color: var(--home); border-top-style: dashed; }
@@ -6781,12 +6814,12 @@ class MarstekVenusPanel extends HTMLElement {
       .daily-op-cell.daily-op-current { box-shadow: inset 0 0 0 1px var(--accent); }
       .daily-op-cell.daily-op-forecast { border-bottom: 1px dashed var(--line-strong); }
       .daily-op-cell.daily-op-stale { opacity: .55; }
-      .daily-op-base-solar-window { background-color: color-mix(in oklab, var(--daily-op-solar-window) 30%, transparent); }
-      .daily-op-base-solar { background-color: color-mix(in oklab, var(--daily-op-solar-charge) 48%, transparent); }
-      .daily-op-base-grid { background-color: color-mix(in oklab, var(--daily-op-grid) 48%, transparent); }
-      .daily-op-base-discharge { background-color: color-mix(in oklab, var(--daily-op-discharge) 48%, transparent); }
-      .daily-op-base-not-needed { background-color: color-mix(in oklab, var(--daily-op-not-needed) 38%, transparent); }
-      .daily-op-base-neutral { background-color: color-mix(in oklab, var(--bg-2) 35%, transparent); }
+      .daily-op-base-solar-window { background-color: color-mix(in oklab, var(--daily-op-solar-window) var(--daily-op-shade-opacity), transparent); }
+      .daily-op-base-solar { background-color: color-mix(in oklab, var(--daily-op-solar-charge) var(--daily-op-shade-opacity), transparent); }
+      .daily-op-base-grid { background-color: color-mix(in oklab, var(--daily-op-grid) var(--daily-op-shade-opacity), transparent); }
+      .daily-op-base-discharge { background-color: color-mix(in oklab, var(--daily-op-discharge) var(--daily-op-shade-opacity), transparent); }
+      .daily-op-base-not-needed { background-color: color-mix(in oklab, var(--daily-op-not-needed) var(--daily-op-shade-opacity), transparent); }
+      .daily-op-base-neutral { background-color: color-mix(in oklab, var(--bg-2) var(--daily-op-shade-opacity), transparent); }
       .daily-op-cell.daily-op-hourly-balance::after { content: ""; position: absolute; left: 1px; right: 1px; bottom: 0; height: 3px; background: var(--daily-op-hourly-balance); opacity: .9; }
       .daily-op-cell.daily-op-delay::before { content: ""; position: absolute; left: 1px; right: 1px; top: 0; height: 3px; background: var(--daily-op-delay); }
       .daily-op-delay-mark, .daily-op-setpoint-mark { position: absolute; z-index: 2; display: grid; place-items: center; color: var(--daily-op-delay); --mdc-icon-size: 12px; }
