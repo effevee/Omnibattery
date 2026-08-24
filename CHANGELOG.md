@@ -5,6 +5,7 @@
 ### Added
 
 - **Daily operation timeline in the dashboard**: the Summary tab now shows a 24-hour, 15-minute resolution chart with observed and projected battery actions, solar and household energy curves, and total SOC.
+- **Vacation Mode dashboard switch**: a new control in the common system card pauses household-consumption learning and the legacy daily average while physical metering and battery control continue normally. Predictive features use a constant baseline learned from 01:00–05:00, taking the median of up to the last three nights with at least three hours of coverage; vacation intervals remain excluded from Recorder backfill after the mode is disabled.
 
 ### Changed
 
