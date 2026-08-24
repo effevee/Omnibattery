@@ -21,6 +21,7 @@ from custom_components.omnibattery.tracking.daily_timeline import (
     ACTION_SOLAR_CHARGE,
     CONTEXT_CHARGE_DELAY,
     CONTEXT_DYNAMIC_PRICE,
+    CONTEXT_SETPOINT,
     DailyOperationTimelineManager,
 )
 
@@ -242,6 +243,56 @@ def test_runtime_diary_marks_only_real_charge_delay_states(
         ChargeDischargeController._daily_operation_delay_active(controller)
         is expected
     )
+
+
+def test_runtime_diary_ignores_stale_delay_on_weekly_full_charge_day():
+    controller = SimpleNamespace(
+        charge_delay_enabled=True,
+        _charge_delay_unlocked=False,
+        _charge_delay_status={"state": "Delayed (10:45 est.)"},
+        _balance_monitor_overrides_delay=lambda: True,
+    )
+
+    assert ChargeDischargeController._daily_operation_delay_active(controller) is False
+
+
+def test_runtime_diary_omits_delay_and_setpoint_context_on_weekly_full_charge_day():
+    coordinator = SimpleNamespace(
+        capabilities=SimpleNamespace(has_mppt_pv=False, has_solar_telemetry=False),
+        data={"battery_power": 1000},
+    )
+    controller = _runtime_controller([coordinator])
+    controller.charge_delay_enabled = True
+    controller._delay_soc_setpoint_enabled = True
+    controller._delay_setpoint_reached = False
+    controller._charge_delay_status = {"state": "Delayed (10:45 est.)"}
+    controller._balance_monitor_overrides_delay = lambda: True
+
+    decision = ChargeDischargeController._daily_operation_runtime_decision(
+        controller, datetime(2026, 8, 24, 10, 0, tzinfo=MADRID)
+    )
+
+    assert not decision["context_mask"] & (CONTEXT_CHARGE_DELAY | CONTEXT_SETPOINT)
+    assert decision["delay_until"] is None
+
+
+def test_runtime_delay_boundary_is_removed_when_delay_stops():
+    clock = MutableClock(datetime(2026, 8, 24, 10, 0, tzinfo=MADRID))
+    manager = _manager(clock, mode="normal")
+
+    manager.record_runtime_decision(
+        action_mask=ACTION_GRID_CHARGE,
+        context_mask=CONTEXT_CHARGE_DELAY,
+        delay_until="10:45",
+    )
+    assert manager.build_public_snapshot()["operations"]["delay_until"][40] == "10:45"
+
+    manager.record_runtime_decision(
+        action_mask=ACTION_GRID_CHARGE,
+        context_mask=0,
+    )
+
+    assert manager.build_public_snapshot()["operations"]["delay_until"][40] is None
 
 
 def test_runtime_diary_reports_capacity_weighted_total_soc():

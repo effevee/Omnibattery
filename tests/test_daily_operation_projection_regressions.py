@@ -14,6 +14,7 @@ from custom_components.omnibattery.pricing.chronological import SlotAllocation
 from custom_components.omnibattery.pricing.daily_timeline import (
     ACTION_GRID_CHARGE,
     ACTION_SOLAR_CHARGE,
+    CONTEXT_CHARGE_DELAY,
     CONTEXT_SETPOINT,
     BatteryProjectionInput,
     ProjectionIntervalInput,
@@ -133,6 +134,38 @@ def test_setpoint_context_stops_after_the_interval_that_reaches_it():
     assert masks[0] & CONTEXT_SETPOINT
     assert not masks[1] & CONTEXT_SETPOINT
     assert not masks[2] & CONTEXT_SETPOINT
+
+
+def test_weekly_full_charge_bypasses_delay_and_setpoint_projection_markers():
+    now = datetime(2026, 8, 24, 10, 0, tzinfo=MADRID)
+    end = now + timedelta(minutes=15)
+    slot = PriceSlot(now, end, 0.1)
+    controller = _controller_for_projection(
+        now,
+        [ProjectionIntervalInput(now, end, consumption_kwh=0.0, solar_kwh=0.0)],
+        [SlotAllocation(slot, 1.0, None, "scheduled")],
+        [BatteryProjectionInput("a", 0, 10, 0, 100, 4000, 4000)],
+        charge_delay_enabled=True,
+        _delay_soc_setpoint_enabled=True,
+        _delay_soc_setpoint=50.0,
+        _delay_setpoint_reached=False,
+        _charge_delay_status={
+            "state": "Delayed (10:45 est.)",
+            "estimated_unlock_time": "10:45",
+        },
+        _balance_monitor_overrides_delay=lambda: True,
+    )
+
+    result = ChargeDischargeController._daily_operation_build_projection(
+        controller, now
+    )
+
+    assert result is not None
+    assert all(
+        not item["context_mask"] & (CONTEXT_CHARGE_DELAY | CONTEXT_SETPOINT)
+        and item.get("delay_until") is None
+        for item in result["intervals"]
+    )
 
 
 def test_external_solar_does_not_hide_grid_charge_during_net_import():

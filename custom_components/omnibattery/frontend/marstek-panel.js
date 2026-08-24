@@ -2890,17 +2890,23 @@ class MarstekVenusPanel extends HTMLElement {
       && ((mask || 0) & 1) === 0
       && (projectedSolarChargePending || solarSurplus);
     const delayState = snapshot.delayInfo && String(snapshot.delayInfo.state || snapshot.delayInfo.status || "").toLowerCase();
+    const weeklyDelayBypassed = Boolean(snapshot.delayInfo && (
+      snapshot.delayInfo.weekly_full_charge_bypasses_delay === true
+      || delayState.trim() === "skipped - full charge day"
+    ));
     const topLevelDelay = index === snapshot.currentIndex && (
       delayState.startsWith("delayed") || [
         "waiting for solar", "waiting for forecast", "waiting_for_solar", "waiting", "blocked",
       ].includes(delayState)
     );
-    const delayUntil = (Array.isArray(snapshot.delayUntil) ? snapshot.delayUntil[index] : null) ??
-      (topLevelDelay && snapshot.delayInfo ? snapshot.delayInfo.estimated_unlock_time || snapshot.delayInfo.unlock_time : null);
+    const delayUntil = weeklyDelayBypassed
+      ? null
+      : ((Array.isArray(snapshot.delayUntil) ? snapshot.delayUntil[index] : null) ??
+        (topLevelDelay && snapshot.delayInfo ? snapshot.delayInfo.estimated_unlock_time || snapshot.delayInfo.unlock_time : null));
     // Older payloads could stamp the delay context on every cell merely because
     // the feature was enabled. Historical/future clocks need a real boundary;
     // boundary-less waiting states are meaningful only for the current cell.
-    const delay = (delayUntil != null && delayUntil !== "") || topLevelDelay;
+    const delay = !weeklyDelayBypassed && ((delayUntil != null && delayUntil !== "") || topLevelDelay);
     const setpointState = snapshot.setpointInfo && String(snapshot.setpointInfo.state || snapshot.setpointInfo.status || "").toLowerCase();
     const topLevelSetpoint = index === snapshot.currentIndex && ["charging_to_setpoint", "to_setpoint", "charging"].includes(setpointState);
     return {
@@ -2910,7 +2916,7 @@ class MarstekVenusPanel extends HTMLElement {
       operationSource,
       observationTrusted: status === "forecast" || this._dailyOperationSourceIsObserved(operationSource),
       delay, delayUntil: delayUntil == null ? null : String(delayUntil),
-      setpoint: ((context || 0) & 1) !== 0 || topLevelSetpoint,
+      setpoint: !weeklyDelayBypassed && (((context || 0) & 1) !== 0 || topLevelSetpoint),
       skipped: snapshot.isSkipped[index], repeated: snapshot.isRepeated[index],
       solarActual: this._dailyOperationValueAt(snapshot.actualSolar, index),
       solarForecast: this._dailyOperationValueAt(snapshot.forecastSolar, index),
@@ -3150,6 +3156,20 @@ class MarstekVenusPanel extends HTMLElement {
     return plotted;
   }
 
+  _dailyOperationForecastPlotValues(values, actual, snapshot) {
+    if (!Array.isArray(values)) return values;
+    const plotted = values.slice();
+    const index = snapshot.currentIndex;
+    const observed = this._dailyOperationValueAt(actual, index);
+    // The projection for the open quarter contains only its remaining energy,
+    // while the observed series is plotted as a complete quarter. Do not put
+    // those different quantities at the same "now" coordinate: use the
+    // observed point as the visual hand-off and keep forecast data unchanged
+    // from the next interval onward.
+    if (observed != null && !snapshot.isSkipped[index]) plotted[index] = observed;
+    return plotted;
+  }
+
   _dailyOperationPath(values, snapshot, yMax, future) {
     if (!Array.isArray(values)) return "";
     const top = 32, bottom = 164;
@@ -3179,10 +3199,12 @@ class MarstekVenusPanel extends HTMLElement {
     if (!ref) return;
     const actualSolar = this._dailyOperationPlotValues(snapshot.actualSolar, snapshot.solarCoverage, snapshot, false);
     const actualConsumption = this._dailyOperationPlotValues(snapshot.actualConsumption, snapshot.consumptionCoverage, snapshot, false);
+    const forecastSolar = this._dailyOperationForecastPlotValues(snapshot.forecastSolar, actualSolar, snapshot);
+    const forecastConsumption = this._dailyOperationForecastPlotValues(snapshot.forecastConsumption, actualConsumption, snapshot);
     const projectedSoc = Array.isArray(snapshot.forecastSoc) ? snapshot.forecastSoc.slice() : snapshot.forecastSoc;
     const currentSoc = this._dailyOperationValueAt(snapshot.actualSoc, snapshot.currentIndex);
     if (Array.isArray(projectedSoc) && currentSoc != null) projectedSoc[snapshot.currentIndex] = currentSoc;
-    const values = [actualSolar, snapshot.forecastSolar, actualConsumption, snapshot.forecastConsumption];
+    const values = [actualSolar, forecastSolar, actualConsumption, forecastConsumption];
     const yMax = Math.max(0.1, ...values.flatMap((array) => Array.isArray(array)
       ? array.map((value) => this._dailyOperationNumber(value)).filter((value) => value != null)
       : []
@@ -3195,9 +3217,9 @@ class MarstekVenusPanel extends HTMLElement {
       `</div>`;
     const pathValues = [
       [ref.paths.solarActual, actualSolar, false],
-      [ref.paths.solarForecast, snapshot.forecastSolar, true],
+      [ref.paths.solarForecast, forecastSolar, true],
       [ref.paths.consumptionActual, actualConsumption, false],
-      [ref.paths.consumptionForecast, snapshot.forecastConsumption, true],
+      [ref.paths.consumptionForecast, forecastConsumption, true],
     ];
     for (const [path, series, future] of pathValues) {
       const d = this._dailyOperationPath(series, snapshot, yMax, future);

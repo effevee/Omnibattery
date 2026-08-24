@@ -1757,6 +1757,10 @@ class DailyOperationTimelineManager:
         delay_value = kwargs.get("delay_until", mapping.get("delay_until"))
         if delay_value is not None:
             cell.actual_delay_until = self._format_delay_until(delay_value, event_time)
+        elif not (parsed_context_mask & CONTEXT_CHARGE_DELAY):
+            # A later runtime decision can release a delay that was recorded
+            # earlier in the same quarter. Do not leave its unlock clock visible.
+            cell.actual_delay_until = None
         source_value = source if source is not None else mapping.get("source", mapping.get("decision_source"))
         slot_value = slot if slot is not None else mapping.get("slot", mapping.get("slot_id"))
         if source_value is not None:

@@ -1105,8 +1105,25 @@ class ChargeDischargeController:
             else candidate
         )
 
+    @staticmethod
+    def _daily_operation_weekly_delay_bypass(controller: Any) -> bool:
+        """Return whether weekly full charge bypasses the solar delay."""
+        weekly_override = getattr(controller, "_balance_monitor_overrides_delay", None)
+        if not callable(weekly_override):
+            return False
+        try:
+            return bool(weekly_override())
+        except Exception:  # noqa: BLE001 - the timeline must not gate control
+            _LOGGER.debug(
+                "Weekly charge-delay override check failed",
+                exc_info=True,
+            )
+            return False
+
     def _daily_operation_delay_active(self) -> bool:
         """Return whether Charge Delay is currently blocking grid charging."""
+        if ChargeDischargeController._daily_operation_weekly_delay_bypass(self):
+            return False
         if (
             not getattr(self, "charge_delay_enabled", False)
             or getattr(self, "_charge_delay_unlocked", False)
@@ -1295,10 +1312,17 @@ class ChargeDischargeController:
                 discharge_power = -total_power
                 action_mask |= ACTION_DISCHARGE
 
+        weekly_charge_bypasses_delay = (
+            ChargeDischargeController._daily_operation_weekly_delay_bypass(self)
+        )
         delay_active = self._daily_operation_delay_active()
         setpoint_enabled = bool(getattr(self, "_delay_soc_setpoint_enabled", False))
         setpoint_reached = bool(getattr(self, "_delay_setpoint_reached", False))
-        setpoint_active = setpoint_enabled and not setpoint_reached
+        setpoint_active = (
+            setpoint_enabled
+            and not setpoint_reached
+            and not weekly_charge_bypasses_delay
+        )
         if delay_active:
             context_mask |= CONTEXT_CHARGE_DELAY
         if setpoint_active and action_mask & (ACTION_SOLAR_CHARGE | ACTION_GRID_CHARGE):
@@ -1360,7 +1384,7 @@ class ChargeDischargeController:
             "soc_pct": system_soc,
             "delay_active": delay_active,
             "setpoint_active": setpoint_active,
-            "delay_until": status.get("estimated_unlock_time"),
+            "delay_until": status.get("estimated_unlock_time") if delay_active else None,
             "slot": slot_label,
             "simultaneous": bool(
                 (positive_batteries and negative_batteries)
@@ -1574,14 +1598,20 @@ class ChargeDischargeController:
 
         setpoint_enabled = bool(getattr(self, "_delay_soc_setpoint_enabled", False))
         setpoint_reached = bool(getattr(self, "_delay_setpoint_reached", False))
+        weekly_charge_bypasses_delay = (
+            ChargeDischargeController._daily_operation_weekly_delay_bypass(self)
+        )
         delay_active = self._daily_operation_delay_active()
         delay_state = str(
             (getattr(self, "_charge_delay_status", {}) or {}).get("state", "")
         ).strip().lower()
-        delay_planned = delay_active or (
-            setpoint_enabled
-            and not setpoint_reached
-            and delay_state == "charging to setpoint"
+        delay_planned = not weekly_charge_bypasses_delay and (
+            delay_active
+            or (
+                setpoint_enabled
+                and not setpoint_reached
+                and delay_state == "charging to setpoint"
+            )
         )
         runtime_delay_unlock = (
             self._daily_operation_delay_unlock(now) if delay_planned else None
@@ -1604,7 +1634,11 @@ class ChargeDischargeController:
                 if getattr(self, "predictive_charging_enabled", False)
                 else 0
             )
-            if setpoint_enabled and not setpoint_reached:
+            if (
+                setpoint_enabled
+                and not setpoint_reached
+                and not weekly_charge_bypasses_delay
+            ):
                 context |= PROJECTION_CONTEXT_SETPOINT
             scheduled = any(
                 allocation.slot.start < interval.end
@@ -1720,7 +1754,12 @@ class ChargeDischargeController:
         delay_projection = None
         delay_starts_at = now if delay_active and not setpoint_enabled else None
         delay_ends_at = runtime_delay_unlock if delay_starts_at is not None else None
-        if battery_inputs and setpoint_enabled and not setpoint_reached:
+        if (
+            battery_inputs
+            and setpoint_enabled
+            and not setpoint_reached
+            and not weekly_charge_bypasses_delay
+        ):
             try:
                 delay_projection = project_charge_delay(
                     projection_inputs,
@@ -1893,6 +1932,7 @@ class ChargeDischargeController:
                 schedule_signature,
                 bool(getattr(self, "_charge_delay_unlocked", False)),
                 bool(getattr(self, "_delay_setpoint_reached", False)),
+                ChargeDischargeController._daily_operation_weekly_delay_bypass(self),
                 current.date().isoformat(),
             )
             monotonic_now = time.monotonic()
@@ -1926,9 +1966,20 @@ class ChargeDischargeController:
             delay = dict(getattr(self, "_charge_delay_status", {}) or {})
             delay.setdefault("enabled", bool(getattr(self, "charge_delay_enabled", False)))
             delay.setdefault("unlocked", bool(getattr(self, "_charge_delay_unlocked", False)))
+            weekly_delay_bypassed = (
+                ChargeDischargeController._daily_operation_weekly_delay_bypass(self)
+            )
+            if weekly_delay_bypassed:
+                # The control cycle refreshes the diary before the charge-delay
+                # handler runs. Publish the weekly override immediately so a
+                # stale delayed state cannot paint the current cell.
+                delay["state"] = "Skipped - Full Charge Day"
+                delay["estimated_unlock_time"] = None
+                delay["unlock_time"] = None
+                delay["weekly_full_charge_bypasses_delay"] = True
             if projection is not None:
                 delay_projection = projection.pop("_delay_projection", None)
-                if isinstance(delay_projection, dict):
+                if isinstance(delay_projection, dict) and not weekly_delay_bypassed:
                     delay.setdefault(
                         "estimated_unlock_time",
                         delay_projection.get("estimated_unlock_at"),
