@@ -18,6 +18,7 @@ import asyncio
 from contextlib import suppress
 import logging
 import math
+import statistics
 from datetime import date, datetime, time, timedelta
 from time import monotonic
 from typing import TYPE_CHECKING, Any, Optional
@@ -342,8 +343,7 @@ class ConsumptionTracker:
             for item in valid[-3:]
         ]
         if values:
-            values.sort()
-            return values[len(values) // 2], "vacation_night_median"
+            return statistics.median(values), "vacation_night_median"
         try:
             today = dt_util.now().date()
             midnight = datetime.combine(today, time.min, tzinfo=dt_util.now().tzinfo)

@@ -588,10 +588,14 @@ class ConsumptionProfileTracker:
         # occurs twice, and an away period in fold=1 must mask it as well.
         for fold in (0, 1):
             start = wall_start.replace(tzinfo=self._timezone(), fold=fold)
-            end = (wall_start + timedelta(seconds=INTERVAL_SECONDS)).replace(
-                tzinfo=self._timezone(), fold=fold
-            )
-            start_ts, end_ts = start.timestamp(), end.timestamp()
+            start_ts = start.timestamp()
+            # Ignore a nonexistent spring-forward wall time. An absolute
+            # 15-minute duration avoids making a fold=0 autumn bin span the
+            # repeated hour before 03:00.
+            round_trip = datetime.fromtimestamp(start_ts, self._timezone())
+            if round_trip.replace(tzinfo=None) != wall_start or round_trip.fold != fold:
+                continue
+            end_ts = start_ts + INTERVAL_SECONDS
             for period_start, period_end in self._excluded_periods:
                 period_start_ts = period_start.timestamp()
                 period_end_ts = period_end.timestamp() if period_end else None

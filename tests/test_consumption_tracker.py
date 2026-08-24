@@ -11,6 +11,7 @@ import asyncio
 import math
 from datetime import date, datetime, timedelta, timezone
 from types import SimpleNamespace
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -138,6 +139,15 @@ def test_vacation_baseline_ignores_nights_without_three_hours_coverage():
     assert source == "vacation_night_median"
 
 
+def test_vacation_baseline_averages_two_valid_nights():
+    tracker = _make_tracker([])
+    tracker._vacation_nights = [
+        {"date": "2026-06-01", "energy_kwh": 3.0, "coverage_s": 10800.0},
+        {"date": "2026-06-02", "energy_kwh": 6.0, "coverage_s": 10800.0},
+    ]
+    assert tracker._vacation_baseline_kw()[0] == pytest.approx(1.5)
+
+
 @pytest.mark.asyncio
 async def test_vacation_state_save_is_coalesced():
     tracker = _make_tracker([])
@@ -174,15 +184,32 @@ def test_vacation_night_uses_absolute_dst_duration():
     tracker = _make_tracker([])
     tracker._vacation_nights = []
     tracker._vacation_save_task = None
-    start = datetime(2026, 3, 29, 1, 0, tzinfo=timezone.utc)
-    # The helper receives absolute timestamps, so a 3-hour covered sample is
-    # never inflated to four hours by a local spring-forward transition.
+    madrid = ZoneInfo("Europe/Madrid")
+    start = datetime(2026, 3, 29, 1, 59, 59, tzinfo=madrid)
     tracker._vacation_last_sample_time = start
     tracker._vacation_last_sample_mono = 0.0
     tracker._vacation_last_power_kw = 1.0
     tracker._request_vacation_save = lambda: None
-    tracker._record_vacation_night_sample(1.0, start + timedelta(hours=3), 10800.0)
-    assert tracker._vacation_nights[0]["coverage_s"] == pytest.approx(10800.0)
+    tracker._record_vacation_night_sample(
+        1.0, datetime(2026, 3, 29, 3, 0, 1, tzinfo=madrid), 2.0
+    )
+    assert tracker._vacation_nights[0]["coverage_s"] == pytest.approx(2.0)
+    assert tracker._vacation_nights[0]["energy_kwh"] == pytest.approx(2 / 3600)
+
+
+@pytest.mark.asyncio
+async def test_load_vacation_state_keeps_partial_night_but_not_baseline():
+    tracker = _make_tracker([])
+    tracker._controller.vacation_mode_enabled = False
+    tracker._vacation_periods = []
+    tracker._vacation_store = _FakeConsumptionStore({
+        "periods": [],
+        "nights": [{"date": "2026-06-01", "energy_kwh": 2.0, "coverage_s": 7200.0}],
+    })
+    tracker._consumption_profile = SimpleNamespace(set_excluded_periods=lambda _periods: None)
+    await tracker.load_vacation_state()
+    assert tracker._vacation_nights[0]["coverage_s"] == 7200.0
+    assert tracker._vacation_baseline_kw()[1] != "vacation_night_median"
 
 
 # ----------------------------------------------------------------------

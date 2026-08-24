@@ -318,6 +318,7 @@ def test_vacation_mask_covers_second_dst_fold():
         "end": datetime(2026, 10, 25, 2, 10, tzinfo=MADRID, fold=1).isoformat(),
     }])
     assert profile._interval_is_excluded(local_date, 8)  # 02:00–02:15
+    assert not profile._interval_is_excluded(local_date, 11)  # 02:45–03:00 fold=1
 
 
 def test_current_day_capture_is_unavailable_without_covered_samples():
