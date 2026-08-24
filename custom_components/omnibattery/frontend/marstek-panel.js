@@ -3434,7 +3434,7 @@ class MarstekVenusPanel extends HTMLElement {
     // Layer native CSS gradients instead: the base action keeps its fill and
     // each simultaneous action is always visible as an alternating hatch.
     const patterns = item.actions.slice(1, 3).map((action, patternIndex) =>
-      `repeating-linear-gradient(${patternIndex ? "45deg" : "135deg"}, transparent 0 4px, ${actionColor[action]} 4px 6px)`
+      `repeating-linear-gradient(${patternIndex ? "45deg" : "135deg"}, transparent 0 4px, color-mix(in oklab, ${actionColor[action]} var(--daily-op-shade-opacity), transparent) 4px 6px)`
     );
     cell.style.backgroundImage = patterns.join(", ") || "none";
     cell.setAttribute("aria-label", this._dailyOperationAriaLabel(snapshot, item));
@@ -6763,7 +6763,7 @@ class MarstekVenusPanel extends HTMLElement {
         pointer-events: none; z-index: 5; }
 
       /* ===== Daily operation timeline ===== */
-      .daily-operation-card { position: relative; min-width: 0; overflow: visible; --daily-op-shade-opacity: 50%; }
+      .daily-operation-card { position: relative; min-width: 0; overflow: visible; --daily-op-confirmed-shade-opacity: 50%; --daily-op-future-shade-opacity: 25%; --daily-op-shade-opacity: var(--daily-op-confirmed-shade-opacity); }
       .daily-operation-card[hidden], .daily-operation-card [hidden] { display: none !important; }
       .daily-op-description { font-size: 12px; line-height: 1.45; margin: -7px 0 12px; }
       .daily-op-toolbar { display: flex; align-items: center; gap: 12px; min-width: 0; margin-bottom: 9px; }
@@ -6819,7 +6819,7 @@ class MarstekVenusPanel extends HTMLElement {
       .daily-op-cell { position: relative; display: block; min-width: 0; height: 146px; padding: 0; border: 0; border-left: 1px solid var(--line); border-radius: 0; background-color: transparent; background-repeat: repeat; background-size: 8px 8px; cursor: pointer; pointer-events: auto; transition: filter .12s, opacity .12s; }
       .daily-op-cell:hover, .daily-op-cell:focus-visible { z-index: 4; filter: brightness(1.18); outline: 2px solid var(--accent); outline-offset: -2px; }
       .daily-op-cell.daily-op-current { box-shadow: inset 0 0 0 1px var(--accent); }
-      .daily-op-cell.daily-op-forecast { border-bottom: 1px dashed var(--line-strong); }
+      .daily-op-cell.daily-op-forecast { border-bottom: 1px dashed var(--line-strong); --daily-op-shade-opacity: var(--daily-op-future-shade-opacity); }
       .daily-op-cell.daily-op-stale { opacity: .55; }
       .daily-op-base-solar-window { background-color: color-mix(in oklab, var(--daily-op-solar-window) var(--daily-op-shade-opacity), transparent); }
       .daily-op-base-solar { background-color: color-mix(in oklab, var(--daily-op-solar-charge) var(--daily-op-shade-opacity), transparent); }
@@ -6827,7 +6827,7 @@ class MarstekVenusPanel extends HTMLElement {
       .daily-op-base-discharge { background-color: color-mix(in oklab, var(--daily-op-discharge) var(--daily-op-shade-opacity), transparent); }
       .daily-op-base-not-needed { background-color: color-mix(in oklab, var(--daily-op-not-needed) var(--daily-op-shade-opacity), transparent); }
       .daily-op-base-neutral { background-color: color-mix(in oklab, var(--bg-2) var(--daily-op-shade-opacity), transparent); }
-      .daily-op-cell.daily-op-hourly-balance::after { content: ""; position: absolute; left: 1px; right: 1px; bottom: 0; height: 3px; background: var(--daily-op-hourly-balance); opacity: .9; }
+      .daily-op-cell.daily-op-hourly-balance::after { content: ""; position: absolute; left: 1px; right: 1px; bottom: 0; height: 3px; background: color-mix(in oklab, var(--daily-op-hourly-balance) var(--daily-op-shade-opacity), transparent); opacity: .9; }
       .daily-op-cell.daily-op-delay::before { content: ""; position: absolute; left: 1px; right: 1px; top: 0; height: 3px; background: var(--daily-op-delay); }
       .daily-op-delay-mark, .daily-op-setpoint-mark { position: absolute; z-index: 2; display: grid; place-items: center; color: var(--daily-op-delay); --mdc-icon-size: 12px; }
       .daily-op-delay-mark { top: 4px; right: 2px; }
