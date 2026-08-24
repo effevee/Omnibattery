@@ -772,7 +772,11 @@ class DailyOperationTimelineManager:
         self._debounce_seconds = parsed_debounce if parsed_debounce is not None else 1.0
         self._save_handle: asyncio.TimerHandle | None = None
         self._save_task: asyncio.Task | None = None
+        self._save_revision = 0
+        self._save_reschedule_requested = False
         self._listeners: list[Callable[..., Any]] = []
+        self._update_batch_depth = 0
+        self._update_notification_pending = False
         self._dirty = False
         self._loaded = False
         self._last_error: str | None = None
@@ -790,6 +794,8 @@ class DailyOperationTimelineManager:
         self._planned_stored_energy_end_kwh: list[float | None] = []
         self._current_index = 0
         self._current_progress = 0.0
+        self._last_clock_timestamp: float | None = None
+        self._interval_end_timestamp_cache: list[tuple[float, ...] | None] = []
         self._mode = self._controller_mode()
         self._plan_evaluated_at: str | None = None
         self._generated_at: str | None = None
@@ -868,6 +874,9 @@ class DailyOperationTimelineManager:
     add_listener = async_add_listener
 
     def _notify_listeners(self) -> None:
+        if self._update_batch_depth > 0:
+            self._update_notification_pending = True
+            return
         for listener in tuple(self._listeners):
             try:
                 listener(self)
@@ -878,6 +887,19 @@ class DailyOperationTimelineManager:
                     _LOGGER.debug("Daily operation listener failed", exc_info=True)
             except Exception:
                 _LOGGER.debug("Daily operation listener failed", exc_info=True)
+
+    def begin_update_batch(self) -> None:
+        """Defer listener publication until a coherent refresh is complete."""
+        self._update_batch_depth += 1
+
+    def end_update_batch(self) -> None:
+        """Publish one listener update after the outermost refresh batch."""
+        if self._update_batch_depth <= 0:
+            return
+        self._update_batch_depth -= 1
+        if self._update_batch_depth == 0 and self._update_notification_pending:
+            self._update_notification_pending = False
+            self._notify_listeners()
 
     @staticmethod
     def _safe_metadata(value: Any, *, max_items: int = 16) -> dict[str, Any]:
@@ -1013,6 +1035,10 @@ class DailyOperationTimelineManager:
             parsed = self._now()
         return parsed.astimezone(self._timezone())
 
+    def as_local_datetime(self, value: Any = None) -> datetime:
+        """Normalize an external callback timestamp to Home Assistant local time."""
+        return self._as_local_datetime(value)
+
     def configuration_fingerprint(self) -> str:
         """Hash config/source identity without persisting the config itself."""
         data = getattr(self._config_entry, "data", {}) or {}
@@ -1071,6 +1097,8 @@ class DailyOperationTimelineManager:
         self._planned_stored_energy_end_kwh = [None] * INTERVAL_COUNT
         self._current_index = 0
         self._current_progress = 0.0
+        self._last_clock_timestamp = None
+        self._interval_end_timestamp_cache = [None] * INTERVAL_COUNT
         self._plan_evaluated_at = None
         self._generated_at = None
         self._stale = False
@@ -1088,19 +1116,78 @@ class DailyOperationTimelineManager:
             "operation_plan": None,
         }
 
-    def _advance_clock(self, current: datetime) -> bool:
+    def _interval_end_timestamps(self, index: int) -> tuple[float, ...]:
+        """Return every physical end instant owned by one wall-clock cell.
+
+        The dashboard deliberately has 96 *wall-clock* cells.  On an autumn
+        DST change the four 02:xx cells therefore each own two physical
+        occurrences.  A cell is historical only after its final occurrence
+        has ended, not after the first pass through that wall time.
+        """
+        cached = self._interval_end_timestamp_cache[index]
+        if cached is not None:
+            return cached
+
+        hour, quarter = divmod(index, 4)
+        start_wall = datetime.combine(
+            self._local_date, time(hour, quarter * INTERVAL_MINUTES)
+        )
+        starts = _datetime_candidates(start_wall, self._timezone())
+        if not starts:
+            self._interval_end_timestamp_cache[index] = ()
+            return ()
+        if len(starts) > 1:
+            result = tuple(start.timestamp() + INTERVAL_SECONDS for start in starts)
+            self._interval_end_timestamp_cache[index] = result
+            return result
+
+        end_wall = start_wall + timedelta(minutes=INTERVAL_MINUTES)
+        ends = _datetime_candidates(end_wall, self._timezone())
+        start_timestamp = starts[0].timestamp()
+        valid_ends = sorted(
+            candidate.timestamp()
+            for candidate in ends
+            if candidate.timestamp() > start_timestamp
+        )
+        if valid_ends:
+            result = (valid_ends[0],)
+            self._interval_end_timestamp_cache[index] = result
+            return result
+        # The wall endpoint of the quarter before spring-forward is
+        # nonexistent, while the physical quarter still lasts fifteen minutes.
+        result = (start_timestamp + INTERVAL_SECONDS,)
+        self._interval_end_timestamp_cache[index] = result
+        return result
+
+    def _advance_clock(self, current: datetime, *, close_elapsed: bool = True) -> bool:
+        """Advance from an absolute instant without confusing a DST fold.
+
+        Wall-clock indexes legitimately move from 11 back to 8 during the
+        second 02:00 hour in Europe/Madrid.  Ordering is instead based on the
+        absolute timestamp.  Late callbacks are ignored, but the repeated
+        hour remains writable until every physical occurrence has elapsed.
+        """
+        timestamp = current.timestamp()
+        if (
+            self._last_clock_timestamp is not None
+            and timestamp < self._last_clock_timestamp
+        ):
+            return False
         index = self._index_for_datetime(current)
         progress = self._progress_for_datetime(current)
-        # Runtime callbacks can arrive late.  A late callback must not move
-        # the public "now" marker backwards and accidentally reopen a closed
-        # interval; midnight is handled by ``_ensure_current_day``.
-        if index < self._current_index:
-            return False
         changed = index != self._current_index or progress != self._current_progress
         self._current_index = index
         self._current_progress = progress
-        for closed_index in range(index):
-            if not self._closed[closed_index]:
+        self._last_clock_timestamp = timestamp
+        if not close_elapsed:
+            return changed
+        for closed_index in range(INTERVAL_COUNT):
+            end_timestamps = self._interval_end_timestamps(closed_index)
+            if (
+                not self._closed[closed_index]
+                and end_timestamps
+                and timestamp >= max(end_timestamps)
+            ):
                 self._closed[closed_index] = True
                 changed = True
         return changed
@@ -2348,8 +2435,10 @@ class DailyOperationTimelineManager:
 
     async def async_save(self) -> bool:
         """Write the bounded payload without ever blocking the control caller."""
+        revision = self._save_revision
+        payload = self._store_payload()
         try:
-            saved = self._store.async_save(self._store_payload())
+            saved = self._store.async_save(payload)
             if inspect.isawaitable(saved):
                 await saved
         except Exception as exc:  # noqa: BLE001
@@ -2357,13 +2446,38 @@ class DailyOperationTimelineManager:
             _LOGGER.error("Daily operation timeline: failed to save Store: %s", exc)
             return False
         self._configuration_fingerprint = self.configuration_fingerprint()
-        self._dirty = False
+        # A mutation may have happened while Store was awaiting I/O.  Its
+        # payload was not part of this write, so retain dirty state and queue
+        # a follow-up instead of silently losing the final runtime evidence.
+        if self._save_revision == revision:
+            self._dirty = False
+        else:
+            self._dirty = True
+            self._save_reschedule_requested = True
         self._last_error = None
         return True
+
+    def _reschedule_after_save(self, _task: asyncio.Task) -> None:
+        if self._save_reschedule_requested:
+            self._schedule_pending_save()
+
+    def _schedule_pending_save(self) -> None:
+        """Start one follow-up save after an in-flight write has completed."""
+        if not self._save_reschedule_requested or not self._dirty:
+            return
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        if self._save_task is not None and not self._save_task.done():
+            return
+        self._save_reschedule_requested = False
+        self._save_task = loop.create_task(self.async_save())
 
     def request_save(self, *, immediate: bool = False) -> None:
         """Schedule one debounced background save and return immediately."""
         self._dirty = True
+        self._save_revision += 1
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
@@ -2374,8 +2488,13 @@ class DailyOperationTimelineManager:
                 self._save_handle = None
             if self._save_task is None or self._save_task.done():
                 self._save_task = loop.create_task(self.async_save())
+            else:
+                self._save_reschedule_requested = True
+                self._save_task.add_done_callback(self._reschedule_after_save)
             return
         if self._save_task is not None and not self._save_task.done():
+            self._save_reschedule_requested = True
+            self._save_task.add_done_callback(self._reschedule_after_save)
             return
         if self._save_handle is not None and not self._save_handle.cancelled():
             return
@@ -2392,15 +2511,24 @@ class DailyOperationTimelineManager:
         if self._save_handle is not None:
             self._save_handle.cancel()
             self._save_handle = None
-        task = self._save_task
-        if task is not None and not task.done():
+        while True:
+            task = self._save_task
+            if task is not None and not task.done():
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
+                # Give the task completion callback a chance to enqueue a
+                # coalesced follow-up write before deciding the flush is done.
+                await asyncio.sleep(0)
+                continue
+            if not self._dirty:
+                return True
             try:
-                await task
-            except asyncio.CancelledError:
-                pass
-        if self._dirty:
-            return await self.async_save()
-        return True
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                return await self.async_save()
+            self._save_task = loop.create_task(self.async_save())
 
     async def async_shutdown(self) -> bool:
         return await self.async_save_all()
@@ -2464,9 +2592,15 @@ class DailyOperationTimelineManager:
     def build_public_snapshot(self, *, as_dto: bool = False) -> dict[str, Any] | DailyOperationTimelineSnapshot:
         """Return the versioned, bounded, JSON-safe dashboard contract."""
         current = self._now()
-        if current.date() != self._local_date:
-            self._ensure_current_day(current)
-        self._advance_clock(current)
+        # Snapshot reads must not perform the day rollover.  A polling entity
+        # can otherwise clear yesterday's coherent payload before the controller
+        # has captured telemetry and rebuilt today's projection.  Mutating
+        # refresh methods perform the rollover atomically instead.
+        # Within the same local day it is safe to refresh the public marker,
+        # but a read never closes an interval.  At midnight retain the last
+        # coherent day until a mutating control refresh performs the rollover.
+        if current.date() == self._local_date:
+            self._advance_clock(current, close_elapsed=False)
         self._generated_at = current.isoformat()
         action_durations = self._public_action_durations()
         actual_coverage = [

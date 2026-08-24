@@ -1074,6 +1074,52 @@ class ChargeDischargeController:
             return "time_slot"
         return normalized or "normal"
 
+    def _daily_operation_delay_unlock(self, now: datetime) -> datetime | None:
+        """Return today's runtime delay boundary as a local datetime."""
+        raw = (getattr(self, "_charge_delay_status", {}) or {}).get(
+            "estimated_unlock_time"
+        )
+        if raw is None or raw == "":
+            return None
+        candidate = raw if isinstance(raw, datetime) else None
+        if candidate is None:
+            text = str(raw).strip()
+            try:
+                candidate = datetime.fromisoformat(text.replace("Z", "+00:00"))
+            except ValueError:
+                try:
+                    hour_text, minute_text = text.split(":", 1)
+                    candidate = now.replace(
+                        hour=int(hour_text),
+                        minute=int(minute_text),
+                        second=0,
+                        microsecond=0,
+                    )
+                except (TypeError, ValueError):
+                    return None
+        if candidate.tzinfo is None:
+            return candidate.replace(tzinfo=now.tzinfo)
+        return (
+            candidate.astimezone(now.tzinfo)
+            if now.tzinfo is not None
+            else candidate
+        )
+
+    def _daily_operation_delay_active(self) -> bool:
+        """Return whether Charge Delay is currently blocking grid charging."""
+        if (
+            not getattr(self, "charge_delay_enabled", False)
+            or getattr(self, "_charge_delay_unlocked", False)
+        ):
+            return False
+        state = str(
+            (getattr(self, "_charge_delay_status", {}) or {}).get("state", "")
+        ).strip().lower()
+        return state.startswith("delayed") or state in {
+            "waiting for forecast",
+            "waiting for solar",
+        }
+
     @staticmethod
     def _daily_operation_capture(profile: Any, source: str) -> Any:
         """Adapt a profile's bounded live capture without exposing its object."""
@@ -1109,6 +1155,25 @@ class ChargeDischargeController:
             getattr(self, "grid_charging_active", False)
             or getattr(self, "_realtime_price_charging", False)
         )
+        solar_power_w = None
+        tracker = getattr(self, "_consumption_tracker", None)
+        read_solar = getattr(tracker, "_read_total_solar_power_kw", None)
+        if callable(read_solar):
+            try:
+                solar_power_kw = self._daily_operation_float(read_solar(), math.nan)
+                if math.isfinite(solar_power_kw):
+                    solar_power_w = max(0.0, solar_power_kw * 1000.0)
+            except Exception:  # noqa: BLE001 - classification is diagnostic only
+                solar_power_w = None
+        solar_measured = solar_power_w is not None and solar_power_w > 10.0
+        # ``previous_sensor`` is the latest net grid meter sample in the
+        # controller's import-positive convention.  External PV production on
+        # its own does not prove that an AC battery charge is solar-powered
+        # when the site is still importing from the grid.
+        grid_power_w = self._daily_operation_float(
+            getattr(self, "previous_sensor", None), math.nan
+        )
+        grid_importing = math.isfinite(grid_power_w) and grid_power_w > 10.0
         total_capacity = 0.0
         total_stored = 0.0
         for coordinator in getattr(self, "coordinators", ()):
@@ -1185,37 +1250,52 @@ class ChargeDischargeController:
             if cell_power > 10.0:
                 charge_power += cell_power
                 positive_batteries += 1
-                if direct_pv_w > 10.0 or not grid_active:
+                # A positive battery flow is not, by itself, proof of solar
+                # charging.  In particular, an inverter can keep drawing AC for
+                # a few samples after the scheduled grid window is released.
+                # Require live PV evidence before painting the interval green.
+                solar_charge = direct_pv_w > 10.0 or (
+                    solar_measured and not grid_active and not grid_importing
+                )
+                if solar_charge:
                     action_mask |= ACTION_SOLAR_CHARGE
                 # A global grid-charge mode can overlap a battery that is
-                # exporting AC while its MPPT still charges the cells. Only
-                # label grid charge when this unit actually draws from AC.
-                if grid_active and (
-                    not math.isfinite(ac_power) or ac_power < -10.0
-                ):
+                # exporting AC while its MPPT still charges the cells. AC draw
+                # plus current grid import is also direct evidence of a mixed
+                # solar/grid charge even if the schedule flag has just fallen.
+                ac_draws_from_grid = math.isfinite(ac_power) and ac_power < -10.0
+                if (
+                    grid_active
+                    and (not math.isfinite(ac_power) or ac_draws_from_grid)
+                ) or (direct_pv_w > 10.0 and grid_importing and ac_draws_from_grid):
+                    action_mask |= ACTION_GRID_CHARGE
+                elif not solar_charge:
+                    # Charging is still a real historical action when its
+                    # source cannot be split.  With no live PV evidence the
+                    # conservative physical classification is AC/grid, never
+                    # an invisible or invented solar interval.
                     action_mask |= ACTION_GRID_CHARGE
             elif cell_power < -10.0:
                 discharge_power += -cell_power
                 negative_batteries += 1
                 action_mask |= ACTION_DISCHARGE
 
+        runtime_source = "runtime_measured" if measured else "runtime_command"
         if not measured:
             total_power = self._daily_operation_float(
                 getattr(self, "previous_power", 0.0), 0.0
             )
-            measured = abs(total_power) > 10.0
             if total_power > 10.0:
                 charge_power = total_power
-                action_mask |= (
-                    ACTION_GRID_CHARGE if grid_active else ACTION_SOLAR_CHARGE
-                )
+                if solar_measured and not grid_active and not grid_importing:
+                    action_mask |= ACTION_SOLAR_CHARGE
+                else:
+                    action_mask |= ACTION_GRID_CHARGE
             elif total_power < -10.0:
                 discharge_power = -total_power
                 action_mask |= ACTION_DISCHARGE
 
-        charge_delay_enabled = bool(getattr(self, "charge_delay_enabled", False))
-        delay_unlocked = bool(getattr(self, "_charge_delay_unlocked", False))
-        delay_active = charge_delay_enabled and not delay_unlocked
+        delay_active = self._daily_operation_delay_active()
         setpoint_enabled = bool(getattr(self, "_delay_soc_setpoint_enabled", False))
         setpoint_reached = bool(getattr(self, "_delay_setpoint_reached", False))
         setpoint_active = setpoint_enabled and not setpoint_reached
@@ -1271,7 +1351,7 @@ class ChargeDischargeController:
 
         return {
             "mode": mode,
-            "source": "runtime_measured" if measured else "runtime_command",
+            "source": runtime_source,
             "action_mask": action_mask,
             "context_mask": context_mask,
             "grid_charge_decision": grid_decision,
@@ -1351,6 +1431,16 @@ class ChargeDischargeController:
             simulate_battery_projection,
         )
         mode = self._daily_operation_mode()
+        if bool(getattr(self, "manual_mode_enabled", False)):
+            # Global manual mode bypasses the automatic controller entirely.
+            # Future battery flows are unknowable from the automatic plan, so
+            # publish no invented projection rather than a conflicting one.
+            return {
+                "intervals": [],
+                "mode": mode,
+                "stale": False,
+                "sources": {"operation_plan": "manual_mode"},
+            }
         if mode == "realtime_price":
             return {
                 "intervals": [],
@@ -1435,6 +1525,19 @@ class ChargeDischargeController:
                     )
 
         battery_inputs = self._daily_operation_battery_inputs()
+        system_charge_power_w = None
+        system_discharge_power_w = None
+        if bool(getattr(self, "enable_system_power_limits", False)):
+            configured_charge = self._daily_operation_float(
+                getattr(self, "system_max_charge_power", None), 0.0
+            )
+            configured_discharge = self._daily_operation_float(
+                getattr(self, "system_max_discharge_power", None), 0.0
+            )
+            if configured_charge > 0.0:
+                system_charge_power_w = configured_charge
+            if configured_discharge > 0.0:
+                system_discharge_power_w = configured_discharge
         plan_intervals = list(getattr(plan, "intervals", ()) or ())
         if not plan_intervals:
             return None
@@ -1471,9 +1574,17 @@ class ChargeDischargeController:
 
         setpoint_enabled = bool(getattr(self, "_delay_soc_setpoint_enabled", False))
         setpoint_reached = bool(getattr(self, "_delay_setpoint_reached", False))
-        delay_active = bool(
-            getattr(self, "charge_delay_enabled", False)
-            and not getattr(self, "_charge_delay_unlocked", False)
+        delay_active = self._daily_operation_delay_active()
+        delay_state = str(
+            (getattr(self, "_charge_delay_status", {}) or {}).get("state", "")
+        ).strip().lower()
+        delay_planned = delay_active or (
+            setpoint_enabled
+            and not setpoint_reached
+            and delay_state == "charging to setpoint"
+        )
+        runtime_delay_unlock = (
+            self._daily_operation_delay_unlock(now) if delay_planned else None
         )
         mode_context = {
             "dynamic_pricing": PROJECTION_CONTEXT_DYNAMIC_PRICE,
@@ -1488,9 +1599,11 @@ class ChargeDischargeController:
         context_masks = []
         grid_decisions = []
         for interval, remaining_start, _remaining_ratio in remaining_intervals:
-            context = mode_context if getattr(self, "predictive_charging_enabled", False) else 0
-            if delay_active:
-                context |= PROJECTION_CONTEXT_CHARGE_DELAY
+            context = (
+                mode_context
+                if getattr(self, "predictive_charging_enabled", False)
+                else 0
+            )
             if setpoint_enabled and not setpoint_reached:
                 context |= PROJECTION_CONTEXT_SETPOINT
             scheduled = any(
@@ -1531,6 +1644,8 @@ class ChargeDischargeController:
             allocations=allocations,
             context_masks=context_masks,
             grid_charge_decisions=grid_decisions,
+            system_charge_power_w=system_charge_power_w,
+            system_discharge_power_w=system_discharge_power_w,
         )
 
         capacity = sum(item.capacity_kwh for item in battery_inputs)
@@ -1563,8 +1678,18 @@ class ChargeDischargeController:
                     "stored_energy_end_kwh": 0.0,
                     "duration_s": 0.0,
                     "source": str(source),
+                    "_start": flow.start,
+                    "_end": flow.end,
                 },
             )
+            if flow.start is not None and (
+                item["_start"] is None or flow.start < item["_start"]
+            ):
+                item["_start"] = flow.start
+            if flow.end is not None and (
+                item["_end"] is None or flow.end > item["_end"]
+            ):
+                item["_end"] = flow.end
             for key in (
                 "solar_kwh",
                 "consumption_kwh",
@@ -1592,7 +1717,60 @@ class ChargeDischargeController:
                 getattr(flow, "stored_energy_end_kwh", 0.0), 0.0
             )
 
+        delay_projection = None
+        delay_starts_at = now if delay_active and not setpoint_enabled else None
+        delay_ends_at = runtime_delay_unlock if delay_starts_at is not None else None
+        if battery_inputs and setpoint_enabled and not setpoint_reached:
+            try:
+                delay_projection = project_charge_delay(
+                    projection_inputs,
+                    battery_inputs,
+                    setpoint_soc_pct=self._daily_operation_float(
+                        getattr(self, "_delay_soc_setpoint", None), 0.0
+                    ),
+                    enabled=setpoint_enabled,
+                    charge_delay_enabled=bool(
+                        getattr(self, "charge_delay_enabled", False)
+                    ),
+                    now=now,
+                    allocations=allocations,
+                    unlock_at=runtime_delay_unlock,
+                    system_charge_power_w=system_charge_power_w,
+                    system_discharge_power_w=system_discharge_power_w,
+                )
+                if delay_planned:
+                    delay_starts_at = delay_projection.delay_starts_at
+                    delay_ends_at = delay_projection.estimated_unlock_at
+            except Exception:  # noqa: BLE001
+                delay_projection = None
+
+        if (
+            delay_projection is not None
+            and delay_projection.setpoint_reached_at is not None
+        ):
+            # Keep the marker through the interval that reaches the target,
+            # but remove it from every later projected interval.
+            for item in aggregates.values():
+                interval_start = item.get("_start")
+                if (
+                    interval_start is not None
+                    and interval_start >= delay_projection.setpoint_reached_at
+                ):
+                    item["context_mask"] &= ~PROJECTION_CONTEXT_SETPOINT
+
         for item in aggregates.values():
+            interval_start = item.pop("_start", None)
+            interval_end = item.pop("_end", None)
+            if (
+                delay_starts_at is not None
+                and delay_ends_at is not None
+                and interval_start is not None
+                and interval_end is not None
+                and interval_end > delay_starts_at
+                and interval_start < delay_ends_at
+            ):
+                item["context_mask"] |= PROJECTION_CONTEXT_CHARGE_DELAY
+                item["delay_until"] = delay_ends_at
             duration = item.pop("duration_s")
             item["charge_power_w"] = (
                 (item["solar_to_battery_kwh"] + item["grid_to_battery_kwh"])
@@ -1609,25 +1787,12 @@ class ChargeDischargeController:
             )
             if capacity > 0.0:
                 item["soc_end_pct"] = item["stored_energy_end_kwh"] / capacity * 100.0
-            item["setpoint_active"] = bool(item["context_mask"] & PROJECTION_CONTEXT_SETPOINT)
-            item["delay_active"] = bool(item["context_mask"] & PROJECTION_CONTEXT_CHARGE_DELAY)
-
-        delay_projection = None
-        if battery_inputs and setpoint_enabled:
-            try:
-                delay_projection = project_charge_delay(
-                    projection_inputs,
-                    battery_inputs,
-                    setpoint_soc_pct=self._daily_operation_float(
-                        getattr(self, "_delay_soc_setpoint", None), 0.0
-                    ),
-                    enabled=setpoint_enabled,
-                    charge_delay_enabled=bool(getattr(self, "charge_delay_enabled", False)),
-                    now=now,
-                    allocations=allocations,
-                )
-            except Exception:  # noqa: BLE001
-                delay_projection = None
+            item["setpoint_active"] = bool(
+                item["context_mask"] & PROJECTION_CONTEXT_SETPOINT
+            )
+            item["delay_active"] = bool(
+                item["context_mask"] & PROJECTION_CONTEXT_CHARGE_DELAY
+            )
 
         diagnostics = getattr(self, "_last_chronological_diagnostics", None) or {}
         sources = {
@@ -1664,6 +1829,20 @@ class ChargeDischargeController:
         if manager is None:
             return
         current = now if isinstance(now, datetime) else dt_util.now()
+        normalize_time = getattr(manager, "as_local_datetime", None)
+        if callable(normalize_time):
+            try:
+                current = normalize_time(current)
+            except Exception:  # noqa: BLE001 - the timeline must not gate control
+                _LOGGER.debug(
+                    "Daily operation timeline timestamp normalization failed",
+                    exc_info=True,
+                )
+        begin_batch = getattr(manager, "begin_update_batch", None)
+        end_batch = getattr(manager, "end_update_batch", None)
+        batching = callable(begin_batch) and callable(end_batch)
+        if batching:
+            begin_batch()
         try:
             tracker = getattr(self, "_consumption_tracker", None)
             manager.refresh_actual_partial(
@@ -1798,6 +1977,9 @@ class ChargeDischargeController:
                 _LOGGER.debug(
                     "Unable to mark daily operation timeline stale", exc_info=True
                 )
+        finally:
+            if batching:
+                end_batch()
 
     def _configured_system_limit(self, is_charging: bool) -> int:
         """Return the optional system-wide power limit for the direction.

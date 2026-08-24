@@ -4,7 +4,7 @@ from __future__ import annotations
 import asyncio
 import copy
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
@@ -19,6 +19,7 @@ from custom_components.omnibattery.tracking.daily_timeline import (
     ACTION_DISCHARGE,
     ACTION_GRID_CHARGE,
     ACTION_SOLAR_CHARGE,
+    CONTEXT_CHARGE_DELAY,
     CONTEXT_DYNAMIC_PRICE,
     DailyOperationTimelineManager,
 )
@@ -39,6 +40,20 @@ class FakeStore:
     async def async_save(self, data):
         self.data = copy.deepcopy(data)
         self.writes.append(copy.deepcopy(data))
+
+
+class BlockingStore(FakeStore):
+    """Store double that exposes a mutation while a write is in flight."""
+
+    def __init__(self):
+        super().__init__()
+        self.started = asyncio.Event()
+        self.release = asyncio.Event()
+
+    async def async_save(self, data):
+        self.started.set()
+        await self.release.wait()
+        await super().async_save(data)
 
 
 class MutableClock:
@@ -74,9 +89,15 @@ def _capture(value: float, coverage: float = 900.0):
     return {"interval_energy_kwh": values, "interval_coverage_s": coverages}
 
 
-def _runtime_controller(coordinators, *, grid_active=False):
-    return SimpleNamespace(
+def _runtime_controller(coordinators, *, grid_active=False, solar_power_kw=None):
+    tracker = None
+    if solar_power_kw is not None:
+        tracker = SimpleNamespace(
+            _read_total_solar_power_kw=lambda: solar_power_kw
+        )
+    controller = SimpleNamespace(
         coordinators=coordinators,
+        _consumption_tracker=tracker,
         grid_charging_active=grid_active,
         predictive_charging_enabled=False,
         charge_delay_enabled=False,
@@ -87,7 +108,13 @@ def _runtime_controller(coordinators, *, grid_active=False):
             ChargeDischargeController._coordinator_delivered_power
         ),
         _is_battery_manual_owned=lambda _coordinator: False,
+        _charge_delay_unlocked=False,
+        _charge_delay_status={"state": "Disabled"},
     )
+    controller._daily_operation_delay_active = lambda: (
+        ChargeDischargeController._daily_operation_delay_active(controller)
+    )
+    return controller
 
 
 def test_runtime_diary_detects_dc_coupled_solar_charge_while_ac_is_exporting():
@@ -128,7 +155,7 @@ def test_runtime_diary_composes_grid_and_dc_solar_charge():
     assert decision["simultaneous"] is True
 
 
-def test_runtime_diary_keeps_charge_and_discharge_power_separate():
+def test_runtime_diary_keeps_charge_history_without_inventing_solar():
     coordinators = [
         SimpleNamespace(
             capabilities=SimpleNamespace(
@@ -149,9 +176,72 @@ def test_runtime_diary_keeps_charge_and_discharge_power_separate():
         controller, datetime(2026, 8, 23, 11, 30, tzinfo=MADRID)
     )
 
-    assert decision["action_mask"] == ACTION_SOLAR_CHARGE | ACTION_DISCHARGE
+    assert decision["action_mask"] == ACTION_GRID_CHARGE | ACTION_DISCHARGE
     assert decision["charge_power_w"] == pytest.approx(1000)
     assert decision["discharge_power_w"] == pytest.approx(400)
+
+
+def test_runtime_diary_classifies_ac_charge_from_live_external_solar():
+    coordinator = SimpleNamespace(
+        capabilities=SimpleNamespace(
+            has_mppt_pv=False, has_solar_telemetry=False
+        ),
+        data={"ac_power": -600},
+    )
+    controller = _runtime_controller(
+        [coordinator], grid_active=False, solar_power_kw=1.4
+    )
+
+    decision = ChargeDischargeController._daily_operation_runtime_decision(
+        controller, datetime(2026, 8, 23, 11, 30, tzinfo=MADRID)
+    )
+
+    assert decision["action_mask"] == ACTION_SOLAR_CHARGE
+
+
+def test_runtime_diary_keeps_grid_label_during_post_window_ac_tail_at_night():
+    coordinator = SimpleNamespace(
+        capabilities=SimpleNamespace(
+            has_mppt_pv=False, has_solar_telemetry=False
+        ),
+        data={"ac_power": -600},
+    )
+    controller = _runtime_controller(
+        [coordinator], grid_active=False, solar_power_kw=0.0
+    )
+
+    decision = ChargeDischargeController._daily_operation_runtime_decision(
+        controller, datetime(2026, 8, 24, 0, 15, tzinfo=MADRID)
+    )
+
+    assert decision["action_mask"] == ACTION_GRID_CHARGE
+
+
+@pytest.mark.parametrize(
+    ("state", "unlocked", "expected"),
+    [
+        ("Idle", False, False),
+        ("Charging to setpoint", False, False),
+        ("Charging allowed", False, False),
+        ("Delayed (10:45 est.)", False, True),
+        ("Waiting for solar", False, True),
+        ("Waiting for forecast", False, True),
+        ("Delayed (10:45 est.)", True, False),
+    ],
+)
+def test_runtime_diary_marks_only_real_charge_delay_states(
+    state, unlocked, expected
+):
+    controller = SimpleNamespace(
+        charge_delay_enabled=True,
+        _charge_delay_unlocked=unlocked,
+        _charge_delay_status={"state": state},
+    )
+
+    assert (
+        ChargeDischargeController._daily_operation_delay_active(controller)
+        is expected
+    )
 
 
 def test_runtime_diary_reports_capacity_weighted_total_soc():
@@ -271,6 +361,7 @@ def test_projection_starts_from_measured_soc_now_instead_of_replaying_the_day():
         _dynamic_pricing_schedule=None,
         predictive_charging_enabled=False,
         charge_delay_enabled=False,
+        _daily_operation_delay_active=lambda: False,
         _delay_soc_setpoint_enabled=False,
         _delay_setpoint_reached=False,
         _charge_delay_unlocked=False,
@@ -286,6 +377,210 @@ def test_projection_starts_from_measured_soc_now_instead_of_replaying_the_day():
     assert intervals[0]["solar_kwh"] == pytest.approx(8 / 15)
     assert intervals[0]["soc_end_pct"] == pytest.approx(68.5333333333)
     assert intervals[1]["soc_end_pct"] == pytest.approx(68.5333333333)
+
+
+def test_projection_limits_charge_delay_clock_to_unlock_boundary():
+    now = datetime(2026, 8, 24, 10, 7, tzinfo=MADRID)
+    hour = now.replace(minute=0, second=0, microsecond=0)
+    plan = SimpleNamespace(
+        allocations=[],
+        intervals=[
+            ProjectionIntervalInput(
+                start=hour + timedelta(minutes=15 * index),
+                end=hour + timedelta(minutes=15 * (index + 1)),
+                consumption_kwh=0.1,
+                solar_kwh=0.0,
+            )
+            for index in range(5)
+        ],
+    )
+    controller = SimpleNamespace(
+        _daily_operation_mode=lambda: "time_slot",
+        _daily_operation_float=ChargeDischargeController._daily_operation_float,
+        _daily_operation_delay_unlock=(
+            lambda current: ChargeDischargeController._daily_operation_delay_unlock(
+                controller, current
+            )
+        ),
+        _daily_operation_delay_active=(
+            lambda: ChargeDischargeController._daily_operation_delay_active(
+                controller
+            )
+        ),
+        _daily_operation_battery_inputs=lambda: [
+            BatteryProjectionInput(
+                key="battery-a",
+                stored_kwh=5.0,
+                capacity_kwh=10.0,
+                min_soc_pct=10.0,
+                max_soc_pct=100.0,
+                charge_power_w=2000.0,
+                discharge_power_w=2000.0,
+            )
+        ],
+        _consumption_tracker=object(),
+        _pricing_mgr=SimpleNamespace(
+            _build_chronological_plan=lambda **_kwargs: plan,
+            _time_slot_price_slots=lambda _now: [],
+        ),
+        _last_decision_data={},
+        _last_chronological_diagnostics={},
+        _dynamic_pricing_schedule=None,
+        predictive_charging_enabled=True,
+        charge_delay_enabled=True,
+        _charge_delay_status={
+            "state": "Delayed (10:45 est.)",
+            "estimated_unlock_time": "10:45",
+        },
+        _delay_soc_setpoint_enabled=False,
+        _delay_setpoint_reached=False,
+        _charge_delay_unlocked=False,
+        max_price_threshold=None,
+    )
+
+    result = ChargeDischargeController._daily_operation_build_projection(
+        controller, now
+    )
+
+    assert result is not None
+    contexts = {
+        item["index"]: item["context_mask"] for item in result["intervals"]
+    }
+    assert contexts[40] & CONTEXT_CHARGE_DELAY
+    assert contexts[41] & CONTEXT_CHARGE_DELAY
+    assert contexts[42] & CONTEXT_CHARGE_DELAY
+    assert not contexts[43] & CONTEXT_CHARGE_DELAY
+    assert not contexts[44] & CONTEXT_CHARGE_DELAY
+    delayed = [
+        item for item in result["intervals"]
+        if item["context_mask"] & CONTEXT_CHARGE_DELAY
+    ]
+    assert {item["delay_until"] for item in delayed} == {
+        datetime(2026, 8, 24, 10, 45, tzinfo=MADRID)
+    }
+
+
+def test_midnight_refresh_normalizes_utc_and_publishes_one_complete_snapshot():
+    clock = MutableClock(datetime(2026, 8, 23, 23, 59, tzinfo=MADRID))
+    manager = _manager(clock, mode="normal")
+    manager.rebuild_future_projection(
+        [{"index": 95, "action_mask": ACTION_DISCHARGE}], mode="normal"
+    )
+    published = []
+    manager.async_add_listener(lambda *_args: published.append(manager.snapshot()))
+
+    clock.value = datetime(2026, 8, 24, 0, 0, tzinfo=MADRID)
+    # Polling the sensor before the control refresh must keep the last coherent
+    # day instead of publishing a transient empty new-day payload.
+    before_refresh = manager.snapshot()
+    assert before_refresh["local_date"] == "2026-08-23"
+    assert before_refresh["operations"]["planned_action_mask"][95] == ACTION_DISCHARGE
+
+    projection_times = []
+
+    def build_projection(current):
+        projection_times.append(current)
+        return {
+            "intervals": [{"index": 0, "action_mask": ACTION_GRID_CHARGE}],
+            "mode": "normal",
+            "stale": False,
+            "sources": {"operation_plan": "projection"},
+        }
+
+    controller = SimpleNamespace(
+        _daily_operation_timeline=manager,
+        _consumption_tracker=SimpleNamespace(
+            consumption_profile=None, solar_profile=None
+        ),
+        _daily_operation_capture=ChargeDischargeController._daily_operation_capture,
+        _daily_operation_runtime_decision=lambda _current: {
+            "action_mask": 0,
+            "context_mask": 0,
+            "simultaneous": False,
+        },
+        _daily_operation_last_runtime_at=None,
+        _dynamic_pricing_schedule=None,
+        _daily_operation_mode=lambda: "normal",
+        _daily_operation_float=ChargeDischargeController._daily_operation_float,
+        _daily_operation_last_projection_signature=None,
+        _daily_operation_last_projection_monotonic=0.0,
+        _daily_operation_build_projection=build_projection,
+        _delay_soc_setpoint_enabled=False,
+        _delay_soc_setpoint=0.0,
+        _delay_setpoint_reached=False,
+        charge_delay_enabled=False,
+        _charge_delay_unlocked=False,
+        _charge_delay_status={},
+    )
+
+    ChargeDischargeController._refresh_daily_operation_timeline(
+        controller,
+        now=datetime(2026, 8, 23, 22, 0, tzinfo=timezone.utc),
+        force_projection=True,
+    )
+
+    assert projection_times == [datetime(2026, 8, 24, 0, 0, tzinfo=MADRID)]
+    assert len(published) == 1
+    assert published[0]["local_date"] == "2026-08-24"
+    assert published[0]["operations"]["planned_action_mask"][0] == ACTION_GRID_CHARGE
+
+
+def test_fall_back_hour_keeps_the_second_occurrence_writable():
+    clock = MutableClock(datetime(2026, 10, 25, 2, 0, tzinfo=MADRID, fold=0))
+    manager = _manager(clock, mode="normal")
+
+    assert manager.record_runtime_decision(action_mask=ACTION_SOLAR_CHARGE) is True
+    clock.value = datetime(2026, 10, 25, 2, 59, tzinfo=MADRID, fold=0)
+    manager.refresh_actual_partial(consumption_kwh=0.1, coverage_s=899)
+    assert manager.current_index == 11
+    assert manager.closed_intervals[8] is False
+
+    # Although the wall clock moves backwards, this is a later absolute
+    # instant and belongs to the second occurrence of the 02:00 cell.
+    clock.value = datetime(2026, 10, 25, 2, 0, tzinfo=MADRID, fold=1)
+    assert manager.record_runtime_decision(action_mask=ACTION_GRID_CHARGE) is True
+    assert manager.current_index == 8
+    assert manager.closed_intervals[8] is False
+    snapshot = manager.build_public_snapshot()
+    assert snapshot["operations"]["actual_action_mask"][8] == (
+        ACTION_SOLAR_CHARGE | ACTION_GRID_CHARGE
+    )
+
+    clock.value = datetime(2026, 10, 25, 2, 15, tzinfo=MADRID, fold=1)
+    manager.refresh_actual_partial(consumption_kwh=0.2, coverage_s=0)
+    assert manager.closed_intervals[8] is True
+    assert manager.current_index == 9
+
+
+def test_snapshot_poll_does_not_close_a_partial_previous_interval():
+    clock = MutableClock(datetime(2026, 8, 23, 10, 14, 59, tzinfo=MADRID))
+    manager = _manager(clock)
+    manager.refresh_actual_partial(_capture(0.1, 899), _capture(0.2, 899))
+
+    clock.value = datetime(2026, 8, 23, 10, 15, tzinfo=MADRID)
+    snapshot = manager.build_public_snapshot()
+    assert snapshot["operations"]["closed"][40] is False
+
+    # The capture arrives after the entity polling boundary and must still
+    # replace the cumulative values for the quarter that just finished.
+    manager.refresh_actual_partial(_capture(0.3), _capture(0.4))
+    after = manager.build_public_snapshot()
+    assert after["series"]["consumption_actual_kwh"][40] == pytest.approx(0.3)
+    assert after["series"]["solar_actual_kwh"][40] == pytest.approx(0.4)
+    assert after["operations"]["closed"][40] is True
+
+
+def test_out_of_order_callback_cannot_reopen_or_move_the_clock_backwards():
+    clock = MutableClock(datetime(2026, 8, 23, 10, 20, tzinfo=MADRID))
+    manager = _manager(clock)
+    manager.refresh_actual_partial(consumption_kwh=0.2, coverage_s=300)
+    assert manager.current_index == 41
+    assert manager.closed_intervals[40] is True
+
+    late = datetime(2026, 8, 23, 10, 10, tzinfo=MADRID)
+    assert manager.record_runtime_decision(action_mask=ACTION_GRID_CHARGE, at=late) is False
+    assert manager.current_index == 41
+    assert manager.closed_intervals[40] is True
 
 
 @pytest.mark.asyncio
@@ -327,6 +622,24 @@ async def test_fake_persistence_restores_current_day_and_actions():
     assert snapshot["operations"]["soc_pct"][40] == pytest.approx(56.5)
     assert snapshot["series"]["solar_actual_kwh"][40] == pytest.approx(0.42)
     assert snapshot["series"]["consumption_actual_kwh"][40] == pytest.approx(0.21)
+
+
+@pytest.mark.asyncio
+async def test_persistence_retries_when_data_changes_during_an_inflight_save():
+    clock = MutableClock(datetime(2026, 8, 23, 10, 7, tzinfo=MADRID))
+    store = BlockingStore()
+    manager = _manager(clock, store)
+
+    manager.update_runtime_metadata(stale=True)
+    manager.request_save(immediate=True)
+    await store.started.wait()
+
+    manager.update_runtime_metadata(stale_reason="newer-runtime-state")
+    store.release.set()
+    assert await manager.async_save_all() is True
+
+    assert len(store.writes) == 2
+    assert store.writes[-1]["metadata"]["stale_reason"] == "newer-runtime-state"
 
 
 def test_closed_intervals_are_immutable_and_reevaluation_starts_at_present():

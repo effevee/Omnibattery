@@ -1599,6 +1599,9 @@ class MarstekVenusPanel extends HTMLElement {
     this._histTimer = null;
     this._historyRefresh = null;
     this._historyStarted = false;
+    this._dailyOperationGlobalListenersAttached = false;
+    this._dailyOperationVisualViewport = null;
+    this._onDailyOperationViewportChange = this._dismissDailyOperationFloatingTooltip.bind(this);
   }
 
   // --- HA-injected properties ------------------------------------------------
@@ -1626,9 +1629,11 @@ class MarstekVenusPanel extends HTMLElement {
   connectedCallback() {
     this._injectFonts();
     this._update();
+    this._attachDailyOperationGlobalListeners();
     this._ensureHistoryStarted();
   }
   disconnectedCallback() {
+    this._detachDailyOperationGlobalListeners();
     if (this._histTimer) clearInterval(this._histTimer);
     this._histTimer = null;
     this._historyStarted = false;
@@ -2185,6 +2190,7 @@ class MarstekVenusPanel extends HTMLElement {
       el.classList.toggle("active", id === view);
     }
     if (!this._main) return;
+    this._detachDailyOperationGlobalListeners();
     this._main.innerHTML = "";
     if (view === "resumen") {
       this._main.appendChild(this._renderResumen());
@@ -2213,6 +2219,7 @@ class MarstekVenusPanel extends HTMLElement {
 
   // ===== Resumen view ========================================================
   _renderResumen() {
+    this._detachDailyOperationGlobalListeners();
     this._r = {};
     this._edgeSig = {};
     this._buildCards();
@@ -2336,18 +2343,6 @@ class MarstekVenusPanel extends HTMLElement {
     stage.className = "daily-op-stage";
 
     const uid = `mv-daily-op-${(this._dailyOpUid = (this._dailyOpUid || 0) + 1)}`;
-    const patternIds = {};
-    const patternDefs = [
-      ["solar", "var(--daily-op-solar-charge)", false], ["solar", "var(--daily-op-solar-charge)", true],
-      ["grid", "var(--daily-op-grid)", false], ["grid", "var(--daily-op-grid)", true],
-      ["discharge", "var(--daily-op-discharge)", false], ["discharge", "var(--daily-op-discharge)", true],
-    ].map(([action, color, reverse], ordinal) => {
-      const direction = reverse ? "reverse" : "forward";
-      const id = `${uid}-${action}-${direction}`;
-      patternIds[`${action}-${reverse ? 1 : 0}`] = id;
-      const path = reverse ? "M-2,-2 L10,10 M-10,-2 L2,10" : "M-2,10 L10,-2 M-10,10 L2,-2";
-      return `<pattern id="${id}" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(${ordinal % 2 ? 0 : 0})"><path d="${path}" stroke="${color}" stroke-width="1.6" fill="none" opacity=".95"/></pattern>`;
-    }).join("");
 
     const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
     svg.classList.add("daily-op-svg");
@@ -2355,7 +2350,6 @@ class MarstekVenusPanel extends HTMLElement {
     svg.setAttribute("preserveAspectRatio", "none");
     svg.setAttribute("aria-hidden", "true");
     svg.innerHTML =
-      `<defs>${patternDefs}</defs>` +
       `<g class="daily-op-grid-lines">` +
       Array.from({ length: 6 }, (_, i) => `<line x1="0" y1="${32 + i * 26.4}" x2="960" y2="${32 + i * 26.4}"/>`).join("") +
       Array.from({ length: 25 }, (_, i) => `<line class="daily-op-hour-line" x1="${i * 40}" y1="24" x2="${i * 40}" y2="170"/>`).join("") +
@@ -2477,7 +2471,11 @@ class MarstekVenusPanel extends HTMLElement {
 
     const scrollState = { manual: false, initialized: false, programmaticUntil: 0 };
     viewport.addEventListener("scroll", () => {
-      if (Date.now() > scrollState.programmaticUntil) scrollState.manual = true;
+      if (Date.now() > scrollState.programmaticUntil) {
+        scrollState.manual = true;
+        this._dailyOpPinnedIndex = null;
+        this._hideDailyOperationTooltip();
+      }
       this._updateDailyOperationNav();
     }, { passive: true });
     const markManualScroll = () => {
@@ -2499,16 +2497,48 @@ class MarstekVenusPanel extends HTMLElement {
       },
       nowMarker,
       nowText,
-      patternIds,
       scrollState,
+      localDate: null,
     };
+    this._attachDailyOperationGlobalListeners();
     return card;
   }
 
+  _dismissDailyOperationFloatingTooltip() {
+    const ref = this._r.dailyOperation;
+    // A fixed tooltip is not clipped by the timeline viewport. Dismiss it
+    // whenever its anchor can move during page/visual-viewport scrolling.
+    if (!ref || ref.tooltip.hidden) return;
+    this._dailyOpPinnedIndex = null;
+    this._hideDailyOperationTooltip();
+  }
+
+  _attachDailyOperationGlobalListeners() {
+    if (this._dailyOperationGlobalListenersAttached || !this._r.dailyOperation) return;
+    window.addEventListener("scroll", this._onDailyOperationViewportChange, { capture: true, passive: true });
+    this._dailyOperationVisualViewport = window.visualViewport || null;
+    if (this._dailyOperationVisualViewport) {
+      this._dailyOperationVisualViewport.addEventListener("scroll", this._onDailyOperationViewportChange, { passive: true });
+      this._dailyOperationVisualViewport.addEventListener("resize", this._onDailyOperationViewportChange, { passive: true });
+    }
+    this._dailyOperationGlobalListenersAttached = true;
+  }
+
+  _detachDailyOperationGlobalListeners() {
+    if (!this._dailyOperationGlobalListenersAttached) return;
+    window.removeEventListener("scroll", this._onDailyOperationViewportChange, true);
+    if (this._dailyOperationVisualViewport) {
+      this._dailyOperationVisualViewport.removeEventListener("scroll", this._onDailyOperationViewportChange);
+      this._dailyOperationVisualViewport.removeEventListener("resize", this._onDailyOperationViewportChange);
+    }
+    this._dailyOperationVisualViewport = null;
+    this._dailyOperationGlobalListenersAttached = false;
+  }
+
   /**
-   * Integration point: the backend should expose the stable sensor ID below.
-   * A panel config override is accepted for installations that rename it; no
-   * service call or control recalculation is performed from this card.
+   * Resolve the timeline through its stable registry identity first.  Entity
+   * IDs are user-editable in Home Assistant, while translation_key is not.
+   * A config override remains useful on older frontends without registry data.
    */
   _dailyOperationEntityId() {
     const hass = this._hass;
@@ -2518,7 +2548,14 @@ class MarstekVenusPanel extends HTMLElement {
       this._panelConfig.daily_operation_entity,
       this._panelConfig.dailyOperationTimelineEntity,
     ].filter(Boolean);
-    const candidates = [...configured, "sensor.omnibattery_daily_operation_timeline"];
+    const domain = this._domain();
+    const registered = Object.values(hass.entities || {})
+      .filter((entry) => entry && entry.entity_id && entry.entity_id.startsWith("sensor.")
+        && (entry.translation_key === "daily_operation_timeline"
+          || (entry.platform === domain
+            && String(entry.unique_id || "").endsWith("daily_operation_timeline"))))
+      .map((entry) => entry.entity_id);
+    const candidates = [...configured, ...registered, "sensor.omnibattery_daily_operation_timeline"];
     return candidates.find((id) => hass.states[id]) || null;
   }
 
@@ -2624,10 +2661,14 @@ class MarstekVenusPanel extends HTMLElement {
         this._dailyOperationNumber(value) != null && this._dailyOperationNumber(value) !== 0
       )
     );
-    const hasValues = [actualSolar, forecastSolar, actualConsumption, forecastConsumption, actualSoc, forecastSoc,
-      pickOperation(["actual_action_mask"]), plannedActions].some((array) =>
-      Array.isArray(array) && array.some((value) => this._dailyOperationNumber(value) != null)
-    );
+    // Operation masks are structurally emitted as 96 zeroes even if the
+    // manager is absent.  A zero-valued energy/SOC sample is still genuine
+    // evidence, but zero masks alone must not make an empty DTO look valid.
+    const hasSeriesEvidence = [actualSolar, forecastSolar, actualConsumption, forecastConsumption, actualSoc, forecastSoc]
+      .some((array) => Array.isArray(array) && array.some((value) => this._dailyOperationNumber(value) != null));
+    const hasActionEvidence = [pickOperation(["actual_action_mask"]), plannedActions]
+      .some((array) => Array.isArray(array) && array.some((value) => (this._dailyOperationNumber(value) || 0) !== 0));
+    const hasValues = data.timeline_available !== false && (hasSeriesEvidence || hasActionEvidence);
     return {
       entityId, stateObj, data, unavailable, hasValues,
       localDate: data.local_date || null,
@@ -2647,6 +2688,8 @@ class MarstekVenusPanel extends HTMLElement {
       plannedCoexistence: pickOperation(["planned_coexistence_mask"]),
       actualContext: pickOperation(["actual_context_mask"]),
       plannedContext: pickOperation(["planned_context_mask"]),
+      actualSource: pickOperation(["actual_source", "actual_sources"]),
+      plannedSource: pickOperation(["planned_source", "planned_sources"]),
       gridDecision, actualDecision, plannedDecision,
       delayUntil: pickOperation(["delay_until", "planned_delay_until"]),
       chargePower: pickOperation(["charge_power_w", "actual_charge_power_w", "planned_charge_power_w"]),
@@ -2742,6 +2785,11 @@ class MarstekVenusPanel extends HTMLElement {
     return String(value).replace(/_/g, " ");
   }
 
+  _dailyOperationSourceIsObserved(value) {
+    if (!value) return true; // Preserve the legacy contract when no per-cell source exists.
+    return !/(?:^|[_ -])(command|unavailable|unknown|error)(?:$|[_ -])/i.test(String(value));
+  }
+
   _dailyOperationReasonDict() {
     return DAILY_OPERATION_REASON_I18N[this._lang2()] || DAILY_OPERATION_REASON_I18N.en;
   }
@@ -2790,6 +2838,10 @@ class MarstekVenusPanel extends HTMLElement {
     if (status === "current") context = contextActual || 0;
     const decision = this._dailyOperationChoiceAt(snapshot.gridDecision, index) ||
       (status === "forecast" ? this._dailyOperationChoiceAt(snapshot.plannedDecision, index) : this._dailyOperationChoiceAt(snapshot.actualDecision, index));
+    const operationSource = this._dailyOperationChoiceAt(
+      status === "forecast" ? snapshot.plannedSource : snapshot.actualSource,
+      index
+    );
     const actionSeconds = {};
     if (snapshot.observedSeconds && typeof snapshot.observedSeconds === "object") {
       for (const bit of [1, 2, 4]) {
@@ -2838,16 +2890,25 @@ class MarstekVenusPanel extends HTMLElement {
       && ((mask || 0) & 1) === 0
       && (projectedSolarChargePending || solarSurplus);
     const delayState = snapshot.delayInfo && String(snapshot.delayInfo.state || snapshot.delayInfo.status || "").toLowerCase();
-    const topLevelDelay = index === snapshot.currentIndex && ["delayed", "waiting_for_solar", "waiting", "blocked"].includes(delayState);
+    const topLevelDelay = index === snapshot.currentIndex && (
+      delayState.startsWith("delayed") || [
+        "waiting for solar", "waiting for forecast", "waiting_for_solar", "waiting", "blocked",
+      ].includes(delayState)
+    );
     const delayUntil = (Array.isArray(snapshot.delayUntil) ? snapshot.delayUntil[index] : null) ??
       (topLevelDelay && snapshot.delayInfo ? snapshot.delayInfo.estimated_unlock_time || snapshot.delayInfo.unlock_time : null);
-    const delay = (delayUntil != null && delayUntil !== "") || (context & 2) !== 0 || topLevelDelay;
+    // Older payloads could stamp the delay context on every cell merely because
+    // the feature was enabled. Historical/future clocks need a real boundary;
+    // boundary-less waiting states are meaningful only for the current cell.
+    const delay = (delayUntil != null && delayUntil !== "") || topLevelDelay;
     const setpointState = snapshot.setpointInfo && String(snapshot.setpointInfo.state || snapshot.setpointInfo.status || "").toLowerCase();
     const topLevelSetpoint = index === snapshot.currentIndex && ["charging_to_setpoint", "to_setpoint", "charging"].includes(setpointState);
     return {
       index, status, statusLabel: this._dailyOperationStatusLabel(status),
       timeRange: this._dailyOperationTimeRange(index),
       mask: mask || 0, actions, solarWindow, context: context || 0, decision,
+      operationSource,
+      observationTrusted: status === "forecast" || this._dailyOperationSourceIsObserved(operationSource),
       delay, delayUntil: delayUntil == null ? null : String(delayUntil),
       setpoint: ((context || 0) & 1) !== 0 || topLevelSetpoint,
       skipped: snapshot.isSkipped[index], repeated: snapshot.isRepeated[index],
@@ -2910,10 +2971,18 @@ class MarstekVenusPanel extends HTMLElement {
     if (item.socActual != null) parts.push(`${this._t("dailyOperationSoc")} (${this._t("dailyOperationReal")}): ${this._nf(item.socActual, 1)} %`);
     if (item.socForecast != null) parts.push(`${this._t("dailyOperationSoc")} (${this._t("dailyOperationForecast")}): ${this._nf(item.socForecast, 1)} %`);
     if (item.coverage != null) parts.push(`${this._t("dailyOperationCoverage")}: ${Math.round(item.coverage)} s`);
-    if (item.actions.length) parts.push(`${this._t("dailyOperationPlan")}: ${item.actions.map((key) => this._dailyOperationActionLabel(key === "solar" ? 1 : key === "grid" ? 2 : 4)).join(", ")}`);
+    if (item.actions.length) {
+      const actionKind = item.status === "forecast"
+        ? this._t("dailyOperationPlan")
+        : item.observationTrusted ? this._t("dailyOperationObserved") : this._t("dailyOperationSource");
+      parts.push(`${actionKind}: ${item.actions.map((key) => this._dailyOperationActionLabel(key === "solar" ? 1 : key === "grid" ? 2 : 4)).join(", ")}`);
+    }
     else if (item.solarWindow) parts.push(this._t("dailyOperationSolarWindow"));
     else if (item.decision === "not_needed") parts.push(this._t("dailyOperationNotNeeded"));
     else parts.push(this._t("dailyOperationNoAction"));
+    if (!item.observationTrusted && item.operationSource) {
+      parts.push(`${this._t("dailyOperationSource")}: ${this._dailyOperationSourceLabel(item.operationSource)}`);
+    }
     if (item.chargePower != null) parts.push(`${this._t("dailyOperationGridCharge")}: ${this._dailyOperationFormatPower(item.chargePower)}`);
     if (item.dischargePower != null) parts.push(`${this._t("dailyOperationDischarge")}: ${this._dailyOperationFormatPower(item.dischargePower)}`);
     if (item.solarToBattery != null) parts.push(`${this._t("dailyOperationSolarCharge")}: ${this._dailyOperationFormatKwh(item.solarToBattery)}`);
@@ -2966,7 +3035,13 @@ class MarstekVenusPanel extends HTMLElement {
       ? item.actions.map((key) => this._dailyOperationActionLabel(key === "solar" ? 1 : key === "grid" ? 2 : 4)).join(", ")
       : item.solarWindow ? this._t("dailyOperationSolarWindow")
         : item.decision === "not_needed" ? this._t("dailyOperationNotNeeded") : this._t("dailyOperationNoAction");
-    rows.push(row(useForecast ? this._t("dailyOperationPlan") : this._t("dailyOperationObserved"), actionLabels));
+    const actionKind = useForecast
+      ? this._t("dailyOperationPlan")
+      : item.observationTrusted ? this._t("dailyOperationObserved") : this._t("dailyOperationSource");
+    rows.push(row(actionKind, actionLabels));
+    if (!item.observationTrusted && item.operationSource) {
+      rows.push(row(this._t("dailyOperationSource"), this._dailyOperationSourceLabel(item.operationSource)));
+    }
     if (item.chargeToBattery != null && item.actions.some((action) => action === "solar" || action === "grid")) {
       rows.push(row(this._t("dailyOperationEnergyToBattery"), this._dailyOperationFormatKwh(item.chargeToBattery)));
     }
@@ -2984,18 +3059,29 @@ class MarstekVenusPanel extends HTMLElement {
     const snapshot = this._dailyOperationSnapshot;
     if (!ref || !snapshot || snapshot.unavailable) return;
     const item = this._dailyOperationItem(snapshot, index);
+    if (this._dailyOpTooltipCell && this._dailyOpTooltipCell !== cell) {
+      this._dailyOpTooltipCell.removeAttribute("aria-describedby");
+    }
     ref.tooltip.innerHTML = this._dailyOperationTooltipHTML(snapshot, item);
     ref.tooltip.hidden = false;
     ref.tooltip.setAttribute("aria-label", this._dailyOperationAriaLabel(snapshot, item));
     cell.setAttribute("aria-describedby", ref.tooltip.id);
-    const cardRect = ref.card.getBoundingClientRect();
+    this._dailyOpTooltipCell = cell;
     const cellRect = cell.getBoundingClientRect();
     const tipWidth = ref.tooltip.offsetWidth || 250;
     const tipHeight = ref.tooltip.offsetHeight || 100;
-    let left = cellRect.left - cardRect.left + cellRect.width / 2 - tipWidth / 2;
-    let top = cellRect.top - cardRect.top - tipHeight - 8;
-    left = this._clamp(left, 8, Math.max(8, cardRect.width - tipWidth - 8));
-    if (top < 8) top = cellRect.bottom - cardRect.top + 8;
+    const visualViewport = window.visualViewport;
+    const viewportLeft = visualViewport ? visualViewport.offsetLeft : 0;
+    const viewportTop = visualViewport ? visualViewport.offsetTop : 0;
+    const viewportRight = viewportLeft + (visualViewport ? visualViewport.width : window.innerWidth);
+    const viewportBottom = viewportTop + (visualViewport ? visualViewport.height : window.innerHeight);
+    let left = cellRect.left + cellRect.width / 2 - tipWidth / 2;
+    const above = cellRect.top - tipHeight - 8;
+    const below = cellRect.bottom + 8;
+    let top = above >= viewportTop + 8 ? above
+      : below + tipHeight <= viewportBottom - 8 ? below
+        : this._clamp(above, viewportTop + 8, Math.max(viewportTop + 8, viewportBottom - tipHeight - 8));
+    left = this._clamp(left, viewportLeft + 8, Math.max(viewportLeft + 8, viewportRight - tipWidth - 8));
     ref.tooltip.style.left = `${left}px`;
     ref.tooltip.style.top = `${top}px`;
   }
@@ -3005,6 +3091,10 @@ class MarstekVenusPanel extends HTMLElement {
     if (!ref) return;
     ref.tooltip.hidden = true;
     ref.tooltip.removeAttribute("aria-label");
+    if (this._dailyOpTooltipCell) {
+      this._dailyOpTooltipCell.removeAttribute("aria-describedby");
+      this._dailyOpTooltipCell = null;
+    }
   }
 
   _scrollDailyOperation(direction) {
@@ -3142,11 +3232,18 @@ class MarstekVenusPanel extends HTMLElement {
     cell.classList.toggle("daily-op-dst-skipped", item.skipped);
     cell.classList.toggle("daily-op-dst-repeated", item.repeated);
     cell.classList.toggle("daily-op-stale", snapshot.stale && item.status === "forecast");
-    const patterns = item.actions.slice(1, 3).map((action, patternIndex) => {
-      const key = `${action}-${patternIndex ? 1 : 0}`;
-      return `url(#${ref.patternIds[key]})`;
-    });
-    cell.style.backgroundImage = patterns.join(", ");
+    const actionColor = {
+      solar: "var(--daily-op-solar-charge)",
+      grid: "var(--daily-op-grid)",
+      discharge: "var(--daily-op-discharge)",
+    };
+    // SVG paint servers cannot be used as CSS backgrounds on HTML buttons.
+    // Layer native CSS gradients instead: the base action keeps its fill and
+    // each simultaneous action is always visible as an alternating hatch.
+    const patterns = item.actions.slice(1, 3).map((action, patternIndex) =>
+      `repeating-linear-gradient(${patternIndex ? "45deg" : "135deg"}, transparent 0 4px, ${actionColor[action]} 4px 6px)`
+    );
+    cell.style.backgroundImage = patterns.join(", ") || "none";
     cell.setAttribute("aria-label", this._dailyOperationAriaLabel(snapshot, item));
     cell.removeAttribute("title");
     const delayMark = cell.querySelector(".daily-op-delay-mark");
@@ -3164,6 +3261,17 @@ class MarstekVenusPanel extends HTMLElement {
       ref.card.hidden = true;
       this._hideDailyOperationTooltip();
       return;
+    }
+    const dayChanged = ref.localDate != null && snapshot.localDate != null
+      && ref.localDate !== snapshot.localDate;
+    ref.localDate = snapshot.localDate;
+    if (dayChanged) {
+      ref.scrollState.manual = false;
+      ref.scrollState.initialized = false;
+      ref.scrollState.programmaticUntil = Date.now() + 250;
+      ref.viewport.scrollLeft = 0;
+      this._dailyOpPinnedIndex = null;
+      this._hideDailyOperationTooltip();
     }
     ref.card.hidden = false;
     const badgeText = `${this._t("dailyOperationReal")} / ${this._t("dailyOperationForecast")}`;
@@ -6530,7 +6638,7 @@ class MarstekVenusPanel extends HTMLElement {
       .daily-op-setpoint-mark { right: 2px; bottom: 3px; color: var(--ink-mid); opacity: .85; }
       .daily-op-dst-skipped { opacity: .25; background-image: repeating-linear-gradient(135deg, transparent 0 4px, var(--line-strong) 4px 5px) !important; }
       .daily-op-dst-repeated { box-shadow: inset 0 0 0 1px var(--ink-dim); }
-      .daily-op-tooltip { position: absolute; z-index: 10; max-width: min(280px, calc(100% - 16px)); min-width: 190px; padding: 8px 10px; border: 1px solid var(--line-strong); border-radius: 10px; background: var(--bg-2); color: var(--ink); box-shadow: 0 8px 24px oklch(0 0 0 / .35); font-size: 11px; line-height: 1.35; pointer-events: none; }
+      .daily-op-tooltip { position: fixed; z-index: 10; max-width: min(280px, calc(100vw - 16px)); min-width: min(190px, calc(100vw - 16px)); padding: 8px 10px; border: 1px solid var(--line-strong); border-radius: 10px; background: var(--bg-2); color: var(--ink); box-shadow: 0 8px 24px oklch(0 0 0 / .35); font-size: 11px; line-height: 1.35; pointer-events: none; }
       .daily-op-tip-head { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin-bottom: 5px; font-variant-numeric: tabular-nums; }
       .daily-op-tip-head strong { color: var(--ink); font-weight: 700; }
       .daily-op-tip-head span { color: var(--ink-dim); font-size: 10px; font-weight: 600; }

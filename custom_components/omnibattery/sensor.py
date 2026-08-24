@@ -1702,6 +1702,19 @@ def _daily_operation_timeline_attributes(controller: object) -> dict[str, object
                 _timeline_energy,
                 None,
             ),
+            # Captures can have a different cadence for solar and consumption.
+            # Keep both coverages so the panel only extrapolates the incomplete
+            # series, rather than applying the longest shared interval to both.
+            "solar_actual_coverage_s": _timeline_array(
+                _timeline_find(source, ("solar_actual_coverage_s",), series),
+                _timeline_energy,
+                None,
+            ),
+            "consumption_actual_coverage_s": _timeline_array(
+                _timeline_find(source, ("consumption_actual_coverage_s",), series),
+                _timeline_energy,
+                None,
+            ),
         },
         "operations": {
             "actual_action_mask": _timeline_array(actual_action, _timeline_mask, 0),
@@ -1728,6 +1741,16 @@ def _daily_operation_timeline_attributes(controller: object) -> dict[str, object
             ),
             "planned_grid_charge_decision": _timeline_array(
                 planned_grid_decision, _timeline_text, None
+            ),
+            "actual_source": _timeline_array(
+                _timeline_find(source, ("actual_source", "actual_sources"), operations),
+                _timeline_text,
+                None,
+            ),
+            "planned_source": _timeline_array(
+                _timeline_find(source, ("planned_source", "planned_sources"), operations),
+                _timeline_text,
+                None,
             ),
             "delay_until": _timeline_array(
                 _timeline_find(source, ("delay_until", "delays_until"), operations),

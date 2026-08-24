@@ -313,6 +313,45 @@ def test_global_allocation_is_capped_once_and_soc_power_limits_apply():
     assert limited.stored_energy_end_kwh <= 8.0 + 1e-9
 
 
+def test_same_battery_never_charges_and_discharges_in_one_interval():
+    result = simulate_battery_projection(
+        [_interval(0, consumption=0.5)],
+        [_battery(stored=5.0)],
+        allocations=[0.5],
+        charge_efficiency=1.0,
+    )
+
+    flow = result.intervals[0]
+    battery_flow = result.battery_flows["battery-a"][0]
+    assert flow.grid_to_battery_kwh == pytest.approx(0.5)
+    assert flow.battery_to_home_kwh == 0.0
+    assert flow.action_mask == ACTION_GRID_CHARGE
+    assert battery_flow.grid_to_battery_kwh == pytest.approx(0.5)
+    assert battery_flow.battery_to_home_kwh == 0.0
+
+
+def test_system_power_limits_cap_aggregate_charge_and_discharge():
+    batteries = [
+        _battery(stored=2.0),
+        BatteryProjectionInput("battery-b", 2.0, 10.0, 0, 100, 4000, 4000),
+    ]
+    result = simulate_battery_projection(
+        [_interval(0), _interval(1, consumption=2.0)],
+        batteries,
+        allocations=[2.0, 0.0],
+        charge_efficiency=1.0,
+        system_charge_power_w=2000.0,
+        system_discharge_power_w=2000.0,
+    )
+
+    charge, discharge = result.intervals
+    assert charge.grid_to_battery_kwh == pytest.approx(0.5)
+    assert charge.charge_power_w == pytest.approx(2000.0)
+    assert discharge.battery_to_home_kwh == pytest.approx(0.5)
+    assert discharge.discharge_power_w == pytest.approx(2000.0)
+    assert discharge.grid_to_home_kwh == pytest.approx(1.5)
+
+
 def test_charge_delay_projection_is_pure_and_does_not_mutate_inputs():
     battery = _battery(stored=0.0, capacity=2.0, charge_power=4000.0)
     intervals = [

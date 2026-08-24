@@ -29,6 +29,10 @@ def _snapshot() -> dict:
     coverage = [None] * 96
     coverage[0] = 900
     coverage[1] = 300
+    solar_coverage = [None] * 96
+    solar_coverage[0] = 300
+    consumption_coverage = [None] * 96
+    consumption_coverage[0] = 900
 
     actual_action = [0] * 96
     actual_action[0] = 1
@@ -51,12 +55,16 @@ def _snapshot() -> dict:
             "solar_actual_kwh": solar_actual,
             "consumption_actual_kwh": consumption_actual,
             "actual_coverage_s": coverage,
+            "solar_actual_coverage_s": solar_coverage,
+            "consumption_actual_coverage_s": consumption_coverage,
             "solar_forecast_kwh": [0.2] * 96,
             "consumption_forecast_kwh": [0.1] * 96,
         },
         "operations": {
             "actual_action_mask": actual_action,
             "planned_action_mask": planned_action,
+            "actual_source": ["runtime_command"] + [None] * 95,
+            "planned_source": ["projection"] * 96,
             "actual_context_mask": [0] * 96,
             "planned_context_mask": [0] * 96,
             "grid_charge_decision": ["unknown"] * 96,
@@ -128,6 +136,10 @@ def test_timeline_entity_publishes_fixed_96_element_json_safe_dto():
         assert len(attrs[key]) == 96
 
     assert attrs["series"]["solar_actual_kwh"][1] is None
+    assert attrs["series"]["solar_actual_coverage_s"][0] == 300
+    assert attrs["series"]["consumption_actual_coverage_s"][0] == 900
+    assert attrs["operations"]["actual_source"][0] == "runtime_command"
+    assert attrs["operations"]["planned_source"][0] == "projection"
     assert attrs["operations"]["observed_seconds_by_action_by_interval"][0] == {
         "solar_charge": 420.0
     }

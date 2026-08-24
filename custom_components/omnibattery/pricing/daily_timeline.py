@@ -1025,6 +1025,8 @@ def simulate_battery_projection(
     discharge_efficiency: float = 1.0,
     context_masks: Any = None,
     grid_charge_decisions: Any = None,
+    system_charge_power_w: float | None = None,
+    system_discharge_power_w: float | None = None,
 ) -> BatteryProjectionResult:
     """Project aggregate and per-battery flows without mutating any input.
 
@@ -1037,7 +1039,9 @@ def simulate_battery_projection(
     A mapping keyed by battery key supplies per-battery quotas; ``all``/``*``
     can be used for a system-wide quota.  This helper does not infer price
     gates, whitelist windows, controller blockers, or new allocations.  Those
-    must be resolved by the authoritative planner before calling it.
+    must be resolved by the authoritative planner before calling it.  Optional
+    system-wide charge/discharge limits cap the aggregate AC-side flow in each
+    interval in addition to every battery's own power limit.
     """
     interval_list = [
         _coerce_interval(value, index) for index, value in enumerate(intervals)
@@ -1098,10 +1102,21 @@ def simulate_battery_projection(
         stored_energy_charged = 0.0
         stored_energy_discharged = 0.0
         per_interval: list[ProjectedBatteryFlow] = []
+        per_battery: dict[str, dict[str, float]] = {}
         global_quota_remaining = (
             _amount_from_source(global_allocations, index, interval_list)
             if not per_battery_allocations
             else 0.0
+        )
+        system_charge_remaining = (
+            _non_negative(system_charge_power_w) * duration_hours / 1000.0
+            if system_charge_power_w is not None
+            else math.inf
+        )
+        system_discharge_remaining = (
+            _non_negative(system_discharge_power_w) * duration_hours / 1000.0
+            if system_discharge_power_w is not None
+            else math.inf
         )
 
         # Solar is consumed locally before it is offered to the batteries.
@@ -1131,8 +1146,14 @@ def simulate_battery_projection(
             else:
                 power_cap = charge_power * duration_hours / 1000.0
                 headroom_input = max(0.0, (maximum - states[key]) / charge_eff)
-                solar_input = min(solar_surplus, power_cap, headroom_input)
+                solar_input = min(
+                    solar_surplus,
+                    power_cap,
+                    headroom_input,
+                    system_charge_remaining,
+                )
             solar_surplus -= solar_input
+            system_charge_remaining = max(0.0, system_charge_remaining - solar_input)
             states[key] += solar_input * charge_eff
             solar_to_battery += solar_input
             stored_energy_charged += solar_input * charge_eff
@@ -1164,6 +1185,7 @@ def simulate_battery_projection(
                     max(0.0, quota_input),
                     power_cap,
                     headroom_input,
+                    system_charge_remaining,
                 )
             if not per_battery_allocations:
                 global_quota_remaining = max(
@@ -1176,21 +1198,59 @@ def simulate_battery_projection(
                     ),
                 )
             states[key] += grid_input * charge_eff
+            system_charge_remaining = max(0.0, system_charge_remaining - grid_input)
             grid_to_battery += grid_input
             stored_energy_charged += grid_input * charge_eff
 
-            # The discharge pass is deliberately separate from charging so
-            # system-level coexistence (different batteries) remains visible.
-            if (
+            per_battery[key] = {
+                "start_stored": start_stored,
+                "solar_input": solar_input,
+                "grid_input": grid_input,
+                "charge_eff": charge_eff,
+                "discharge_eff": discharge_eff,
+                "minimum": minimum,
+                "discharge_power": discharge_power,
+                "discharge_output": 0.0,
+            }
+
+        # Run discharge after all charge allocation.  A given battery cannot
+        # charge and discharge in the same interval, but distinct batteries
+        # may still coexist in opposite directions.
+        for (
+            battery,
+            _initial,
+            _minimum,
+            _maximum,
+            _charge_power,
+            _discharge_power,
+            _capacity,
+        ) in valid:
+            key = str(battery.key)
+            values = per_battery[key]
+            discharge_eff = values["discharge_eff"]
+            if values["solar_input"] > _EPSILON or values["grid_input"] > _EPSILON:
+                discharge_output = 0.0
+            elif (
                 not battery.can_discharge
                 or discharge_eff <= _EPSILON
                 or duration_hours <= _EPSILON
             ):
                 discharge_output = 0.0
             else:
-                power_cap = discharge_power * duration_hours / 1000.0
-                available_output = max(0.0, (states[key] - minimum) * discharge_eff)
-                discharge_output = min(remaining_deficit, power_cap, available_output)
+                power_cap = values["discharge_power"] * duration_hours / 1000.0
+                available_output = max(
+                    0.0, (states[key] - values["minimum"]) * discharge_eff
+                )
+                discharge_output = min(
+                    remaining_deficit,
+                    power_cap,
+                    available_output,
+                    system_discharge_remaining,
+                )
+            values["discharge_output"] = discharge_output
+            system_discharge_remaining = max(
+                0.0, system_discharge_remaining - discharge_output
+            )
             states[key] -= (
                 discharge_output / discharge_eff if discharge_eff > _EPSILON else 0.0
             )
@@ -1199,6 +1259,23 @@ def simulate_battery_projection(
             stored_energy_discharged += (
                 discharge_output / discharge_eff if discharge_eff > _EPSILON else 0.0
             )
+
+        for (
+            battery,
+            _initial,
+            _minimum,
+            _maximum,
+            _charge_power,
+            _discharge_power,
+            _capacity,
+        ) in valid:
+            key = str(battery.key)
+            values = per_battery[key]
+            solar_input = values["solar_input"]
+            grid_input = values["grid_input"]
+            discharge_output = values["discharge_output"]
+            charge_eff = values["charge_eff"]
+            discharge_eff = values["discharge_eff"]
             per_interval.append(
                 ProjectedBatteryFlow(
                     battery_key=key,
@@ -1207,7 +1284,7 @@ def simulate_battery_projection(
                     solar_to_battery_kwh=solar_input,
                     grid_to_battery_kwh=grid_input,
                     battery_to_home_kwh=discharge_output,
-                    stored_energy_start_kwh=start_stored,
+                    stored_energy_start_kwh=values["start_stored"],
                     stored_energy_end_kwh=states[key],
                     stored_energy_charged_kwh=(solar_input + grid_input) * charge_eff,
                     stored_energy_discharged_kwh=(
@@ -1345,6 +1422,8 @@ def project_charge_delay(
     charge_efficiency: float = CHARGE_EFFICIENCY,
     discharge_efficiency: float = 1.0,
     unlock_at: datetime | None = None,
+    system_charge_power_w: float | None = None,
+    system_discharge_power_w: float | None = None,
 ) -> ChargeDelayProjection:
     """Project only observable ChargeDelay milestones without controller calls.
 
@@ -1382,6 +1461,8 @@ def project_charge_delay(
         allocation_energy_kind=allocation_energy_kind,
         charge_efficiency=charge_efficiency,
         discharge_efficiency=discharge_efficiency,
+        system_charge_power_w=system_charge_power_w,
+        system_discharge_power_w=system_discharge_power_w,
     )
     target_energy = {
         str(battery.key): _finite(battery.capacity_kwh)
