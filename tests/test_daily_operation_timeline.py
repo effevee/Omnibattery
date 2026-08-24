@@ -14,6 +14,7 @@ from custom_components.omnibattery.pricing.daily_timeline import (
     ACTION_SOLAR_CHARGE,
     CONTEXT_CHARGE_DELAY,
     CONTEXT_DYNAMIC_PRICE,
+    CONTEXT_HOURLY_BALANCE,
     CONTEXT_SETPOINT,
     DST_REPEATED,
     DST_SKIPPED,
@@ -254,6 +255,11 @@ def test_masks_are_composable_and_grid_decision_is_independent():
         ).grid_charge_decision
         == GRID_CHARGE_UNKNOWN
     )
+
+
+def test_hourly_balance_context_alias_is_composable():
+    assert compose_context_mask("hourly_net_balance") == CONTEXT_HOURLY_BALANCE
+    assert compose_context_mask("net_balance") == CONTEXT_HOURLY_BALANCE
 
 
 def test_simulation_preserves_energy_balance_and_efficiency():

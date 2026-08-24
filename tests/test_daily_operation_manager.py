@@ -21,6 +21,7 @@ from custom_components.omnibattery.tracking.daily_timeline import (
     ACTION_SOLAR_CHARGE,
     CONTEXT_CHARGE_DELAY,
     CONTEXT_DYNAMIC_PRICE,
+    CONTEXT_HOURLY_BALANCE,
     CONTEXT_SETPOINT,
     DailyOperationTimelineManager,
 )
@@ -216,6 +217,46 @@ def test_runtime_diary_keeps_grid_label_during_post_window_ac_tail_at_night():
     )
 
     assert decision["action_mask"] == ACTION_GRID_CHARGE
+
+
+def test_runtime_diary_classifies_grid_charge_from_hourly_balance():
+    coordinator = SimpleNamespace(
+        capabilities=SimpleNamespace(has_mppt_pv=False, has_solar_telemetry=False),
+        data={"ac_power": -600},
+    )
+    controller = _runtime_controller([coordinator])
+    controller.hourly_balance_enabled = True
+    controller._hourly_balance_mgr = SimpleNamespace(
+        get_status_dict=lambda: {"offset_w": 600.0, "in_active_slot": True}
+    )
+
+    decision = ChargeDischargeController._daily_operation_runtime_decision(
+        controller, datetime(2026, 8, 23, 11, 30, tzinfo=MADRID)
+    )
+
+    assert decision["action_mask"] == ACTION_GRID_CHARGE
+    assert decision["context_mask"] & CONTEXT_HOURLY_BALANCE
+    assert decision["hourly_balance_active"] is True
+
+
+def test_runtime_diary_classifies_discharge_from_hourly_balance():
+    coordinator = SimpleNamespace(
+        capabilities=SimpleNamespace(has_mppt_pv=False, has_solar_telemetry=False),
+        data={"ac_power": 600},
+    )
+    controller = _runtime_controller([coordinator])
+    controller.hourly_balance_enabled = True
+    controller._hourly_balance_mgr = SimpleNamespace(
+        get_status_dict=lambda: {"offset_w": -600.0, "in_active_slot": True}
+    )
+
+    decision = ChargeDischargeController._daily_operation_runtime_decision(
+        controller, datetime(2026, 8, 23, 11, 30, tzinfo=MADRID)
+    )
+
+    assert decision["action_mask"] == ACTION_DISCHARGE
+    assert decision["context_mask"] & CONTEXT_HOURLY_BALANCE
+    assert decision["hourly_balance_active"] is True
 
 
 @pytest.mark.parametrize(
@@ -644,7 +685,7 @@ async def test_fake_persistence_restores_current_day_and_actions():
     manager.record_runtime_decision(
         {"source": "chronological", "slot": "slot-1", "soc_pct": 56.5},
         action_mask=ACTION_SOLAR_CHARGE | ACTION_GRID_CHARGE,
-        context_mask=CONTEXT_DYNAMIC_PRICE,
+        context_mask=CONTEXT_DYNAMIC_PRICE | CONTEXT_HOURLY_BALANCE,
         charge_power_w=1200,
         duration_s=120,
         simultaneous=True,
@@ -659,6 +700,7 @@ async def test_fake_persistence_restores_current_day_and_actions():
     assert snapshot["local_date"] == "2026-08-23"
     assert snapshot["operations"]["actual_action_mask"][40] == 3
     assert snapshot["operations"]["actual_context_mask"][40] & CONTEXT_DYNAMIC_PRICE
+    assert snapshot["operations"]["actual_context_mask"][40] & CONTEXT_HOURLY_BALANCE
     assert (
         snapshot["operations"]["observed_seconds_by_action_by_interval"][40]["solar_charge"]
         == 120

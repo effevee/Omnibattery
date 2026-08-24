@@ -211,6 +211,7 @@ from .tracking.daily_timeline import (
     ACTION_SOLAR_CHARGE,
     CONTEXT_CHARGE_DELAY,
     CONTEXT_DYNAMIC_PRICE,
+    CONTEXT_HOURLY_BALANCE,
     CONTEXT_NONE,
     CONTEXT_REALTIME_PRICE,
     CONTEXT_SETPOINT,
@@ -1137,6 +1138,45 @@ class ChargeDischargeController:
             "waiting for solar",
         }
 
+    def _daily_operation_hourly_balance_context(self, action_mask: int) -> int:
+        """Classify a measured action driven by the hourly net-balance offset.
+
+        The physical action remains a grid charge or battery discharge. The
+        hourly-balance context only explains the active setpoint correction;
+        future projections deliberately do not use it because the future grid
+        signal is not known.
+        """
+        manager = getattr(self, "_hourly_balance_mgr", None)
+        if (
+            manager is None
+            or not getattr(self, "hourly_balance_enabled", False)
+            or not (action_mask & (ACTION_GRID_CHARGE | ACTION_DISCHARGE))
+        ):
+            return CONTEXT_NONE
+
+        try:
+            status = manager.get_status_dict()
+        except Exception:  # noqa: BLE001 - timeline classification is optional
+            return CONTEXT_NONE
+        if not isinstance(status, dict) or status.get("in_active_slot") is False:
+            return CONTEXT_NONE
+
+        try:
+            offset_w = float(status.get("offset_w", 0.0) or 0.0)
+        except (TypeError, ValueError, OverflowError):
+            return CONTEXT_NONE
+        if not math.isfinite(offset_w) or abs(offset_w) <= 10.0:
+            return CONTEXT_NONE
+
+        # Positive offset asks the PD controller to import/charge; negative
+        # offset asks it to export/discharge. Do not label an unrelated solar
+        # charge as hourly-balance grid charging when no grid action was seen.
+        if offset_w > 0.0 and action_mask & ACTION_GRID_CHARGE:
+            return CONTEXT_HOURLY_BALANCE
+        if offset_w < 0.0 and action_mask & ACTION_DISCHARGE:
+            return CONTEXT_HOURLY_BALANCE
+        return CONTEXT_NONE
+
     @staticmethod
     def _daily_operation_capture(profile: Any, source: str) -> Any:
         """Adapt a profile's bounded live capture without exposing its object."""
@@ -1312,6 +1352,10 @@ class ChargeDischargeController:
                 discharge_power = -total_power
                 action_mask |= ACTION_DISCHARGE
 
+        context_mask |= ChargeDischargeController._daily_operation_hourly_balance_context(
+            self, action_mask
+        )
+
         weekly_charge_bypasses_delay = (
             ChargeDischargeController._daily_operation_weekly_delay_bypass(self)
         )
@@ -1378,6 +1422,7 @@ class ChargeDischargeController:
             "source": runtime_source,
             "action_mask": action_mask,
             "context_mask": context_mask,
+            "hourly_balance_active": bool(context_mask & CONTEXT_HOURLY_BALANCE),
             "grid_charge_decision": grid_decision,
             "charge_power_w": charge_power,
             "discharge_power_w": discharge_power,
