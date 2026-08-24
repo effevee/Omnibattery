@@ -529,6 +529,7 @@ class ConsumptionProfileTracker:
         self._invalidated = False
         self._fallback_daily_kwh = fallback_daily_kwh
         self._active_fingerprint = self.configuration_fingerprint()
+        self._excluded_periods: list[tuple[datetime, datetime | None]] = []
 
     # ------------------------------------------------------------------
     # Configuration, time and validation
@@ -556,6 +557,45 @@ class ConsumptionProfileTracker:
 
     def _today(self) -> date:
         return self._now().date()
+
+    def set_excluded_periods(self, periods: list[dict[str, Any]]) -> bool:
+        """Exclude vacation-overlapping quarter-hours, including Recorder data."""
+        parsed: list[tuple[datetime, datetime | None]] = []
+        for item in periods:
+            try:
+                start = datetime.fromisoformat(str(item["start"]))
+                end_value = item.get("end")
+                end = datetime.fromisoformat(str(end_value)) if end_value else None
+            except (KeyError, TypeError, ValueError):
+                continue
+            if start.tzinfo is None:
+                start = start.replace(tzinfo=self._timezone())
+            if end is not None and end.tzinfo is None:
+                end = end.replace(tzinfo=self._timezone())
+            parsed.append((start, end))
+        self._excluded_periods = parsed
+        changed = False
+        for day in self._days.values():
+            for index in range(INTERVAL_COUNT):
+                if self._interval_is_excluded(day.local_date, index):
+                    if day.energy_kwh[index] or day.coverage_s[index]:
+                        day.energy_kwh[index] = 0.0
+                        day.coverage_s[index] = 0.0
+                        changed = True
+        if changed:
+            self.request_save()
+        return changed
+
+    def _interval_is_excluded(self, local_date: date, index: int) -> bool:
+        if not self._excluded_periods:
+            return False
+        start = datetime.combine(
+            local_date, time(index // INTERVALS_PER_HOUR, (index % INTERVALS_PER_HOUR) * INTERVAL_MINUTES),
+            tzinfo=self._timezone(),
+        )
+        end = start + timedelta(seconds=INTERVAL_SECONDS)
+        return any(period_start < end and (period_end is None or period_end > start)
+                   for period_start, period_end in self._excluded_periods)
 
     def configuration_fingerprint(self) -> str:
         """Hash consumption sources and load adjustments, excluding solar forecast."""
@@ -703,6 +743,15 @@ class ConsumptionProfileTracker:
 
         self._days = loaded
         self._prune()
+        if self._excluded_periods:
+            # Reapply exclusions after restoring persisted raw days. The period
+            # Store belongs to ConsumptionTracker so a Recorder rebuild cannot
+            # silently resurrect these quarter-hours.
+            for day in self._days.values():
+                for index in range(INTERVAL_COUNT):
+                    if self._interval_is_excluded(day.local_date, index):
+                        day.energy_kwh[index] = 0.0
+                        day.coverage_s[index] = 0.0
         self._active_fingerprint = expected_fingerprint
         self._loaded = True
         _LOGGER.info(
@@ -842,6 +891,10 @@ class ConsumptionProfileTracker:
                     self._last_power_kw,
                     parsed_power,
                 ):
+                    if self._interval_is_excluded(
+                        contribution.local_date, contribution.interval_index
+                    ):
+                        continue
                     day = self._day(contribution.local_date)
                     index = contribution.interval_index
                     day.energy_kwh[index] += contribution.energy_kwh
@@ -1503,6 +1556,10 @@ class ConsumptionProfileTracker:
                 else:
                     sign = 1.0
                 _apply_external_load_to_day(adjusted, device_day, sign)
+            for index in range(INTERVAL_COUNT):
+                if self._interval_is_excluded(local_date, index):
+                    adjusted.energy_kwh[index] = 0.0
+                    adjusted.coverage_s[index] = 0.0
             before = self._days.get(local_date)
             for index in range(INTERVAL_COUNT):
                 if (

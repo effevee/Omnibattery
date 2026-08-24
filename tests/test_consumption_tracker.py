@@ -8,7 +8,7 @@ helpers are called directly, and the one instance test uses the in-process
 from __future__ import annotations
 
 import math
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import pytest
@@ -96,6 +96,34 @@ def test_avg_daily_consumption_averages_history():
 def test_avg_daily_consumption_single_day():
     tracker = _make_tracker([(date(2026, 6, 1), 3.0)])
     assert tracker.get_avg_daily_consumption() == pytest.approx(3.0)
+
+
+def test_vacation_forecast_uses_median_of_last_three_valid_nights():
+    tracker = _make_tracker([])
+    tracker._controller.vacation_mode_enabled = True
+    tracker._vacation_nights = [
+        {"date": "2026-06-01", "energy_kwh": 2.0, "coverage_s": 10800.0},
+        {"date": "2026-06-02", "energy_kwh": 4.0, "coverage_s": 10800.0},
+        {"date": "2026-06-03", "energy_kwh": 8.0, "coverage_s": 10800.0},
+    ]
+    forecast = tracker.forecast_consumption_between(
+        datetime(2026, 6, 4, 8, tzinfo=timezone.utc),
+        datetime(2026, 6, 4, 10, tzinfo=timezone.utc),
+    )
+    # Valid-night rates are 0.5, 1.0 and 2.0 kW: median 1.0 kW.
+    assert forecast.source == "vacation_baseline"
+    assert forecast.energy_kwh == pytest.approx(2.0)
+
+
+def test_vacation_period_marks_a_partial_legacy_day_as_excluded():
+    tracker = _make_tracker([])
+    tracker._vacation_periods = [{
+        "start": "2026-06-04T12:00:00+00:00", "end": "2026-06-04T14:00:00+00:00",
+    }]
+    assert tracker._period_intersects(
+        datetime(2026, 6, 4, tzinfo=timezone.utc),
+        datetime(2026, 6, 5, tzinfo=timezone.utc),
+    )
 
 
 # ----------------------------------------------------------------------

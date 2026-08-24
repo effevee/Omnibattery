@@ -2,6 +2,23 @@
 
 Predictive charging needs to know how much energy your home consumes to decide whether grid charging is needed. The integration learns a **15-minute consumption profile** from up to 28 complete local days. Until that profile is mature, the existing 7-day daily estimate remains the safe fallback.
 
+## Vacation mode
+
+Turn on the **Vacation Mode** switch on the Omnibattery System device when the
+usual household pattern is not representative. Physical energy counters and
+the real-consumption chart continue recording, and battery control continues
+normally. Only consumption learning pauses: affected calendar days are omitted
+from the legacy daily history and only affected quarter-hours are omitted from
+the 28-day profile. The periods are stored, so a later Recorder backfill cannot
+reintroduce them.
+
+While enabled, all consumption forecasts use a constant vacation baseline. It
+is the median load from the last three valid 01:00–05:00 nights (a night needs
+at least three hours of coverage). Before the first valid night, the learned
+night profile is used, then the daily history divided by 24, and finally the
+default estimate. Toggling the switch breaks learning-integrator continuity,
+so a sample interval is never attributed across a mode change.
+
 Dynamic Pricing uses this as a chronological curve, not only as a daily total. It can therefore reserve grid energy before an early projected depletion while leaving the rest of the daily deficit flexible by price. The mature profile and temporary curve are normalized to the same aggregate kWh used by the predictive decision.
 
 While the learned profile is immature, that daily total is not distributed

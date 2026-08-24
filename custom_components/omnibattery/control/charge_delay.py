@@ -315,7 +315,7 @@ class ChargeDelayManager:
         ctrl = self._controller
         tracker = getattr(ctrl, "_consumption_tracker", None)
         profile = getattr(tracker, "consumption_profile", None)
-        if profile is None or end_h <= start_h:
+        if profile is None or tracker is None or end_h <= start_h:
             return None
         try:
             current = _decision_now()
@@ -336,13 +336,8 @@ class ChargeDelayManager:
             )
             start = midnight + timedelta(hours=max(0.0, start_h))
             end = midnight + timedelta(hours=max(0.0, end_h))
-            forecast = profile.forecast_energy_between(
-                start,
-                end,
-                exclude_charging_windows=False,
-                fallback="legacy_daily",
-            )
-            if forecast.source in {"profile", "legacy_daily"}:
+            forecast = tracker.forecast_consumption_between(start, end, fallback="legacy_daily")
+            if forecast.source in {"profile", "legacy_daily", "vacation_baseline"}:
                 return forecast
         except Exception as exc:  # noqa: BLE001
             _LOGGER.debug("Charge Delay: profile forecast failed: %s", exc)
@@ -950,13 +945,10 @@ class ChargeDelayManager:
                 )
                 start = midnight + timedelta(hours=max(0.0, t))
                 end = midnight + timedelta(hours=max(0.0, t_end))
-                result = profile.forecast_energy_between(
-                    start,
-                    end,
-                    exclude_charging_windows=False,
-                    fallback="legacy_daily",
+                result = ctrl._consumption_tracker.forecast_consumption_between(
+                    start, end, fallback="legacy_daily"
                 )
-                if result.mature and result.source == "profile":
+                if result.source in {"profile", "vacation_baseline"}:
                     return result.energy_kwh
             except Exception:  # noqa: BLE001
                 return None

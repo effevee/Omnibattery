@@ -37,6 +37,7 @@ from .const import (
     DOMAIN,
     NOTIFICATION_ID_PREFIX,
     CONF_ENABLE_PREDICTIVE_CHARGING,
+    CONF_VACATION_MODE_ENABLED,
     CONF_CHARGING_TIME_SLOT,
     CONF_SOLAR_FORECAST_SENSOR,
     CONF_SOLAR_FORECAST_REMAINING_SENSOR,
@@ -695,6 +696,7 @@ class ChargeDischargeController:
         
         # Predictive Grid Charging state
         self.predictive_charging_enabled = config_entry.data.get(CONF_ENABLE_PREDICTIVE_CHARGING, False)
+        self.vacation_mode_enabled = config_entry.data.get(CONF_VACATION_MODE_ENABLED, False)
         # Predictive charging windows: list of {start_time, end_time, days} dicts.
         # Legacy configs stored a single dict — normalize to a one-element list.
         _raw_slots = config_entry.data.get(CONF_CHARGING_TIME_SLOT, None)
@@ -4500,18 +4502,23 @@ class ChargeDischargeController:
                         second=0,
                         microsecond=0,
                     )
-                    profile_forecast = profile.forecast_energy_between(
+                    profile_forecast = self._consumption_tracker.forecast_consumption_between(
                         profile_start,
                         profile_start + timedelta(days=1),
-                        exclude_charging_windows=False,
                         fallback="legacy_daily",
                     )
                 except Exception as exc:  # noqa: BLE001
                     _LOGGER.debug("Predictive evaluation: daily profile failed: %s", exc)
                     profile_forecast = None
-            if profile_forecast is not None and profile_forecast.mature:
+            if profile_forecast is not None and (
+                profile_forecast.mature or profile_forecast.source == "vacation_baseline"
+            ):
                 avg_consumption_kwh = profile_forecast.energy_kwh
-                consumption_scope = "daily_profile"
+                consumption_scope = (
+                    "daily_vacation_baseline"
+                    if profile_forecast.source == "vacation_baseline"
+                    else "daily_profile"
+                )
             else:
                 avg_consumption_kwh = await self._consumption_tracker.get_dynamic_base_consumption()
         else:
@@ -9492,6 +9499,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     from .tracking.consumption_tracker import ConsumptionTracker
     consumption_tracker = ConsumptionTracker(hass, entry, controller)
     controller._consumption_tracker = consumption_tracker
+    await consumption_tracker.load_vacation_state()
     daily_operation_timeline = DailyOperationTimelineManager(
         hass, entry, controller
     )

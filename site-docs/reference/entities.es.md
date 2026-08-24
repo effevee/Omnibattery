@@ -159,6 +159,14 @@ Disponibles bajo el prefijo `sensor.marstek_venus_system_*`, suman los valores d
 - `system_home_consumption` — Consumo instantáneo del hogar (W). Lee el sensor del hogar si está configurado, en caso contrario lo deriva de `red + AC de baterías + solar`.
 - `system_daily_home_energy` — Consumo del hogar de hoy (kWh), integrado del valor de Consumo de la Casa anterior. Se reinicia a medianoche (hora local).
 
+### Modo vacaciones
+
+`switch.omnibattery_vacation_mode` pausa el aprendizaje de consumo sin pausar
+la medición física ni el control de batería. Sus atributos muestran la carga
+base constante activa, su origen, las noches válidas y los periodos excluidos
+persistidos. Durante las vacaciones el sensor de perfil esperado usa
+`source: vacation_baseline`.
+
 ### Perfil de consumo esperado del hogar
 
 `sensor.omnibattery_expected_home_consumption_profile` es un sensor de

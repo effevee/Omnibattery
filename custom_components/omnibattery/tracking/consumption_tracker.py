@@ -17,7 +17,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import math
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta
 from time import monotonic
 from typing import TYPE_CHECKING, Any, Optional
 
@@ -25,7 +25,7 @@ from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
 from ..const import DEFAULT_BASE_CONSUMPTION_KWH, DOMAIN
-from .consumption_profile import ConsumptionProfileTracker
+from .consumption_profile import ConsumptionForecast, ConsumptionProfileTracker, INTERVAL_COUNT
 from .solar_profile import SolarProfileTracker
 
 if TYPE_CHECKING:
@@ -35,6 +35,11 @@ if TYPE_CHECKING:
 _LOGGER = logging.getLogger(__name__)
 
 CONSUMPTION_HISTORY_SCOPE = "full_day_home"
+VACATION_NIGHT_START = time(1, 0)
+VACATION_NIGHT_END = time(5, 0)
+VACATION_NIGHT_SECONDS = 4 * 3600
+VACATION_NIGHT_MIN_COVERAGE_S = VACATION_NIGHT_SECONDS * 0.75
+VACATION_NIGHT_SAMPLE_GAP_S = 5 * 60
 
 # Grid, solar and battery telemetry are published independently. During a
 # battery charge, a short-lived mismatch can make the derived household
@@ -128,6 +133,16 @@ class ConsumptionTracker:
         self._daily_energy_store: Store = Store(
             hass, 1, f"{DOMAIN}.{config_entry.entry_id}.daily_energy"
         )
+        self._vacation_store: Store = Store(
+            hass, 1, f"{DOMAIN}.{config_entry.entry_id}.vacation_learning"
+        )
+        # [{"start": ISO-8601, "end": ISO-8601|None}], retained so a later
+        # Recorder rebuild can never put absent-period data back into training.
+        self._vacation_periods: list[dict[str, str | None]] = []
+        self._vacation_nights: list[dict[str, float | str]] = []
+        self._vacation_last_sample_time: datetime | None = None
+        self._vacation_last_sample_mono: float | None = None
+        self._vacation_last_power_kw: float | None = None
 
         # The legacy seven-day total history remains owned by this tracker for
         # compatibility.  The quarter-hour profile is deliberately isolated in
@@ -164,6 +179,150 @@ class ConsumptionTracker:
     async def load_consumption_profile(self) -> bool:
         """Restore the independent quarter-hour profile Store."""
         return await self._consumption_profile.async_load()
+
+    async def load_vacation_state(self) -> None:
+        """Restore exclusion periods and valid overnight baseline observations."""
+        try:
+            data = await self._vacation_store.async_load() or {}
+            periods = data.get("periods", [])
+            nights = data.get("nights", [])
+            self._vacation_periods = [
+                {"start": str(item["start"]), "end": item.get("end")}
+                for item in periods if isinstance(item, dict) and item.get("start")
+            ]
+            self._vacation_nights = [
+                {"date": str(item["date"]), "energy_kwh": float(item["energy_kwh"]),
+                 "coverage_s": float(item["coverage_s"])}
+                for item in nights if isinstance(item, dict) and item.get("date")
+                and float(item.get("coverage_s", 0)) >= VACATION_NIGHT_MIN_COVERAGE_S
+            ][-30:]
+            self._sync_profile_vacation_exclusions()
+        except (TypeError, ValueError) as exc:
+            _LOGGER.warning("Could not restore vacation learning state: %s", exc)
+
+    async def _save_vacation_state(self) -> None:
+        await self._vacation_store.async_save({
+            "periods": self._vacation_periods,
+            "nights": self._vacation_nights[-30:],
+        })
+
+    @staticmethod
+    def _as_aware(value: str | datetime | None) -> datetime | None:
+        if value is None:
+            return None
+        if isinstance(value, datetime):
+            return value
+        try:
+            return datetime.fromisoformat(value)
+        except (TypeError, ValueError):
+            return None
+
+    def _period_intersects(self, start: datetime, end: datetime) -> bool:
+        """Whether an interval overlaps a persisted or current vacation."""
+        for item in self._vacation_periods:
+            period_start = self._as_aware(item.get("start"))
+            period_end = self._as_aware(item.get("end"))
+            if period_start is None:
+                continue
+            zone = start.tzinfo or period_start.tzinfo or dt_util.UTC
+            if start.tzinfo is None:
+                start = start.replace(tzinfo=zone)
+                end = end.replace(tzinfo=zone)
+            if period_start.tzinfo is None:
+                period_start = period_start.replace(tzinfo=zone)
+            if period_end is not None and period_end.tzinfo is None:
+                period_end = period_end.replace(tzinfo=zone)
+            if period_start < end and (period_end is None or period_end > start):
+                return True
+        return False
+
+    def _sync_profile_vacation_exclusions(self) -> None:
+        setter = getattr(self._consumption_profile, "set_excluded_periods", None)
+        if callable(setter):
+            setter(self._vacation_periods)
+
+    def is_vacation_active(self) -> bool:
+        return bool(getattr(self._controller, "vacation_mode_enabled", False))
+
+    async def async_set_vacation_mode(self, enabled: bool) -> None:
+        """Record a toggle boundary and break both learning integrators."""
+        now = dt_util.now()
+        if enabled:
+            if not self._vacation_periods or self._vacation_periods[-1].get("end"):
+                self._vacation_periods.append({"start": now.isoformat(), "end": None})
+            # A vacation affects the complete legacy day even if it began late.
+            self._controller._daily_consumption_history = [
+                (day, energy) for day, energy in self._controller._daily_consumption_history
+                if day != now.date()
+            ]
+        elif self._vacation_periods and self._vacation_periods[-1].get("end") is None:
+            self._vacation_periods[-1]["end"] = now.isoformat()
+        self._household_last_accumulation_time = None
+        self._vacation_last_sample_time = None
+        self._vacation_last_sample_mono = None
+        self._vacation_last_power_kw = None
+        self._consumption_profile.record_power_sample(None, local_time=now)
+        self._sync_profile_vacation_exclusions()
+        await self.save_consumption_history()
+        await self._save_vacation_state()
+
+    def _vacation_baseline_kw(self) -> tuple[float, str]:
+        """Return median valid-night load, then prior profile, history, default."""
+        valid = [item for item in self._vacation_nights
+                 if float(item.get("coverage_s", 0.0)) >= VACATION_NIGHT_MIN_COVERAGE_S]
+        values = [float(item["energy_kwh"]) / 4.0 for item in valid[-3:]]
+        if values:
+            values.sort()
+            return values[len(values) // 2], "vacation_night_median"
+        try:
+            today = dt_util.now().date()
+            midnight = datetime.combine(today, time.min, tzinfo=dt_util.now().tzinfo)
+            prior = self._consumption_profile.forecast_energy_between(
+                midnight + timedelta(hours=1), midnight + timedelta(hours=5),
+                exclude_charging_windows=False, fallback="legacy_daily",
+            )
+            if prior.source == "profile" and prior.energy_kwh > 0:
+                return prior.energy_kwh / 4.0, "prior_night_profile"
+        except Exception:  # noqa: BLE001
+            pass
+        history = [energy for day, energy in self._controller._daily_consumption_history
+                   if not self._period_intersects(
+                       datetime.combine(day, time.min, tzinfo=dt_util.now().tzinfo),
+                       datetime.combine(day + timedelta(days=1), time.min, tzinfo=dt_util.now().tzinfo))]
+        if history:
+            return sum(history) / len(history) / 24.0, "daily_history"
+        return DEFAULT_BASE_CONSUMPTION_KWH / 24.0, "default"
+
+    def vacation_diagnostics(self) -> dict[str, Any]:
+        baseline_kw, source = self._vacation_baseline_kw()
+        return {
+            "active": self.is_vacation_active(),
+            "baseline_kw": round(baseline_kw, 4),
+            "baseline_daily_kwh": round(baseline_kw * 24.0, 3),
+            "baseline_source": source,
+            "valid_nights": sum(float(item.get("coverage_s", 0.0)) >= VACATION_NIGHT_MIN_COVERAGE_S for item in self._vacation_nights),
+            "night_window": "01:00-05:00",
+            "min_coverage_hours": 3.0,
+            "excluded_periods": list(self._vacation_periods),
+        }
+
+    def forecast_consumption_between(self, start: datetime, end: datetime, *, fallback: str = "legacy_daily") -> ConsumptionForecast:
+        """Single forecast API: learned profile normally, constant baseline away."""
+        if not self.is_vacation_active():
+            return self._consumption_profile.forecast_energy_between(
+                start, end, exclude_charging_windows=False, fallback=fallback
+            )
+        seconds = max(0.0, end.timestamp() - start.timestamp())
+        baseline_kw, source = self._vacation_baseline_kw()
+        energy = baseline_kw * seconds / 3600.0
+        intervals = [baseline_kw * 0.25] * INTERVAL_COUNT
+        return ConsumptionForecast(energy, intervals, "vacation_baseline", False,
+            fallback_reason=source)
+
+    def forecast_consumption_for_date(self, target_date: date, *, fallback: str = "legacy_daily") -> ConsumptionForecast:
+        now = dt_util.now()
+        midnight = datetime.combine(target_date, time.min, tzinfo=now.tzinfo)
+        return self.forecast_consumption_between(midnight, midnight + timedelta(days=1), fallback=fallback)
 
     def start_consumption_profile_backfill(self) -> None:
         """Start the non-blocking Recorder backfill for the quarter-hour profile."""
@@ -231,6 +390,15 @@ class ConsumptionTracker:
                 self._controller._daily_consumption_history = [
                     (date.fromisoformat(date_str), round(consumption, 2))
                     for date_str, consumption in data["history"]
+                ]
+                local_tz = dt_util.now().tzinfo
+                self._controller._daily_consumption_history = [
+                    (day, consumption)
+                    for day, consumption in self._controller._daily_consumption_history
+                    if not self._period_intersects(
+                        datetime.combine(day, time.min, tzinfo=local_tz),
+                        datetime.combine(day + timedelta(days=1), time.min, tzinfo=local_tz),
+                    )
                 ]
                 history = self._controller._daily_consumption_history
                 _LOGGER.info(
@@ -844,6 +1012,8 @@ class ConsumptionTracker:
 
     def get_avg_daily_consumption(self) -> float:
         """Get average daily consumption from history, with fallback."""
+        if self.is_vacation_active():
+            return self._vacation_baseline_kw()[0] * 24.0
         history = self._controller._daily_consumption_history
         if history:
             total = sum(c for _, c in history)
@@ -859,6 +1029,10 @@ class ConsumptionTracker:
         """
         ctrl = self._controller
 
+        if self.is_vacation_active():
+            baseline_kw, _source = self._vacation_baseline_kw()
+            return baseline_kw * 24.0
+
         # OPPORTUNISTIC BACKFILL: Replace default entries with real data from HA history
         # This recovers real data after restarts or when defaults were pre-populated.
         # Window = the 7 most recent calendar days.
@@ -869,6 +1043,10 @@ class ConsumptionTracker:
         }
         if len(real_data_dates) < 7:
             for past_date in self._recent_history_days(7):
+                local_tz = dt_util.now().tzinfo
+                start = datetime.combine(past_date, time.min, tzinfo=local_tz)
+                if self._period_intersects(start, start + timedelta(days=1)):
+                    continue
                 if past_date not in real_data_dates:
                     value = await self.backfill_home_from_history(past_date)
                     if value is not None and value >= 1.5:
@@ -950,6 +1128,10 @@ class ConsumptionTracker:
         demand: battery charging is already cancelled by the battery AC term in
         ``grid + battery AC + solar``. Returns None if no usable data.
         """
+        local_tz = dt_util.get_time_zone(self._hass.config.time_zone) or dt_util.UTC
+        day_start = datetime.combine(target_date, time.min, tzinfo=local_tz)
+        if self._period_intersects(day_start, day_start + timedelta(days=1)):
+            return None
         source_entity = self._home_consumption_entity_id()
         if not source_entity:
             return None
@@ -960,7 +1142,6 @@ class ConsumptionTracker:
             _LOGGER.warning("Recorder not available for household backfill")
             return None
 
-        local_tz = dt_util.get_time_zone(self._hass.config.time_zone) or dt_util.UTC
         start_time = datetime.combine(target_date, datetime.min.time()).replace(tzinfo=local_tz)
         end_time = datetime.combine(target_date, datetime.max.time()).replace(tzinfo=local_tz)
 
@@ -1107,7 +1288,13 @@ class ConsumptionTracker:
 
         # Try to backfill past days from recorder history.
         # Window = the 7 most recent calendar days.
-        target_days = self._recent_history_days(7)
+        target_days = [
+            past_date for past_date in self._recent_history_days(7)
+            if not self._period_intersects(
+                datetime.combine(past_date, time.min, tzinfo=dt_util.now().tzinfo),
+                datetime.combine(past_date + timedelta(days=1), time.min, tzinfo=dt_util.now().tzinfo),
+            )
+        ]
         real_data_dates = {
             d for d, c in ctrl._daily_consumption_history if c != DEFAULT_BASE_CONSUMPTION_KWH
         }
@@ -1205,6 +1392,14 @@ class ConsumptionTracker:
             return
 
         today = date.today()
+        day_start = datetime.combine(today, time.min, tzinfo=dt_util.now().tzinfo)
+        if self._period_intersects(day_start, day_start + timedelta(days=1)):
+            ctrl._daily_consumption_history = [
+                (day, energy) for day, energy in ctrl._daily_consumption_history if day != today
+            ]
+            await self.save_consumption_history()
+            _LOGGER.info("Daily consumption capture skipped: %s intersects vacation mode", today)
+            return
 
         # Consumption comes from the adjusted full-day home-energy accumulator.
         # Grid charging is not household demand: the negative battery AC term
@@ -1492,11 +1687,17 @@ class ConsumptionTracker:
         """
         ctrl = self._controller
 
-        # Capture the same adjusted 24-hour demand for both the legacy total and
-        # the quarter-hour profile.
+        # Capture the same adjusted demand for both learning paths unless the
+        # manual vacation switch is on. Physical daily energy counters are
+        # integrated elsewhere and intentionally never pause.
         profile_now = dt_util.now()
         profile_mono = monotonic()
         power_kw = self.get_adjusted_home_power_kw()
+        if self.is_vacation_active():
+            self._record_vacation_night_sample(power_kw, profile_now, profile_mono)
+            self._household_last_accumulation_time = None
+            self._consumption_profile.record_power_sample(None, local_time=profile_now)
+            return
         self._consumption_profile.record_power_sample(
             power_kw,
             local_time=profile_now,
@@ -1511,6 +1712,52 @@ class ConsumptionTracker:
             dt_hours = (now - self._household_last_accumulation_time) / 3600.0
             ctrl._household_energy_accumulator += max(0.0, power_kw) * dt_hours
         self._household_last_accumulation_time = now
+
+    def _record_vacation_night_sample(
+        self, power_kw: float | None, local_time: datetime, monotonic_time: float
+    ) -> None:
+        """Integrate 01:00–05:00 samples into a valid-night baseline record."""
+        if local_time.tzinfo is None:
+            local_time = local_time.replace(tzinfo=dt_util.now().tzinfo)
+        parsed = power_kw if power_kw is not None and math.isfinite(power_kw) and power_kw >= 0 else None
+        if parsed is None:
+            self._vacation_last_sample_time = None
+            self._vacation_last_sample_mono = None
+            self._vacation_last_power_kw = None
+            return
+        previous_time = self._vacation_last_sample_time
+        previous_power = self._vacation_last_power_kw
+        previous_mono = self._vacation_last_sample_mono
+        if previous_time is not None and previous_power is not None and previous_mono is not None:
+            elapsed = monotonic_time - previous_mono
+            if 0 < elapsed <= VACATION_NIGHT_SAMPLE_GAP_S:
+                # Split at the fixed local night boundaries; date belongs to the
+                # night that starts at 01:00, so no cross-midnight ambiguity.
+                cursor = previous_time
+                end = local_time
+                night_start = datetime.combine(cursor.date(), VACATION_NIGHT_START, tzinfo=cursor.tzinfo)
+                night_end = datetime.combine(cursor.date(), VACATION_NIGHT_END, tzinfo=cursor.tzinfo)
+                overlap_start = max(cursor, night_start)
+                overlap_end = min(end, night_end)
+                if overlap_end > overlap_start:
+                    fraction_start = (overlap_start - cursor).total_seconds() / max(1e-9, (end - cursor).total_seconds())
+                    fraction_end = (overlap_end - cursor).total_seconds() / max(1e-9, (end - cursor).total_seconds())
+                    start_power = previous_power + (parsed - previous_power) * fraction_start
+                    end_power = previous_power + (parsed - previous_power) * fraction_end
+                    coverage = (overlap_end - overlap_start).total_seconds()
+                    key = cursor.date().isoformat()
+                    record = next((item for item in self._vacation_nights if item["date"] == key), None)
+                    if record is None:
+                        record = {"date": key, "energy_kwh": 0.0, "coverage_s": 0.0}
+                        self._vacation_nights.append(record)
+                    record["energy_kwh"] = float(record["energy_kwh"]) + (start_power + end_power) / 2 * coverage / 3600.0
+                    record["coverage_s"] = float(record["coverage_s"]) + coverage
+                    if float(record["coverage_s"]) >= VACATION_NIGHT_MIN_COVERAGE_S:
+                        self._vacation_nights = self._vacation_nights[-30:]
+                        asyncio.create_task(self._save_vacation_state())
+        self._vacation_last_sample_time = local_time
+        self._vacation_last_sample_mono = monotonic_time
+        self._vacation_last_power_kw = parsed
 
     # ------------------------------------------------------------------
     # Throttle helpers used by the control loop
@@ -1551,3 +1798,4 @@ class ConsumptionTracker:
         await self.async_save_daily_energy()
         await self._consumption_profile.async_save_all()
         await self._solar_profile.async_save_all()
+        await self._save_vacation_state()

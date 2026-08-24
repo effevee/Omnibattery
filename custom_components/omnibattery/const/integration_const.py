@@ -80,6 +80,10 @@ MULTI_BATTERY_SELECTION_HOLD_SECONDS = 120
 
 # Predictive Grid Charging Configuration
 CONF_ENABLE_PREDICTIVE_CHARGING = "enable_predictive_charging"
+# A manual, persistent learning pause. The exact affected periods and the
+# measured overnight baseline live in ConsumptionTracker's Store; this flag is
+# kept in the entry so the switch restores before the first control cycle.
+CONF_VACATION_MODE_ENABLED = "vacation_mode_enabled"
 CONF_CHARGING_TIME_SLOT = "charging_time_slot"
 CONF_SOLAR_FORECAST_SENSOR = "solar_forecast_sensor"
 # Explicit post-now forecast.  The old key remains a whole-day ``today`` value

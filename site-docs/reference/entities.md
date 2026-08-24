@@ -202,6 +202,14 @@ available through the integration diagnostics endpoint.
 The source is `profile` only when the maturity contract is satisfied;
 `legacy_daily` identifies the fallback.
 
+### Vacation Mode
+
+`switch.omnibattery_vacation_mode` pauses consumption learning without pausing
+physical metering or battery control. Its attributes report the active constant
+baseline, its source, valid overnight samples and the persisted excluded
+periods. During vacation the expected-profile sensor reports
+`source: vacation_baseline`.
+
 Predictive charging also reports `solar_timeline_source`,
 `solar_remaining_raw_kwh`, `solar_remaining_effective_kwh`,
 `solar_timeline_fallback_reason`, `solar_profile_mature`,

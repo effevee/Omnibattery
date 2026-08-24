@@ -802,6 +802,7 @@ async def async_get_config_entry_diagnostics(
 
     consumption_profile = {}
     solar_profile = {}
+    vacation = {}
     tracker = getattr(controller, "_consumption_tracker", None)
     profile = getattr(tracker, "consumption_profile", None)
     if profile is not None:
@@ -809,6 +810,12 @@ async def async_get_config_entry_diagnostics(
             consumption_profile = _json_safe(profile.diagnostics())
         except Exception as exc:  # noqa: BLE001
             consumption_profile = {"error": str(exc)}
+    vacation_info = getattr(tracker, "vacation_diagnostics", None)
+    if callable(vacation_info):
+        try:
+            vacation = _json_safe(vacation_info())
+        except Exception as exc:  # noqa: BLE001
+            vacation = {"error": str(exc)}
     solar_tracker = getattr(tracker, "solar_profile", None)
     if solar_tracker is not None:
         try:
@@ -831,6 +838,7 @@ async def async_get_config_entry_diagnostics(
         "dynamic_pricing": _dynamic_pricing_info(controller),
         "daily_operation_timeline": _daily_operation_timeline_summary(controller),
         "consumption_profile": consumption_profile,
+        "vacation_learning": vacation,
         "solar_profile": solar_profile,
         "curtailment": _curtailment_info(controller),
         "phase_protection": async_redact_data(

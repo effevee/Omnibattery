@@ -1350,6 +1350,9 @@
       "predictive_charging": {
         "name": "Voorspellend Laden"
       },
+      "vacation_mode": {
+        "name": "Vakantiemodus"
+      },
       "charge_delay": {
         "name": "Laadvertraging"
       },

@@ -1368,6 +1368,9 @@
       "predictive_charging": {
         "name": "Carga Predictiva"
       },
+      "vacation_mode": {
+        "name": "Modo vacaciones"
+      },
       "charge_delay": {
         "name": "Retraso de Carga"
       },

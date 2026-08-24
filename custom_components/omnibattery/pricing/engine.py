@@ -2170,11 +2170,8 @@ class PricingManager:
             solar_profile_mode = normalize_solar_profile_mode(
                 getattr(self._controller, "solar_profile_mode", None)
             )
-            forecast = profile.forecast_energy_between(
-                now,
-                horizon_end,
-                exclude_charging_windows=False,
-                fallback="legacy_daily",
+            forecast = tracker.forecast_consumption_between(
+                now, horizon_end, fallback="legacy_daily"
             )
             boundaries = build_boundaries(now, horizon_end)
             consumption_raw: list[float] = []
@@ -3320,13 +3317,10 @@ class PricingManager:
                 start = start.replace(tzinfo=current)
             if end.tzinfo is None:
                 end = end.replace(tzinfo=start.tzinfo)
-            forecast = profile.forecast_energy_between(
-                start,
-                end,
-                exclude_charging_windows=False,
-                fallback="legacy_daily",
+            forecast = tracker.forecast_consumption_between(
+                start, end, fallback="legacy_daily"
             )
-            if forecast.source in {"profile", "legacy_daily"}:
+            if forecast.source in {"profile", "legacy_daily", "vacation_baseline"}:
                 return forecast
         except Exception as exc:  # noqa: BLE001
             _LOGGER.debug("Pricing: profile forecast failed: %s", exc)
@@ -3663,7 +3657,7 @@ class PricingManager:
             self._get_consumed_today_kwh(self._controller, now)
         )
         tracker = self._controller._consumption_tracker
-        avg_daily_kwh = tracker.get_avg_daily_consumption()
+        avg_daily_kwh = await get_average()
         if _consumption_source == "daily_home_energy":
             window_hours_per_day = 24.0
             remaining_window_hours = 24.0 - now_h

@@ -2156,10 +2156,11 @@ class ConsumptionProfileSensor(SensorEntity):
     def _forecast(self):
         tracker = getattr(self._controller, "_consumption_tracker", None)
         profile = getattr(tracker, "consumption_profile", None)
-        if profile is None:
+        forecast_for_date = getattr(tracker, "forecast_consumption_for_date", None)
+        if profile is None or not callable(forecast_for_date):
             return None
         try:
-            return profile.forecast_for_date(self._target_date())
+            return forecast_for_date(self._target_date())
         except Exception as exc:  # noqa: BLE001
             _LOGGER.debug("Consumption profile sensor: forecast unavailable: %s", exc)
             return None

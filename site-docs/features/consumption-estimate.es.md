@@ -2,6 +2,24 @@
 
 La carga predictiva necesita saber cuánta energía consume tu hogar para decidir si hace falta cargar desde la red. La integración aprende un **perfil de consumo de 15 minutos** a partir de hasta 28 días locales completos. Hasta que ese perfil alcanza la madurez, la estimación diaria existente de 7 días sigue siendo el fallback seguro.
 
+## Modo vacaciones
+
+Activa el interruptor **Modo vacaciones** del dispositivo de sistema de
+Omnibattery cuando el patrón habitual de la vivienda deje de ser representativo.
+Los contadores físicos y el gráfico de consumo real siguen registrando, y el
+control de batería funciona con normalidad. Solo se pausa el aprendizaje: los
+días afectados se eliminan del histórico diario heredado y solo los intervalos
+de 15 minutos afectados se excluyen del perfil de 28 días. Los periodos se
+guardan para que un backfill posterior de Recorder no los reincorpore.
+
+Durante las vacaciones todas las previsiones de consumo usan una carga base
+constante: la mediana de las tres últimas noches válidas entre 01:00 y 05:00
+(cada noche necesita al menos tres horas de cobertura). Antes de la primera
+noche válida se usa el perfil nocturno aprendido, después la media diaria/24 y
+por último el valor predeterminado. Al cambiar el interruptor se rompe la
+continuidad de los integradores de aprendizaje para no atribuir intervalos al
+modo equivocado.
+
 Precio Dinámico lo usa como curva cronológica, no solo como total diario. Así puede reservar energía de red antes de un agotamiento temprano previsto y mantener flexible por precio el resto del déficit diario. Tanto el perfil maduro como la curva provisional se normalizan a los mismos kWh agregados usados por la decisión predictiva.
 
 Mientras el perfil aprendido no está maduro, ese total diario no se reparte de
