@@ -15,6 +15,7 @@ compatibility with sensors and binary_sensors that read those attrs directly:
 from __future__ import annotations
 
 import asyncio
+from contextlib import suppress
 import logging
 import math
 from datetime import date, datetime, time, timedelta
@@ -40,6 +41,8 @@ VACATION_NIGHT_END = time(5, 0)
 VACATION_NIGHT_SECONDS = 4 * 3600
 VACATION_NIGHT_MIN_COVERAGE_S = VACATION_NIGHT_SECONDS * 0.75
 VACATION_NIGHT_SAMPLE_GAP_S = 5 * 60
+VACATION_STATE_SAVE_INTERVAL_S = 300
+VACATION_RETENTION_DAYS = 35
 
 # Grid, solar and battery telemetry are published independently. During a
 # battery charge, a short-lived mismatch can make the derived household
@@ -143,6 +146,7 @@ class ConsumptionTracker:
         self._vacation_last_sample_time: datetime | None = None
         self._vacation_last_sample_mono: float | None = None
         self._vacation_last_power_kw: float | None = None
+        self._vacation_save_task: asyncio.Task | None = None
 
         # The legacy seven-day total history remains owned by this tracker for
         # compatibility.  The quarter-hour profile is deliberately isolated in
@@ -196,15 +200,51 @@ class ConsumptionTracker:
                 for item in nights if isinstance(item, dict) and item.get("date")
                 and float(item.get("coverage_s", 0)) >= VACATION_NIGHT_MIN_COVERAGE_S
             ][-30:]
-            self._sync_profile_vacation_exclusions()
-        except (TypeError, ValueError) as exc:
+            await self.async_reconcile_vacation_mode()
+        except Exception as exc:  # Store must never prevent entry setup
             _LOGGER.warning("Could not restore vacation learning state: %s", exc)
 
     async def _save_vacation_state(self) -> None:
-        await self._vacation_store.async_save({
-            "periods": self._vacation_periods,
-            "nights": self._vacation_nights[-30:],
-        })
+        try:
+            self._prune_vacation_periods(dt_util.now())
+            await self._vacation_store.async_save({
+                "periods": self._vacation_periods,
+                "nights": self._vacation_nights[-30:],
+            })
+        except Exception as exc:  # noqa: BLE001
+            _LOGGER.warning("Could not save vacation learning state: %s", exc)
+
+    def _prune_vacation_periods(self, now: datetime) -> None:
+        """Retain only periods that can still overlap persisted training data."""
+        floor = now - timedelta(days=VACATION_RETENTION_DAYS)
+        self._vacation_periods = [
+            period for period in self._vacation_periods
+            if period.get("end") is None
+            or (self._as_aware(period.get("end")) or now) >= floor
+        ][-64:]
+
+    def _request_vacation_save(self) -> None:
+        """Coalesce high-rate night samples into at most one Store write/5 min."""
+        if self._vacation_save_task is not None and not self._vacation_save_task.done():
+            return
+
+        async def _delayed_save() -> None:
+            try:
+                await asyncio.sleep(VACATION_STATE_SAVE_INTERVAL_S)
+                await self._save_vacation_state()
+            except asyncio.CancelledError:
+                raise
+
+        self._vacation_save_task = asyncio.create_task(_delayed_save())
+
+    async def _flush_vacation_state(self) -> None:
+        task = self._vacation_save_task
+        self._vacation_save_task = None
+        if task is not None and not task.done():
+            task.cancel()
+            with suppress(asyncio.CancelledError):
+                await task
+        await self._save_vacation_state()
 
     @staticmethod
     def _as_aware(value: str | datetime | None) -> datetime | None:
@@ -244,12 +284,30 @@ class ConsumptionTracker:
     def is_vacation_active(self) -> bool:
         return bool(getattr(self._controller, "vacation_mode_enabled", False))
 
+    async def async_reconcile_vacation_mode(self) -> None:
+        """Repair the persisted period after reload or an entry-data update."""
+        now = dt_util.now()
+        open_period = next(
+            (period for period in reversed(self._vacation_periods) if not period.get("end")),
+            None,
+        )
+        if self.is_vacation_active() and open_period is None:
+            self._vacation_periods.append({"start": now.isoformat(), "end": None})
+            self._vacation_nights = []
+        elif not self.is_vacation_active() and open_period is not None:
+            open_period["end"] = now.isoformat()
+        self._prune_vacation_periods(now)
+        self._sync_profile_vacation_exclusions()
+        await self._save_vacation_state()
+
     async def async_set_vacation_mode(self, enabled: bool) -> None:
         """Record a toggle boundary and break both learning integrators."""
         now = dt_util.now()
         if enabled:
             if not self._vacation_periods or self._vacation_periods[-1].get("end"):
                 self._vacation_periods.append({"start": now.isoformat(), "end": None})
+                # A fresh holiday must not inherit a prior household-away load.
+                self._vacation_nights = []
             # A vacation affects the complete legacy day even if it began late.
             self._controller._daily_consumption_history = [
                 (day, energy) for day, energy in self._controller._daily_consumption_history
@@ -264,13 +322,16 @@ class ConsumptionTracker:
         self._consumption_profile.record_power_sample(None, local_time=now)
         self._sync_profile_vacation_exclusions()
         await self.save_consumption_history()
-        await self._save_vacation_state()
+        await self._flush_vacation_state()
 
     def _vacation_baseline_kw(self) -> tuple[float, str]:
         """Return median valid-night load, then prior profile, history, default."""
         valid = [item for item in self._vacation_nights
                  if float(item.get("coverage_s", 0.0)) >= VACATION_NIGHT_MIN_COVERAGE_S]
-        values = [float(item["energy_kwh"]) / 4.0 for item in valid[-3:]]
+        values = [
+            float(item["energy_kwh"]) / (float(item["coverage_s"]) / 3600.0)
+            for item in valid[-3:]
+        ]
         if values:
             values.sort()
             return values[len(values) // 2], "vacation_night_median"
@@ -1696,7 +1757,11 @@ class ConsumptionTracker:
         if self.is_vacation_active():
             self._record_vacation_night_sample(power_kw, profile_now, profile_mono)
             self._household_last_accumulation_time = None
-            self._consumption_profile.record_power_sample(None, local_time=profile_now)
+            # Keep the raw capture for the dashboard/timeline. The profile's
+            # persistent vacation mask prevents these samples from training.
+            self._consumption_profile.record_power_sample(
+                power_kw, local_time=profile_now, monotonic_time=profile_mono
+            )
             return
         self._consumption_profile.record_power_sample(
             power_kw,
@@ -1752,9 +1817,8 @@ class ConsumptionTracker:
                         self._vacation_nights.append(record)
                     record["energy_kwh"] = float(record["energy_kwh"]) + (start_power + end_power) / 2 * coverage / 3600.0
                     record["coverage_s"] = float(record["coverage_s"]) + coverage
-                    if float(record["coverage_s"]) >= VACATION_NIGHT_MIN_COVERAGE_S:
-                        self._vacation_nights = self._vacation_nights[-30:]
-                        asyncio.create_task(self._save_vacation_state())
+                    self._vacation_nights = self._vacation_nights[-30:]
+                    self._request_vacation_save()
         self._vacation_last_sample_time = local_time
         self._vacation_last_sample_mono = monotonic_time
         self._vacation_last_power_kw = parsed
@@ -1798,4 +1862,4 @@ class ConsumptionTracker:
         await self.async_save_daily_energy()
         await self._consumption_profile.async_save_all()
         await self._solar_profile.async_save_all()
-        await self._save_vacation_state()
+        await self._flush_vacation_state()

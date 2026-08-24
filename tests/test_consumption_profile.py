@@ -47,6 +47,7 @@ def _profile(days=None, *, slots=None, fallback_daily=5.0):
     profile._loaded = True
     profile._invalidated = False
     profile._active_fingerprint = "test"
+    profile._excluded_periods = []
     return profile
 
 
@@ -291,6 +292,22 @@ def test_current_day_capture_exposes_raw_energy_and_coverage():
     assert capture["interval_coverage_s"][40] == pytest.approx(900.0)
     assert capture["valid_intervals"] == 1
     assert capture["coverage_ratio"] == pytest.approx(round(900 / 86400, 6))
+
+
+def test_vacation_mask_keeps_raw_capture_but_excludes_profile_training():
+    local_date = date(2026, 6, 4)
+    profile = _profile({local_date: _single_interval_day(local_date, 0.25, 40)})
+    profile.set_excluded_periods([{
+        "start": "2026-06-04T10:00:00+02:00",
+        "end": "2026-06-04T10:15:00+02:00",
+    }])
+
+    capture = profile.current_day_capture(local_date)
+    forecast = profile.forecast_for_date(local_date)
+
+    assert capture["interval_energy_kwh"][40] == pytest.approx(0.25)
+    assert capture["interval_coverage_s"][40] == pytest.approx(INTERVAL_SECONDS)
+    assert forecast.total_days == 0
 
 
 def test_current_day_capture_is_unavailable_without_covered_samples():

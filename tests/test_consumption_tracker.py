@@ -7,6 +7,7 @@ helpers are called directly, and the one instance test uses the in-process
 """
 from __future__ import annotations
 
+import asyncio
 import math
 from datetime import date, datetime, timedelta, timezone
 from types import SimpleNamespace
@@ -103,14 +104,14 @@ def test_vacation_forecast_uses_median_of_last_three_valid_nights():
     tracker._controller.vacation_mode_enabled = True
     tracker._vacation_nights = [
         {"date": "2026-06-01", "energy_kwh": 2.0, "coverage_s": 10800.0},
-        {"date": "2026-06-02", "energy_kwh": 4.0, "coverage_s": 10800.0},
-        {"date": "2026-06-03", "energy_kwh": 8.0, "coverage_s": 10800.0},
+        {"date": "2026-06-02", "energy_kwh": 4.0, "coverage_s": 14400.0},
+        {"date": "2026-06-03", "energy_kwh": 6.0, "coverage_s": 10800.0},
     ]
     forecast = tracker.forecast_consumption_between(
         datetime(2026, 6, 4, 8, tzinfo=timezone.utc),
         datetime(2026, 6, 4, 10, tzinfo=timezone.utc),
     )
-    # Valid-night rates are 0.5, 1.0 and 2.0 kW: median 1.0 kW.
+    # Rates are 2/3, 1 and 2 kW; 3 hours is a valid incomplete night.
     assert forecast.source == "vacation_baseline"
     assert forecast.energy_kwh == pytest.approx(2.0)
 
@@ -124,6 +125,49 @@ def test_vacation_period_marks_a_partial_legacy_day_as_excluded():
         datetime(2026, 6, 4, tzinfo=timezone.utc),
         datetime(2026, 6, 5, tzinfo=timezone.utc),
     )
+
+
+def test_vacation_baseline_ignores_nights_without_three_hours_coverage():
+    tracker = _make_tracker([])
+    tracker._vacation_nights = [
+        {"date": "2026-06-01", "energy_kwh": 9.0, "coverage_s": 10799.0},
+        {"date": "2026-06-02", "energy_kwh": 3.0, "coverage_s": 10800.0},
+    ]
+    baseline_kw, source = tracker._vacation_baseline_kw()
+    assert baseline_kw == pytest.approx(1.0)
+    assert source == "vacation_night_median"
+
+
+@pytest.mark.asyncio
+async def test_vacation_state_save_is_coalesced():
+    tracker = _make_tracker([])
+    tracker._vacation_save_task = None
+    tracker._request_vacation_save()
+    first = tracker._vacation_save_task
+    tracker._request_vacation_save()
+    assert tracker._vacation_save_task is first
+    first.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await first
+
+
+@pytest.mark.asyncio
+async def test_vacation_reconcile_starts_a_new_session_without_old_nights():
+    tracker = _make_tracker([])
+    tracker._controller.vacation_mode_enabled = True
+    tracker._vacation_periods = [{
+        "start": "2026-05-01T00:00:00+00:00", "end": "2026-05-02T00:00:00+00:00",
+    }]
+    tracker._vacation_nights = [{
+        "date": "2026-05-01", "energy_kwh": 3.0, "coverage_s": 10800.0,
+    }]
+    tracker._consumption_profile = SimpleNamespace(set_excluded_periods=lambda _periods: None)
+    tracker._vacation_store = _FakeConsumptionStore({})
+
+    await tracker.async_reconcile_vacation_mode()
+
+    assert tracker._vacation_nights == []
+    assert tracker._vacation_periods[-1]["end"] is None
 
 
 # ----------------------------------------------------------------------

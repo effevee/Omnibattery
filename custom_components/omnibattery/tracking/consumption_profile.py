@@ -559,7 +559,7 @@ class ConsumptionProfileTracker:
         return self._now().date()
 
     def set_excluded_periods(self, periods: list[dict[str, Any]]) -> bool:
-        """Exclude vacation-overlapping quarter-hours, including Recorder data."""
+        """Set a training-only vacation mask without altering raw capture."""
         parsed: list[tuple[datetime, datetime | None]] = []
         for item in periods:
             try:
@@ -573,17 +573,8 @@ class ConsumptionProfileTracker:
             if end is not None and end.tzinfo is None:
                 end = end.replace(tzinfo=self._timezone())
             parsed.append((start, end))
+        changed = parsed != self._excluded_periods
         self._excluded_periods = parsed
-        changed = False
-        for day in self._days.values():
-            for index in range(INTERVAL_COUNT):
-                if self._interval_is_excluded(day.local_date, index):
-                    if day.energy_kwh[index] or day.coverage_s[index]:
-                        day.energy_kwh[index] = 0.0
-                        day.coverage_s[index] = 0.0
-                        changed = True
-        if changed:
-            self.request_save()
         return changed
 
     def _interval_is_excluded(self, local_date: date, index: int) -> bool:
@@ -596,6 +587,18 @@ class ConsumptionProfileTracker:
         end = start + timedelta(seconds=INTERVAL_SECONDS)
         return any(period_start < end and (period_end is None or period_end > start)
                    for period_start, period_end in self._excluded_periods)
+
+    def _training_interval(self, day: ProfileDay, index: int) -> float | None:
+        """Return usable learning data while leaving the physical raw day intact."""
+        if self._interval_is_excluded(day.local_date, index):
+            return None
+        return day.normalized_interval(index)
+
+    def _day_has_training_data(self, day: ProfileDay) -> bool:
+        return any(
+            self._training_interval(day, index) is not None
+            for index in range(INTERVAL_COUNT)
+        )
 
     def configuration_fingerprint(self) -> str:
         """Hash consumption sources and load adjustments, excluding solar forecast."""
@@ -743,15 +746,6 @@ class ConsumptionProfileTracker:
 
         self._days = loaded
         self._prune()
-        if self._excluded_periods:
-            # Reapply exclusions after restoring persisted raw days. The period
-            # Store belongs to ConsumptionTracker so a Recorder rebuild cannot
-            # silently resurrect these quarter-hours.
-            for day in self._days.values():
-                for index in range(INTERVAL_COUNT):
-                    if self._interval_is_excluded(day.local_date, index):
-                        day.energy_kwh[index] = 0.0
-                        day.coverage_s[index] = 0.0
         self._active_fingerprint = expected_fingerprint
         self._loaded = True
         _LOGGER.info(
@@ -891,10 +885,6 @@ class ConsumptionProfileTracker:
                     self._last_power_kw,
                     parsed_power,
                 ):
-                    if self._interval_is_excluded(
-                        contribution.local_date, contribution.interval_index
-                    ):
-                        continue
                     day = self._day(contribution.local_date)
                     index = contribution.interval_index
                     day.energy_kwh[index] += contribution.energy_kwh
@@ -1037,7 +1027,7 @@ class ConsumptionProfileTracker:
         return [
             day
             for day in self._days.values()
-            if day.complete and day.has_valid_data()
+            if day.complete and self._day_has_training_data(day)
         ]
 
     def forecast_for_date(
@@ -1071,7 +1061,7 @@ class ConsumptionProfileTracker:
             day_type_values: list[tuple[float, float, date]] = []
             global_values: list[tuple[float, float, date]] = []
             for day in days:
-                value = day.normalized_interval(interval_index)
+                value = self._training_interval(day, interval_index)
                 if value is None:
                     continue
                 age = max(0, (today - day.local_date).days)
@@ -1556,10 +1546,6 @@ class ConsumptionProfileTracker:
                 else:
                     sign = 1.0
                 _apply_external_load_to_day(adjusted, device_day, sign)
-            for index in range(INTERVAL_COUNT):
-                if self._interval_is_excluded(local_date, index):
-                    adjusted.energy_kwh[index] = 0.0
-                    adjusted.coverage_s[index] = 0.0
             before = self._days.get(local_date)
             for index in range(INTERVAL_COUNT):
                 if (
@@ -1601,7 +1587,11 @@ class ConsumptionProfileTracker:
         forecast = self.forecast_for_date(target_date)
         coverage_by_day = {
             local_date.isoformat(): round(
-                sum(day.coverage_s) / (INTERVAL_COUNT * INTERVAL_SECONDS),
+                sum(
+                    coverage
+                    for index, coverage in enumerate(day.coverage_s)
+                    if not self._interval_is_excluded(local_date, index)
+                ) / (INTERVAL_COUNT * INTERVAL_SECONDS),
                 3,
             )
             for local_date, day in sorted(self._days.items())

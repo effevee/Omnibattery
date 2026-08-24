@@ -1354,6 +1354,9 @@
       "predictive_charging": {
         "name": "Predictive Charging"
       },
+      "vacation_mode": {
+        "name": "Vacation Mode"
+      },
       "charge_delay": {
         "name": "Charge Delay"
       },

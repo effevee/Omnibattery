@@ -2531,6 +2531,9 @@ class ChargeDischargeController:
     def update_pd_parameters(self):
         """Re-read PD controller parameters from config_entry.data (hot-reload)."""
         self.meter_inverted = self.config_entry.data.get(CONF_METER_INVERTED, False)
+        self.vacation_mode_enabled = self.config_entry.data.get(
+            CONF_VACATION_MODE_ENABLED, False
+        )
         if self._phase_power_limiter is not None:
             self._phase_power_limiter.refresh_config()
             self._phase_power_limiter.update_manual_mode_warning(
@@ -9729,6 +9732,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             controller.update_pd_parameters()
             controller._check_solar_forecast_migration()
             tracker = getattr(controller, "_consumption_tracker", None)
+            reconcile_vacation = getattr(tracker, "async_reconcile_vacation_mode", None)
+            if callable(reconcile_vacation):
+                await reconcile_vacation()
             profile = getattr(tracker, "consumption_profile", None)
             if profile is not None and profile.invalidate_if_configuration_changed():
                 tracker.start_consumption_profile_backfill()
