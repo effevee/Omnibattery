@@ -74,6 +74,59 @@ class ChronologicalPlan:
     reason: str = "ok"
 
 
+@dataclass(frozen=True)
+class ChronologicalEvaluationRequest:
+    """Immutable input for a chronological allocation evaluation.
+
+    This is deliberately independent from the Home Assistant controller and
+    from its mutable decision dictionary.  Callers that need live forecasts
+    adapt them before constructing this value; visual projections can use the
+    same evaluator without gaining any path to runtime control state.
+    """
+
+    now: datetime
+    horizon_end: datetime
+    intervals: tuple[EnergyInterval, ...]
+    price_slots: tuple[PriceSlot, ...]
+    total_required_kwh: float
+    effective_power_kw: float
+    headroom_kwh: float = math.inf
+    usable_initial_kwh: float = 0.0
+    max_price_threshold: float | None = None
+    deadlines: tuple[EnergyDeadline, ...] = ()
+
+    def __post_init__(self) -> None:
+        if self.horizon_end <= self.now:
+            raise ValueError("chronological horizon must end after now")
+        # Accept ordinary sequences at the public boundary but retain only
+        # immutable containers while the evaluator is running.
+        object.__setattr__(self, "intervals", tuple(self.intervals))
+        object.__setattr__(self, "price_slots", tuple(self.price_slots))
+        object.__setattr__(self, "deadlines", tuple(self.deadlines))
+
+
+@dataclass(frozen=True)
+class ChronologicalDiagnostics:
+    """Read-only diagnostics produced by a chronological evaluation."""
+
+    earliest_projected_depletion: datetime | None
+    minimum_projected_energy_kwh: float
+    deadline_required_kwh: float
+    flexible_required_kwh: float
+    deadline_shortfall_kwh: float
+    total_shortfall_kwh: float
+    energy_deadlines: tuple[EnergyDeadline, ...]
+    reason: str
+
+
+@dataclass(frozen=True)
+class ChronologicalEvaluationResult:
+    """Pure evaluation output: allocation plan plus its diagnostics."""
+
+    plan: ChronologicalPlan
+    diagnostics: ChronologicalDiagnostics
+
+
 def _finite_non_negative(value: float) -> float:
     try:
         parsed = float(value)
@@ -326,4 +379,47 @@ def allocate_price_slots(
         earliest_depletion_at=earliest,
         minimum_projected_energy_kwh=simulation.minimum_projected_energy_kwh,
         reason=reason,
+    )
+
+
+def evaluate_chronological_request(
+    request: ChronologicalEvaluationRequest,
+) -> ChronologicalEvaluationResult:
+    """Evaluate an immutable chronological request without runtime side effects.
+
+    The caller may provide already-computed deadlines (for example a guaranteed
+    minimum-SOC floor).  If it does not, ordinary depletion deadlines are
+    derived from the supplied intervals.  No input collection, controller
+    access or diagnostics persistence happens in this function.
+    """
+    intervals = tuple(request.intervals)
+    deadlines = (
+        tuple(request.deadlines)
+        if request.deadlines
+        else tuple(build_energy_deadlines(intervals, request.usable_initial_kwh))
+    )
+    plan = allocate_price_slots(
+        intervals,
+        deadlines,
+        request.price_slots,
+        total_required_kwh=request.total_required_kwh,
+        effective_power_kw=request.effective_power_kw,
+        now=request.now,
+        horizon_end=request.horizon_end,
+        headroom_kwh=request.headroom_kwh,
+        usable_initial_kwh=request.usable_initial_kwh,
+        max_price_threshold=request.max_price_threshold,
+    )
+    return ChronologicalEvaluationResult(
+        plan=plan,
+        diagnostics=ChronologicalDiagnostics(
+            earliest_projected_depletion=plan.earliest_depletion_at,
+            minimum_projected_energy_kwh=plan.minimum_projected_energy_kwh,
+            deadline_required_kwh=plan.deadline_required_kwh,
+            flexible_required_kwh=plan.flexible_required_kwh,
+            deadline_shortfall_kwh=plan.deadline_shortfall_kwh,
+            total_shortfall_kwh=plan.total_shortfall_kwh,
+            energy_deadlines=tuple(plan.deadlines),
+            reason=plan.reason,
+        ),
     )

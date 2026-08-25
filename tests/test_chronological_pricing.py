@@ -7,11 +7,13 @@ import pytest
 
 from custom_components.omnibattery.pricing import PriceSlot
 from custom_components.omnibattery.pricing.chronological import (
+    ChronologicalEvaluationRequest,
     ChronologicalPlan,
     EnergyInterval,
     SlotAllocation,
     allocate_price_slots,
     build_energy_deadlines,
+    evaluate_chronological_request,
     normalize_energy_shape,
     simulate_allocations,
 )
@@ -37,6 +39,52 @@ def _slot(start_minutes, end_minutes, price):
 def test_normalized_shape_preserves_exact_total():
     result = normalize_energy_shape([1, 2, 3], 2.16)
     assert sum(result) == pytest.approx(2.16)
+
+
+def test_pure_chronological_evaluation_needs_no_controller_or_mutable_state():
+    """The dashboard-safe evaluator must not depend on PricingManager state."""
+    intervals = [_interval(0, 0.5)]
+    slots = [_slot(0, 15, 0.1)]
+    request = ChronologicalEvaluationRequest(
+        now=BASE,
+        horizon_end=BASE + timedelta(days=1),
+        intervals=intervals,
+        price_slots=slots,
+        total_required_kwh=0.5,
+        effective_power_kw=4.0,
+        usable_initial_kwh=0.0,
+    )
+    intervals.clear()
+    slots.clear()
+
+    result = evaluate_chronological_request(request)
+
+    assert len(request.intervals) == 1
+    assert len(request.price_slots) == 1
+    assert result.plan.allocated_kwh == pytest.approx(0.5)
+    assert result.diagnostics.deadline_required_kwh == pytest.approx(0.5)
+    assert result.diagnostics.energy_deadlines == tuple(result.plan.deadlines)
+
+
+def test_manager_projection_api_matches_pure_chronological_evaluation():
+    """The manager forwarding API cannot mutate its controller argument."""
+    intervals = (_interval(0, 0.25), _interval(1, 0.25))
+    request = ChronologicalEvaluationRequest(
+        now=BASE,
+        horizon_end=BASE + timedelta(days=1, hours=12),
+        intervals=intervals,
+        price_slots=(_slot(0, 30, 0.1),),
+        total_required_kwh=0.5,
+        effective_power_kw=4.0,
+    )
+    controller = SimpleNamespace(untouched={"decision": "stable"})
+    manager = PricingManager(SimpleNamespace(), controller)
+
+    direct = evaluate_chronological_request(request)
+    projected = manager.evaluate_chronological_projection(request)
+
+    assert projected == direct
+    assert controller.untouched == {"decision": "stable"}
 
 
 def test_later_solar_does_not_erase_early_deadline():
@@ -175,6 +223,42 @@ def test_time_slot_windows_are_materialized_and_split_at_midnight():
         (22, 0),
     ]
     assert slots[-1].end.date() == BASE.date() + timedelta(days=1)
+
+
+def test_time_slot_dashboard_preview_extends_known_windows_but_control_does_not():
+    now = BASE + timedelta(minutes=30)
+    controller = SimpleNamespace(
+        charging_time_slots=[
+            {
+                "start_time": "23:00",
+                "end_time": "02:00",
+                "days": ["tue", "wed"],
+            },
+            {
+                "start_time": "09:00",
+                "end_time": "10:00",
+                "days": ["wed"],
+            },
+        ]
+    )
+    manager = PricingManager(SimpleNamespace(), controller)
+    tomorrow_noon = BASE + timedelta(days=1, hours=12)
+
+    control_slots = manager._time_slot_price_slots(now)
+    preview_slots = manager._time_slot_price_slots_for_horizon(
+        now, tomorrow_noon
+    )
+
+    assert [(slot.start, slot.end) for slot in control_slots] == [
+        (BASE, BASE + timedelta(hours=2)),
+        (BASE + timedelta(hours=23), BASE + timedelta(days=1)),
+    ]
+    assert [(slot.start, slot.end) for slot in preview_slots] == [
+        (BASE, BASE + timedelta(hours=2)),
+        (BASE + timedelta(hours=23), BASE + timedelta(days=1)),
+        (BASE + timedelta(days=1), BASE + timedelta(days=1, hours=2)),
+        (BASE + timedelta(days=1, hours=9), BASE + timedelta(days=1, hours=10)),
+    ]
 
 
 def test_time_slot_plan_applies_only_the_active_window_quota():

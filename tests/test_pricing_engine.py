@@ -14,6 +14,7 @@ no ``hass`` and no time mocking.
 from __future__ import annotations
 
 import asyncio
+import copy
 from datetime import datetime, timedelta
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo
@@ -42,6 +43,10 @@ from custom_components.omnibattery.pricing import engine as pricing_engine
 from custom_components.omnibattery.pricing.engine import (
     DynamicPricingEvaluationHorizon,
     PricingManager,
+)
+from custom_components.omnibattery.tracking.consumption_profile import (
+    ConsumptionForecast,
+    INTERVAL_COUNT,
 )
 from custom_components.omnibattery.solar_forecast import (
     SolarForecastInput,
@@ -892,6 +897,213 @@ def test_extended_timeline_adds_tomorrow_periods_without_leaking_into_today():
     assert extended.remaining_kwh == pytest.approx(4.0)
     assert extended.conversion == "extended_dated_periods"
     assert repeated.remaining_kwh == pytest.approx(4.0)
+
+
+def test_extended_chronological_plan_uses_consumption_shape_by_date():
+    """Tomorrow's matching hour must not overwrite today's profile shape."""
+    madrid = ZoneInfo("Europe/Madrid")
+    now = datetime(2026, 8, 24, 10, 0, tzinfo=madrid)
+    tomorrow = now.date() + timedelta(days=1)
+    today_shape = [0.0] * INTERVAL_COUNT
+    tomorrow_shape = [0.0] * INTERVAL_COUNT
+    today_shape[40] = 1.0
+    tomorrow_shape[40] = 9.0
+    aggregate = [0.0] * INTERVAL_COUNT
+    aggregate[40] = 10.0
+    forecast = ConsumptionForecast(
+        10.0,
+        aggregate,
+        "profile",
+        True,
+        intervals_by_date={
+            now.date(): today_shape,
+            tomorrow: tomorrow_shape,
+        },
+    )
+    tracker = SimpleNamespace(
+        consumption_profile=SimpleNamespace(),
+        forecast_consumption_between=lambda *_args, **_kwargs: forecast,
+    )
+    ctrl = _controller(
+        _consumption_tracker=tracker,
+        solar_profile_mode="off",
+        _predictive_safety_margin_kwh=0.0,
+        coordinators=[],
+        _is_battery_manual_owned=lambda _coordinator: False,
+        max_contracted_power=0.0,
+        max_charge_capacity=0.0,
+    )
+    manager = _mgr(ctrl)
+    horizon_end = now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(
+        days=1, hours=12
+    )
+
+    projection = manager.build_extended_chronological_projection(
+        now=now,
+        slots=[],
+        base_decision_data={
+            "avg_consumption_kwh": 1.0,
+            "solar_forecast_input": SolarForecastInput(0.0, "none"),
+        },
+        price_ceiling=None,
+        horizon_end=horizon_end,
+    )
+    plan = projection.plan
+
+    assert plan is not None
+    at_ten = [
+        item for item in plan.intervals
+        if item.start.hour == 10 and item.start.minute == 0
+    ]
+    assert [(item.start.date(), item.consumption_kwh) for item in at_ten] == [
+        (now.date(), pytest.approx(1.0)),
+        (tomorrow, pytest.approx(9.0)),
+    ]
+
+
+def test_extended_projection_adapter_is_read_only_for_dashboard_callers():
+    """A visual cross-midnight projection cannot alter predictive runtime state."""
+    madrid = ZoneInfo("Europe/Madrid")
+    now = datetime(2026, 8, 24, 10, 0, tzinfo=madrid)
+    horizon_end = now.replace(
+        hour=0, minute=0, second=0, microsecond=0
+    ) + timedelta(days=1, hours=12)
+    shape = [0.0] * INTERVAL_COUNT
+    shape[40] = 1.0
+    forecast = ConsumptionForecast(1.0, shape, "profile", True)
+    tracker = SimpleNamespace(
+        consumption_profile=SimpleNamespace(),
+        forecast_consumption_between=lambda *_args, **_kwargs: forecast,
+    )
+    ctrl = _controller(
+        _consumption_tracker=tracker,
+        solar_profile_mode="off",
+        _predictive_safety_margin_kwh=0.0,
+        coordinators=[],
+        _is_battery_manual_owned=lambda _coordinator: False,
+        max_contracted_power=0.0,
+        max_charge_capacity=0.0,
+        _last_chronological_diagnostics={"before": "unchanged"},
+    )
+    base_decision_data = {
+        "avg_consumption_kwh": 1.0,
+        "solar_forecast_input": SolarForecastInput(0.0, "none"),
+    }
+
+    result = _mgr(ctrl).build_extended_chronological_projection(
+        now=now,
+        slots=[],
+        base_decision_data=base_decision_data,
+        price_ceiling=None,
+        horizon_end=horizon_end,
+    )
+
+    assert result.plan is not None
+    assert base_decision_data == {
+        "avg_consumption_kwh": 1.0,
+        "solar_forecast_input": SolarForecastInput(0.0, "none"),
+    }
+    assert ctrl._last_chronological_diagnostics == {"before": "unchanged"}
+    assert result.diagnostics["chronological_planning_active"] is False
+    with pytest.raises(TypeError):
+        result.diagnostics["chronological_source"] = "mutated"
+
+
+def test_canonical_diagnostics_refresh_writes_no_control_runtime_state():
+    """Reload diagnostics are owned by PricingManager, not the dashboard."""
+    madrid = ZoneInfo("Europe/Madrid")
+    now = datetime(2026, 8, 24, 10, 0, tzinfo=madrid)
+    schedule = SimpleNamespace(selected_slots=[])
+    actuator_calls: list[object] = []
+    ctrl = _controller(
+        _last_decision_data={"should_charge": True, "control": "unchanged"},
+        _last_chronological_diagnostics={"previous": "diagnostic"},
+        _dynamic_pricing_schedule=schedule,
+        _charge_delay_unlocked=False,
+        _delay_setpoint_reached=False,
+        _charge_delay_status={"state": "Delayed"},
+        _daily_operation_last_projection_monotonic=17.0,
+        _daily_operation_last_projection_signature=("saved",),
+        grid_charging_active=True,
+        coordinators=[
+            SimpleNamespace(
+                apply_power=lambda *args, **kwargs: actuator_calls.append(
+                    (args, kwargs)
+                )
+            )
+        ],
+    )
+    manager = _mgr(ctrl)
+    decision_calls: list[datetime] = []
+    build_calls: list[dict] = []
+
+    local_decision_data = {
+        "avg_consumption_kwh": 2.0,
+        "planned_grid_charge_kwh": 0.0,
+    }
+
+    async def local_decision(*, now: datetime | None = None):
+        assert now is not None
+        decision_calls.append(now)
+        return local_decision_data
+
+    def build_plan(**kwargs):
+        build_calls.append(kwargs)
+        kwargs["decision_data"].update(
+            {
+                "chronological_source": "profile",
+                "solar_timeline_source": "provider",
+                "solar_timeline_effective_kwh": 1.2,
+            }
+        )
+        manager._store_chronological_diagnostics(kwargs["decision_data"])
+        return pricing_engine.ChronologicalPlan()
+
+    manager._current_horizon_grid_charging_decision = local_decision
+    manager._build_chronological_plan = build_plan
+    before_decision_ref = ctrl._last_decision_data
+    before_decision = copy.deepcopy(before_decision_ref)
+    before_schedule = ctrl._dynamic_pricing_schedule
+    before_flags = (
+        ctrl._charge_delay_unlocked,
+        ctrl._delay_setpoint_reached,
+        copy.deepcopy(ctrl._charge_delay_status),
+        ctrl._daily_operation_last_projection_monotonic,
+        ctrl._daily_operation_last_projection_signature,
+        ctrl.grid_charging_active,
+    )
+
+    refreshed = asyncio.run(
+        manager.async_refresh_chronological_diagnostics(now=now)
+    )
+
+    assert refreshed is True
+    assert decision_calls == [now]
+    assert build_calls[0]["slots"] == []
+    assert build_calls[0]["diagnostic_only"] is True
+    assert "horizon_end" not in build_calls[0]
+    assert "persist_diagnostics" not in build_calls[0]
+    assert ctrl._last_decision_data is before_decision_ref
+    assert ctrl._last_decision_data == before_decision
+    assert local_decision_data == {
+        "avg_consumption_kwh": 2.0,
+        "planned_grid_charge_kwh": 0.0,
+    }
+    assert ctrl._dynamic_pricing_schedule is before_schedule
+    assert (
+        ctrl._charge_delay_unlocked,
+        ctrl._delay_setpoint_reached,
+        ctrl._charge_delay_status,
+        ctrl._daily_operation_last_projection_monotonic,
+        ctrl._daily_operation_last_projection_signature,
+        ctrl.grid_charging_active,
+    ) == before_flags
+    assert actuator_calls == []
+    assert ctrl._last_chronological_diagnostics == {
+        "chronological_source": "profile",
+        "solar_timeline_source": "provider",
+        "solar_timeline_effective_kwh": 1.2,
+    }
 
 
 # ----------------------------------------------------------------------

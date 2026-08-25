@@ -1484,22 +1484,9 @@ class ChargeDischargeController:
         """Build the dashboard projection from the existing authoritative planner."""
         from .const import CHARGE_EFFICIENCY
         from .pricing.chronological import SlotAllocation
-        from .pricing.daily_timeline import (
-            CONTEXT_CHARGE_DELAY as PROJECTION_CONTEXT_CHARGE_DELAY,
-        )
-        from .pricing.daily_timeline import (
-            CONTEXT_DYNAMIC_PRICE as PROJECTION_CONTEXT_DYNAMIC_PRICE,
-        )
-        from .pricing.daily_timeline import (
-            CONTEXT_SETPOINT as PROJECTION_CONTEXT_SETPOINT,
-        )
-        from .pricing.daily_timeline import (
-            CONTEXT_TIME_SLOT as PROJECTION_CONTEXT_TIME_SLOT,
-        )
-        from .pricing.daily_timeline import (
-            ProjectionIntervalInput,
-            project_charge_delay,
-            simulate_battery_projection,
+        from .tracking.daily_projection import (
+            DailyOperationProjectionRequest,
+            build_daily_operation_projection,
         )
         mode = self._daily_operation_mode()
         if bool(getattr(self, "manual_mode_enabled", False)):
@@ -1525,34 +1512,54 @@ class ChargeDischargeController:
         if tracker is None or planner is None:
             return None
 
-        decision_data = dict(getattr(self, "_last_decision_data", None) or {})
-        decision_data.update(
+        base_decision_data = dict(getattr(self, "_last_decision_data", None) or {})
+        base_decision_data.update(
             getattr(self, "_last_chronological_diagnostics", None) or {}
         )
+        decision_data = dict(base_decision_data)
         slots = []
         schedule = getattr(self, "_dynamic_pricing_schedule", None)
-        if mode == "dynamic_pricing" and schedule is not None:
-            slots = list(getattr(schedule, "selected_slots", ()) or ())
-        elif mode == "time_slot":
-            try:
-                slots = list(planner._time_slot_price_slots(now))
-            except (AttributeError, TypeError, ValueError):
-                slots = []
-
         local_midnight = now.replace(
             hour=0, minute=0, second=0, microsecond=0
         ) + timedelta(days=1)
         projection_horizon_end = local_midnight + timedelta(hours=12)
+        if mode == "dynamic_pricing" and schedule is not None:
+            slots = list(getattr(schedule, "selected_slots", ()) or ())
+        elif mode == "time_slot":
+            try:
+                # The dashboard deliberately looks beyond today's control
+                # horizon.  Keep the normal Time Slot helper unchanged for
+                # runtime control, but materialize known configured windows
+                # through the end of this read-only preview.
+                preview_slots = getattr(
+                    planner, "_time_slot_price_slots_for_horizon", None
+                )
+                if callable(preview_slots):
+                    slots = list(preview_slots(now, projection_horizon_end))
+                else:
+                    # Compatibility with lightweight planners used by older
+                    # tests and external custom extensions.
+                    slots = list(planner._time_slot_price_slots(now))
+            except (AttributeError, TypeError, ValueError):
+                slots = []
 
         try:
-            plan = planner._build_chronological_plan(
+            projection_builder = getattr(
+                planner, "build_extended_chronological_projection", None
+            )
+            if not callable(projection_builder):
+                raise RuntimeError("extended chronological projection unavailable")
+            projection_result = projection_builder(
                 now=now,
-                slots=slots,
-                decision_data=decision_data,
+                slots=tuple(slots),
+                base_decision_data=base_decision_data,
                 price_ceiling=getattr(self, "max_price_threshold", None),
-                diagnostic_only=True,
                 horizon_end=projection_horizon_end,
             )
+            plan = projection_result.plan
+            # These are projection-local diagnostics. They are deliberately
+            # merged only into the private view copy, never controller state.
+            decision_data.update(dict(projection_result.diagnostics))
         except Exception as exc:  # noqa: BLE001 - dashboard projection is optional
             _LOGGER.debug("Daily operation timeline projection failed: %s", exc)
             return {
@@ -1615,40 +1622,6 @@ class ChargeDischargeController:
                 system_charge_power_w = configured_charge
             if configured_discharge > 0.0:
                 system_discharge_power_w = configured_discharge
-        plan_intervals = list(getattr(plan, "intervals", ()) or ())
-        if not plan_intervals:
-            return None
-
-        # The battery inputs describe the measured state *now*. Replaying the
-        # plan from midnight with that state would apply all past solar and
-        # charging a second time, producing an inflated SOC at the current
-        # boundary. Keep only the remaining part of the current quarter and
-        # future quarters, scaling the current quarter's energy accordingly.
-        remaining_intervals: list[tuple[Any, datetime, float]] = []
-        for interval in plan_intervals:
-            start = getattr(interval, "start", None)
-            end = getattr(interval, "end", None)
-            if not isinstance(start, datetime) or not isinstance(end, datetime):
-                continue
-            try:
-                if end <= now:
-                    continue
-                duration_s = (end - start).total_seconds()
-                remaining_start = max(start, now)
-                remaining_ratio = (
-                    max(0.0, (end - remaining_start).total_seconds()) / duration_s
-                    if duration_s > 0.0
-                    else 0.0
-                )
-            except (TypeError, ValueError):
-                continue
-            if remaining_ratio > 0.0:
-                remaining_intervals.append(
-                    (interval, remaining_start, min(1.0, remaining_ratio))
-                )
-        if not remaining_intervals:
-            return None
-
         setpoint_enabled = bool(getattr(self, "_delay_soc_setpoint_enabled", False))
         setpoint_reached = bool(getattr(self, "_delay_setpoint_reached", False))
         weekly_charge_bypasses_delay = (
@@ -1669,294 +1642,50 @@ class ChargeDischargeController:
         runtime_delay_unlock = (
             self._daily_operation_delay_unlock(now) if delay_planned else None
         )
-        mode_context = {
-            "dynamic_pricing": PROJECTION_CONTEXT_DYNAMIC_PRICE,
-            "time_slot": PROJECTION_CONTEXT_TIME_SLOT,
-        }.get(mode, 0)
-        explicit_should_charge = decision_data.get("should_charge")
-        if mode == "time_slot" and "aggregate_should_charge" in decision_data:
-            explicit_should_charge = decision_data["aggregate_should_charge"]
         has_selected_schedule = bool(
             schedule is not None and getattr(schedule, "selected_slots", ())
         )
-        context_masks = []
-        grid_decisions = []
-        for interval, remaining_start, _remaining_ratio in remaining_intervals:
-            context = (
-                mode_context
-                if getattr(self, "predictive_charging_enabled", False)
-                else 0
-            )
-            if (
-                setpoint_enabled
-                and not setpoint_reached
-                and not weekly_charge_bypasses_delay
-            ):
-                context |= PROJECTION_CONTEXT_SETPOINT
-            scheduled = any(
-                allocation.slot.start < interval.end
-                and allocation.slot.end > remaining_start
-                for allocation in allocations
-            )
-            if scheduled:
-                grid_decisions.append(GRID_CHARGE_SCHEDULED)
-            elif (
-                mode in {"dynamic_pricing", "time_slot"}
-                and not has_selected_schedule
-                and explicit_should_charge is False
-            ):
-                grid_decisions.append(GRID_CHARGE_NOT_NEEDED)
-            else:
-                grid_decisions.append(GRID_CHARGE_NOT_APPLICABLE)
-            context_masks.append(context)
-
-        projection_inputs = [
-            ProjectionIntervalInput(
-                start=remaining_start,
-                end=interval.end,
-                consumption_kwh=interval.consumption_kwh * remaining_ratio,
-                solar_kwh=interval.solar_kwh * remaining_ratio,
-                state="future",
-                context_mask=context_masks[index],
-                grid_charge_decision=grid_decisions[index],
-                projected=True,
-            )
-            for index, (interval, remaining_start, remaining_ratio) in enumerate(
-                remaining_intervals
-            )
-        ]
-        result = simulate_battery_projection(
-            projection_inputs,
-            battery_inputs,
-            allocations=allocations,
-            context_masks=context_masks,
-            grid_charge_decisions=grid_decisions,
-            system_charge_power_w=system_charge_power_w,
-            system_discharge_power_w=system_discharge_power_w,
+        operation_plan_source = (
+            "dynamic_schedule" if mode == "dynamic_pricing" and schedule is not None
+            else "time_slot" if mode == "time_slot" and slots
+            else "profile_projection"
         )
-
-        capacity = sum(item.capacity_kwh for item in battery_inputs)
-        source = (
-            decision_data.get("chronological_source")
-            or decision_data.get("solar_timeline_source")
-            or "profile_projection"
-        )
-        aggregates: dict[tuple[Any, int], dict[str, Any]] = {}
-        for flow in result.intervals:
-            if flow.start is None:
-                continue
-
-            flow_start = flow.start
-            flow_end = flow.end
-            if flow_start.tzinfo is None and now.tzinfo is not None:
-                flow_start = flow_start.replace(tzinfo=now.tzinfo)
-            elif flow_start.tzinfo is not None and now.tzinfo is not None:
-                flow_start = flow_start.astimezone(now.tzinfo)
-            if flow_end is not None:
-                if flow_end.tzinfo is None and now.tzinfo is not None:
-                    flow_end = flow_end.replace(tzinfo=now.tzinfo)
-                elif flow_end.tzinfo is not None and now.tzinfo is not None:
-                    flow_end = flow_end.astimezone(now.tzinfo)
-
-            interval_index = flow_start.hour * 4 + flow_start.minute // 15
-            is_extended = (
-                flow_start >= local_midnight
-                and flow_start < projection_horizon_end
-            )
-            if flow_start.date() != now.date() and not is_extended:
-                continue
-            aggregate_key = (flow_start.date(), interval_index)
-            item = aggregates.setdefault(
-                aggregate_key,
-                {
-                    "index": interval_index,
-                    "extension_index": interval_index if is_extended else None,
-                    "_extended": is_extended,
-                    "solar_kwh": 0.0,
-                    "consumption_kwh": 0.0,
-                    "solar_to_battery_kwh": 0.0,
-                    "grid_to_battery_kwh": 0.0,
-                    "battery_to_home_kwh": 0.0,
-                    "grid_to_home_kwh": 0.0,
-                    "solar_to_home_kwh": 0.0,
-                    "action_mask": 0,
-                    "context_mask": 0,
-                    "grid_charge_decision": GRID_CHARGE_NOT_APPLICABLE,
-                    "stored_energy_end_kwh": 0.0,
-                    "duration_s": 0.0,
-                    "source": str(source),
-                    "_start": flow_start,
-                    "_end": flow_end,
-                },
-            )
-            if flow_start is not None and (
-                item["_start"] is None or flow_start < item["_start"]
-            ):
-                item["_start"] = flow_start
-            if flow_end is not None and (
-                item["_end"] is None or flow_end > item["_end"]
-            ):
-                item["_end"] = flow_end
-            for key in (
-                "solar_kwh",
-                "consumption_kwh",
-                "solar_to_battery_kwh",
-                "grid_to_battery_kwh",
-                "battery_to_home_kwh",
-                "grid_to_home_kwh",
-                "solar_to_home_kwh",
-                "duration_seconds",
-            ):
-                target_key = "duration_s" if key == "duration_seconds" else key
-                item[target_key] += self._daily_operation_float(
-                    getattr(flow, key, 0.0), 0.0
-                )
-            item["action_mask"] |= int(getattr(flow, "action_mask", 0) or 0)
-            item["context_mask"] |= int(getattr(flow, "context_mask", 0) or 0)
-            if getattr(flow, "grid_charge_decision", None) == GRID_CHARGE_SCHEDULED:
-                item["grid_charge_decision"] = GRID_CHARGE_SCHEDULED
-            elif (
-                item["grid_charge_decision"] == GRID_CHARGE_NOT_APPLICABLE
-                and getattr(flow, "grid_charge_decision", None) == GRID_CHARGE_NOT_NEEDED
-            ):
-                item["grid_charge_decision"] = GRID_CHARGE_NOT_NEEDED
-            item["stored_energy_end_kwh"] = self._daily_operation_float(
-                getattr(flow, "stored_energy_end_kwh", 0.0), 0.0
-            )
-
-        delay_projection = None
-        delay_starts_at = now if delay_active and not setpoint_enabled else None
-        delay_ends_at = runtime_delay_unlock if delay_starts_at is not None else None
-        if (
-            battery_inputs
-            and setpoint_enabled
-            and not setpoint_reached
-            and not weekly_charge_bypasses_delay
-        ):
-            try:
-                delay_projection = project_charge_delay(
-                    projection_inputs,
-                    battery_inputs,
-                    setpoint_soc_pct=self._daily_operation_float(
-                        getattr(self, "_delay_soc_setpoint", None), 0.0
-                    ),
-                    enabled=setpoint_enabled,
-                    charge_delay_enabled=bool(
-                        getattr(self, "charge_delay_enabled", False)
-                    ),
-                    now=now,
-                    allocations=allocations,
-                    unlock_at=runtime_delay_unlock,
-                    system_charge_power_w=system_charge_power_w,
-                    system_discharge_power_w=system_discharge_power_w,
-                )
-                if delay_planned:
-                    delay_starts_at = delay_projection.delay_starts_at
-                    delay_ends_at = delay_projection.estimated_unlock_at
-            except Exception:  # noqa: BLE001
-                delay_projection = None
-
-        if (
-            delay_projection is not None
-            and delay_projection.setpoint_reached_at is not None
-        ):
-            # Keep the marker through the interval that reaches the target,
-            # but remove it from every later projected interval.
-            for item in aggregates.values():
-                interval_start = item.get("_start")
-                if (
-                    interval_start is not None
-                    and interval_start >= delay_projection.setpoint_reached_at
-                ):
-                    item["context_mask"] &= ~PROJECTION_CONTEXT_SETPOINT
-
-        for item in aggregates.values():
-            interval_start = item.pop("_start", None)
-            interval_end = item.pop("_end", None)
-            item["start"] = interval_start
-            item["end"] = interval_end
-            if (
-                delay_starts_at is not None
-                and delay_ends_at is not None
-                and interval_start is not None
-                and interval_end is not None
-                and interval_end > delay_starts_at
-                and interval_start < delay_ends_at
-            ):
-                item["context_mask"] |= PROJECTION_CONTEXT_CHARGE_DELAY
-                item["delay_until"] = delay_ends_at
-            duration = item.pop("duration_s")
-            item["charge_power_w"] = (
-                (item["solar_to_battery_kwh"] + item["grid_to_battery_kwh"])
-                / duration
-                * 3600.0
-                * 1000.0
-                if duration > 0.0
-                else 0.0
-            )
-            item["discharge_power_w"] = (
-                item["battery_to_home_kwh"] / duration * 3600.0 * 1000.0
-                if duration > 0.0
-                else 0.0
-            )
-            item["charge_to_battery_kwh"] = (
-                item["solar_to_battery_kwh"] + item["grid_to_battery_kwh"]
-            )
-            item["discharge_from_battery_kwh"] = item["battery_to_home_kwh"]
-            if capacity > 0.0:
-                item["soc_end_pct"] = item["stored_energy_end_kwh"] / capacity * 100.0
-            item["setpoint_active"] = bool(
-                item["context_mask"] & PROJECTION_CONTEXT_SETPOINT
-            )
-            item["delay_active"] = bool(
-                item["context_mask"] & PROJECTION_CONTEXT_CHARGE_DELAY
-            )
-
-        base_intervals = [
-            item for item in aggregates.values() if not item.get("_extended")
-        ]
-        extended_intervals = [
-            item for item in aggregates.values() if item.get("_extended")
-        ]
-        for item in aggregates.values():
-            item.pop("_extended", None)
-
-        diagnostics = getattr(self, "_last_chronological_diagnostics", None) or {}
-        sources = {
-            "solar_forecast": diagnostics.get("solar_timeline_source") or "unavailable",
-            "solar_fallback_reason": diagnostics.get("solar_timeline_fallback_reason"),
-            "consumption_forecast": diagnostics.get("chronological_source") or "fallback",
-            "operation_plan": (
-                "dynamic_schedule" if mode == "dynamic_pricing" and schedule is not None
-                else "time_slot" if mode == "time_slot" and slots
-                else "profile_projection"
-            ),
-        }
         evaluated_at = (
             getattr(schedule, "evaluation_time", None)
             if schedule is not None and mode == "dynamic_pricing"
             else now
         )
-        return {
-            "intervals": sorted(base_intervals, key=lambda item: item["index"]),
-            "extended_intervals": sorted(
-                extended_intervals,
-                key=lambda item: item.get("extension_index", item["index"]),
-            ),
-            "extended_horizon": {
-                "start": local_midnight,
-                "end": projection_horizon_end,
-                "interval_minutes": 15,
-                "interval_count": 48,
-            },
-            "mode": mode,
-            "plan_evaluated_at": evaluated_at,
-            "stale": False,
-            "sources": sources,
-            "_delay_projection": (
-                delay_projection.to_dict() if delay_projection is not None else None
-            ),
-        }
+        return build_daily_operation_projection(
+            DailyOperationProjectionRequest(
+                now=now,
+                plan_intervals=tuple(getattr(plan, "intervals", ()) or ()),
+                allocations=tuple(allocations),
+                battery_inputs=tuple(battery_inputs),
+                mode=mode,
+                decision_data=dict(decision_data),
+                predictive_charging_enabled=bool(
+                    getattr(self, "predictive_charging_enabled", False)
+                ),
+                has_selected_schedule=has_selected_schedule,
+                setpoint_enabled=setpoint_enabled,
+                setpoint_reached=setpoint_reached,
+                weekly_charge_bypasses_delay=weekly_charge_bypasses_delay,
+                delay_active=delay_active,
+                delay_planned=delay_planned,
+                delay_unlock=runtime_delay_unlock,
+                charge_delay_enabled=bool(
+                    getattr(self, "charge_delay_enabled", False)
+                ),
+                setpoint_soc_pct=self._daily_operation_float(
+                    getattr(self, "_delay_soc_setpoint", None), 0.0
+                ),
+                system_charge_power_w=system_charge_power_w,
+                system_discharge_power_w=system_discharge_power_w,
+                operation_plan_source=operation_plan_source,
+                plan_evaluated_at=evaluated_at,
+            )
+        )
+
 
     def _refresh_daily_operation_timeline(
         self, *, now: datetime | None = None, force_projection: bool = False
@@ -9516,6 +9245,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # This is advisory only and is evaluated at setup and after option updates,
     # independently of grid-sensor health or the control loop.
     controller._check_solar_forecast_migration()
+    predictive_configured = CONF_ENABLE_PREDICTIVE_CHARGING in entry.data
 
     from .tracking.consumption_tracker import ConsumptionTracker
     consumption_tracker = ConsumptionTracker(hass, entry, controller)
@@ -9573,11 +9303,24 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if controller._solar_t_start is None:
         await consumption_tracker.load_solar_t_start()
 
+    # Restore the canonical predictive diagnostics through the pricing flow,
+    # before Daily Operation consumes them.  The dashboard is strictly a
+    # read-only view and must never use a refresh to rebuild control state.
+    startup_now = dt_util.now()
+    if (
+        predictive_configured
+        and controller.predictive_charging_enabled
+        and not controller.predictive_charging_overridden
+    ):
+        await controller._pricing_mgr.async_refresh_chronological_diagnostics(
+            now=startup_now
+        )
+
     # Restore the current-day operation diary only after the profile and charge-delay
     # state are available, then seed the dashboard with the first authoritative view.
     await daily_operation_timeline.async_load()
     controller._refresh_daily_operation_timeline(
-        now=dt_util.now(), force_projection=True
+        now=startup_now, force_projection=True
     )
 
     # Set up periodic timers and store unsub callbacks for manual cancellation during unload.
@@ -9761,6 +9504,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 solar_profile.refresh_mode(getattr(controller, "solar_profile_mode", None))
                 if solar_profile.invalidate_if_configuration_changed():
                     tracker.start_solar_profile_backfill()
+            if (
+                controller.predictive_charging_enabled
+                and not controller.predictive_charging_overridden
+            ):
+                diagnostic_now = dt_util.now()
+                await controller._pricing_mgr.async_refresh_chronological_diagnostics(
+                    now=diagnostic_now
+                )
+                controller._refresh_daily_operation_timeline(
+                    now=diagnostic_now,
+                    force_projection=True,
+                )
         # Keep the recovery copy in sync with the latest options.
         from .config_backup import async_save_config_backup
         await async_save_config_backup(hass)
@@ -9770,7 +9525,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Schedule daily consumption capture at 23:55 local time every day
     # This captures the day's battery discharge energy before the sensor resets at midnight local
     # Also needed for weekly full charge delay (to estimate remaining consumption)
-    predictive_configured = CONF_ENABLE_PREDICTIVE_CHARGING in entry.data
     needs_consumption_capture = predictive_configured or controller.charge_delay_enabled
     if needs_consumption_capture:
         entry.async_on_unload(

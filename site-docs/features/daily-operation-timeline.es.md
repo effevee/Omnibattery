@@ -51,7 +51,10 @@ Las series diarias y las listas de operación mantienen 96 valores para
 conservar el contrato existente. La ampliación se publica aparte en
 `extended_horizon` y `extended_projection`, limitada a 48 intervalos y
 excluida de Recorder; consultar la entidad desde el dashboard no provoca
-reevaluaciones del control.
+reevaluaciones del control. Su previsión se genera con entradas inmutables y
+desacopladas mediante un simulador sin efectos laterales. Los diagnósticos
+predictivos pertenecen al ciclo de precios y nunca se restauran al renderizar
+esta entidad.
 
 El backend deja inmutables los cuartos cerrados. Una reevaluación solo puede
 sustituir el intervalo actual abierto y el futuro. La restauración del Store

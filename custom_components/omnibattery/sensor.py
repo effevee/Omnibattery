@@ -1408,6 +1408,23 @@ def _timeline_horizon(value: object) -> dict[str, object]:
         number = _timeline_number(value.get(key), 0)
         if number is not None:
             result[key] = max(0, int(number))
+    for key, converter, default in (
+        ("duration_s", _timeline_number, 0.0),
+        ("dst_skipped", _timeline_bool, False),
+        ("dst_repeated", _timeline_bool, False),
+    ):
+        raw = value.get(key)
+        if not isinstance(raw, (list, tuple)):
+            continue
+        converted: list[object] = []
+        for item in raw[:_DAILY_OPERATION_EXTENDED_INTERVAL_COUNT]:
+            parsed = converter(item)
+            converted.append(default if parsed is None else parsed)
+        converted.extend(
+            [default]
+            * (_DAILY_OPERATION_EXTENDED_INTERVAL_COUNT - len(converted))
+        )
+        result[key] = converted
     return result
 
 

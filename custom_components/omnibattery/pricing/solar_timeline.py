@@ -421,8 +421,14 @@ def build_solar_timeline(
         invalid_budget = False
     margin = margin or 0.0
     effective = max(0.0, raw - margin)
+    # Keep every rejected-candidate diagnostic, but only expose a fallback
+    # reason when the selected timeline actually moved to a lower-priority
+    # source. A healthy provider must not be labelled as fallback merely
+    # because an optional learned candidate was rejected.
     reasons: list[str] = []
-    candidates: list[tuple[str, list[float] | None, str | None]] = []
+    provider_reasons: list[str] = []
+    learned_reasons: list[str] = []
+    candidates: list[tuple[str, list[float] | None, int]] = []
 
     if mode not in ("off", "shadow", "active"):
         reasons.append("invalid_mode")
@@ -436,30 +442,38 @@ def build_solar_timeline(
             solar_end=solar_end,
         )
         if provider is not None:
-            candidates.append(("provider", provider, None))
+            candidates.append(("provider", provider, 0))
         elif provider_periods:
-            reasons.append(reason or "provider_invalid")
+            reason = reason or "provider_invalid"
+            provider_reasons.append(reason)
+            reasons.append(reason)
 
         legacy, reason = legacy_shape_weights(boundaries, temporal_shape)
         if legacy is not None:
-            candidates.append(("provider", legacy, None))
+            candidates.append(("provider", legacy, 0))
         elif temporal_shape is not None:
-            reasons.append(reason or "legacy_shape_invalid")
+            reason = reason or "legacy_shape_invalid"
+            provider_reasons.append(reason)
+            reasons.append(reason)
 
         if learned_mature:
             learned, reason = progress_shape_weights(
                 boundaries, learned_shape, solar_start, solar_end
             )
             if learned is not None:
-                candidates.append(("learned_profile", learned, None))
+                candidates.append(("learned_profile", learned, 1))
             else:
-                reasons.append(reason or "learned_invalid")
+                reason = reason or "learned_invalid"
+                learned_reasons.append(reason)
+                reasons.append(reason)
         elif learned_shape is not None:
-            reasons.append("profile_not_mature")
+            reason = "profile_not_mature"
+            learned_reasons.append(reason)
+            reasons.append(reason)
 
     sinusoid, reason = sinusoidal_weights(boundaries, solar_start, solar_end)
     if sinusoid is not None:
-        candidates.append(("sinusoidal", sinusoid, None))
+        candidates.append(("sinusoidal", sinusoid, 2))
     else:
         reasons.append(reason or "sinusoidal_invalid")
 
@@ -468,11 +482,24 @@ def build_solar_timeline(
 
     selected_source = "zero_fallback"
     selected_weights: list[float] | None = None
-    for source, weights, _candidate_reason in candidates:
+    selected_priority: int | None = None
+    for source, weights, priority in candidates:
         if weights is not None and any(value > _EPSILON for value in weights):
             selected_source = source
             selected_weights = weights
+            selected_priority = priority
             break
+
+    selected_fallback_reasons: list[str] = []
+    if selected_priority is None:
+        # No candidate survived: every rejection contributed to the actual
+        # zero fallback and remains useful to diagnose the missing timeline.
+        selected_fallback_reasons.extend(reasons)
+    else:
+        if selected_priority >= 1:
+            selected_fallback_reasons.extend(provider_reasons)
+        if selected_priority >= 2:
+            selected_fallback_reasons.extend(learned_reasons)
 
     if invalid_budget:
         zero = tuple(0.0 for _ in boundaries)
@@ -498,7 +525,7 @@ def build_solar_timeline(
             safety_margin_kwh=margin,
             remaining_effective_kwh=effective,
             timeline_effective_kwh=0.0,
-            fallback_reason=";".join(dict.fromkeys(reasons)) or (
+            fallback_reason=";".join(dict.fromkeys(selected_fallback_reasons)) or (
                 "zero_budget" if effective <= _EPSILON else "unsafe_temporal_shape"
             ),
             candidate_reasons=tuple(dict.fromkeys(reasons)),
@@ -508,7 +535,9 @@ def build_solar_timeline(
 
     selected = normalize_timeline_weights(selected_weights, effective)
     if selected is None:
-        reasons.append(f"{selected_source}_normalization")
+        normalization_reason = f"{selected_source}_normalization"
+        reasons.append(normalization_reason)
+        selected_fallback_reasons.append(normalization_reason)
         zero = tuple(0.0 for _ in boundaries)
         return SolarTimelineResult(
             zero,
@@ -517,7 +546,7 @@ def build_solar_timeline(
             margin,
             effective,
             0.0,
-            ";".join(dict.fromkeys(reasons)),
+            ";".join(dict.fromkeys(selected_fallback_reasons)),
             tuple(dict.fromkeys(reasons)),
         )
 
@@ -543,7 +572,7 @@ def build_solar_timeline(
         safety_margin_kwh=margin,
         remaining_effective_kwh=effective,
         timeline_effective_kwh=effective,
-        fallback_reason=";".join(dict.fromkeys(reasons)) or None,
+        fallback_reason=";".join(dict.fromkeys(selected_fallback_reasons)) or None,
         candidate_reasons=tuple(dict.fromkeys(reasons)),
         shadow_selected_source=shadow_source,
         shadow_intervals_kwh=shadow_values,

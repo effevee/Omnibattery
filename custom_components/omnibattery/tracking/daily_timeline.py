@@ -2813,11 +2813,22 @@ class DailyOperationTimelineManager:
             time.min,
             tzinfo=self._timezone(),
         )
+        extended_grid = [
+            _wall_interval_info(
+                self._local_date + timedelta(days=1),
+                index,
+                self._timezone(),
+            )
+            for index in range(EXTENDED_INTERVAL_COUNT)
+        ]
         extended_horizon = {
             "start": extended_start.isoformat(),
             "end": (extended_start + timedelta(hours=EXTENDED_HORIZON_HOURS)).isoformat(),
             "interval_minutes": INTERVAL_MINUTES,
             "interval_count": EXTENDED_INTERVAL_COUNT,
+            "duration_s": [item["duration_s"] for item in extended_grid],
+            "dst_skipped": [item["dst_skipped"] for item in extended_grid],
+            "dst_repeated": [item["dst_repeated"] for item in extended_grid],
         }
         actual_samples = [
             {
