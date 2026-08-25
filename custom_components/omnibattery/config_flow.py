@@ -1663,6 +1663,14 @@ class MarstekVenusConfigFlow(LegacyDomainMigrationMixin, ConfigFlow, domain=DOMA
             self._current_battery_data["device_max_discharge_power"] = int(max_discharge)
         if inverter_max:
             self._current_battery_data["device_inverter_max_power"] = int(inverter_max)
+        # An EMMA on the same bus carries the installation's grid meter. Finding
+        # it here means a user with one gets a grid reading fast enough to
+        # control against without configuring anything.
+        emma = await HuaweiSolarDriver.find_emma_slave_id(
+            self.hass, self._huawei_pending[CONF_HOST], self._huawei_pending[CONF_PORT]
+        )
+        if emma is not None:
+            self._current_battery_data["huawei_emma_slave_id"] = emma
         # What the battery reports today is the sensible starting value; the
         # form's ceiling is wider, because adding a pack raises it.
         for key, probed in (
@@ -2657,6 +2665,8 @@ class MarstekVenusConfigFlow(LegacyDomainMigrationMixin, ConfigFlow, domain=DOMA
             return await self.async_step_reconfigure_battery_sessy(user_input)
         if current.get("brand", "marstek") == "hoymiles":
             return await self.async_step_reconfigure_battery_hoymiles(user_input)
+        if current.get("brand", "marstek") == "huawei":
+            return await self.async_step_reconfigure_battery_huawei(user_input)
 
         errors = {}
 
@@ -3020,6 +3030,83 @@ class MarstekVenusConfigFlow(LegacyDomainMigrationMixin, ConfigFlow, domain=DOMA
             ),
             errors=errors,
             description_placeholders={"battery_num": str(battery_num)},
+        )
+
+    async def async_step_reconfigure_battery_huawei(self, user_input: dict[str, Any] | None = None) -> FlowResult:
+        """Update a Huawei battery's connection without asking Marstek questions.
+
+        Without this branch the reconfigure flow offered the Marstek form and
+        probe: a battery version, a slave id meaning something else, and no way
+        to reach the fields this brand actually needs.
+        """
+        entry = self._get_reconfigure_entry()
+        current = entry.data.get("batteries", [])[self.battery_index]
+        errors: dict[str, str] = {}
+
+        if user_input is not None:
+            host = (user_input[CONF_HOST] or "").strip()
+            port = int(user_input.get(CONF_PORT, 502))
+            raw_slave = user_input.get(CONF_SLAVE_ID)
+            slave_id = None if raw_slave in (None, "") else int(raw_slave)
+            device_id = user_input.get("huawei_battery_device") or ""
+            direct_write = bool(user_input.get("huawei_direct_write", False))
+
+            if not direct_write and not device_id:
+                errors["huawei_battery_device"] = (
+                    "huawei_device_required"
+                    if self.hass.config_entries.async_entries(HUAWEI_SOLAR_DOMAIN)
+                    else "huawei_solar_missing"
+                )
+            else:
+                found = slave_id
+                if found is None:
+                    candidates = await HuaweiSolarDriver.scan_slave_ids(self.hass, host, port)
+                    with_battery = [candidate for candidate in candidates if candidate[2]]
+                    found = with_battery[0][0] if len(with_battery) == 1 else None
+                ok, model, max_charge, max_discharge, serial, inverter_max = (
+                    await HuaweiSolarDriver.probe(self.hass, host, port, found)
+                    if found is not None
+                    else (False, None, None, None, None, None)
+                )
+                if not ok:
+                    errors["base"] = "cannot_connect"
+                else:
+                    old_host, old_port = current.get(CONF_HOST), current.get(CONF_PORT, 502)
+                    if old_host and (old_host != host or old_port != port):
+                        self._migrate_battery_registry_ids(entry, old_host, old_port, host, port)
+                    updated = dict(current)
+                    updated.update({
+                        CONF_NAME: user_input[CONF_NAME],
+                        CONF_HOST: host,
+                        CONF_PORT: port,
+                        CONF_SLAVE_ID: found,
+                        "brand": "huawei",
+                        "huawei_battery_device_id": device_id,
+                        "huawei_direct_write": direct_write,
+                        "huawei_model": model,
+                    })
+                    if max_charge:
+                        updated["device_max_charge_power"] = int(max_charge)
+                    if max_discharge:
+                        updated["device_max_discharge_power"] = int(max_discharge)
+                    if inverter_max:
+                        updated["device_inverter_max_power"] = int(inverter_max)
+                    emma = await HuaweiSolarDriver.find_emma_slave_id(self.hass, host, port)
+                    if emma is not None:
+                        updated["huawei_emma_slave_id"] = emma
+                    self._reconfigure_batteries.append(updated)
+                    self.battery_index += 1
+                    if self.battery_index >= len(entry.data.get("batteries", [])):
+                        return self.async_update_reload_and_abort(
+                            entry, data_updates={"batteries": self._reconfigure_batteries}
+                        )
+                    return await self.async_step_reconfigure_battery()
+
+        return self.async_show_form(
+            step_id="reconfigure_battery_huawei",
+            data_schema=self._huawei_schema(current, self.battery_index + 1),
+            errors=errors,
+            description_placeholders={"battery_num": str(self.battery_index + 1)},
         )
 
     async def async_step_reconfigure_battery_hoymiles(self, user_input: dict[str, Any] | None = None) -> FlowResult:
@@ -3916,6 +4003,14 @@ class OptionsFlowHandler(OptionsFlow):
             self._current_battery_data["device_max_discharge_power"] = int(max_discharge)
         if inverter_max:
             self._current_battery_data["device_inverter_max_power"] = int(inverter_max)
+        # An EMMA on the same bus carries the installation's grid meter. Finding
+        # it here means a user with one gets a grid reading fast enough to
+        # control against without configuring anything.
+        emma = await HuaweiSolarDriver.find_emma_slave_id(
+            self.hass, self._huawei_pending[CONF_HOST], self._huawei_pending[CONF_PORT]
+        )
+        if emma is not None:
+            self._current_battery_data["huawei_emma_slave_id"] = emma
         # What the battery reports today is the sensible starting value; the
         # form's ceiling is wider, because adding a pack raises it.
         for key, probed in (
@@ -4099,6 +4194,8 @@ class OptionsFlowHandler(OptionsFlow):
                 max_discharge_power = _SESSY_MAX_DISCHARGE_POWER_W
             elif brand == "hoymiles":
                 max_charge_power, max_discharge_power = _hoymiles_power_ceilings(self._current_battery_data)
+            elif brand == "huawei":
+                max_charge_power, max_discharge_power = _huawei_power_ceilings(self._current_battery_data)
             else:
                 battery_version = self._current_battery_data.get(CONF_BATTERY_VERSION, DEFAULT_VERSION)
                 max_charge_power = max_discharge_power = MAX_POWER_BY_VERSION.get(battery_version, 2500)

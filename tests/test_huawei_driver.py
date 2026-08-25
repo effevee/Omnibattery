@@ -1517,7 +1517,7 @@ def test_the_empty_field_is_explained_in_every_language():
 # so the pairing is checkable. On the reference installation both read
 # BT24B1457565.
 # ----------------------------------------------------------------------
-def _huawei_flow(monkeypatch, *, probe, devices=None, huawei_solar_installed=True):
+def _huawei_flow(monkeypatch, *, probe, devices=None, huawei_solar_installed=True, emma=None):
     """A config flow whose Huawei probe and device registry are faked."""
     from types import SimpleNamespace
 
@@ -1533,6 +1533,11 @@ def _huawei_flow(monkeypatch, *, probe, devices=None, huawei_solar_installed=Tru
         )
     )
     monkeypatch.setattr(mod.HuaweiSolarDriver, "probe", AsyncMock(return_value=probe))
+    # Never let a flow test reach for the network: the EMMA scan would sit on
+    # connection timeouts for every candidate id.
+    monkeypatch.setattr(
+        mod.HuaweiSolarDriver, "find_emma_slave_id", AsyncMock(return_value=emma)
+    )
     registry = MagicMock()
     registry.async_get.side_effect = (devices or {}).get
     monkeypatch.setattr(mod.dr, "async_get", lambda hass: registry)
@@ -1869,3 +1874,238 @@ async def test_an_unread_register_leaves_the_configured_limit_in_charge():
     hass = _hass_with_services()
     driver = _driver(_fake_client({}), hass=hass, max_charge_power_w=7500, max_discharge_power_w=7500)
     assert (await driver.apply_setpoint(7500, read_back=False)).net_power_w == 7500
+
+
+# ----------------------------------------------------------------------
+# the EMMA's grid meter
+#
+# An installation with an EMMA is metered by it, and may well have no other
+# meter at all. huawei_solar publishes the same value on a 30 s coordinator —
+# measured on the reference installation — which is far too slow to control
+# against. Read here it is live on every request, at 25 ms per read.
+# ----------------------------------------------------------------------
+@pytest.mark.asyncio
+async def test_the_grid_meter_is_read_from_the_emmas_own_unit():
+    meter = _fake_client({31657: [0xFFFF, 0xFFE5]})   # -27 W, exporting
+    driver = _driver(_fake_client(_LIVE_BLOCKS), meter_client=meter)
+    data = await driver.read_telemetry(["grid_power"])
+    # Sign matches the Omnibattery convention: positive imports, negative exports.
+    assert data["grid_power"] == -27
+
+
+@pytest.mark.asyncio
+async def test_no_emma_means_no_grid_entity():
+    """An entity that could only ever read unknown is worse than none."""
+    driver = _driver(_fake_client(_LIVE_BLOCKS))
+    assert "grid_power" not in {row["key"] for row in driver.sensor_definitions}
+    assert "grid_power" not in {k for g in driver.read_groups for k in g.keys}
+
+
+@pytest.mark.asyncio
+async def test_the_meter_joins_the_fast_group():
+    """A grid reading is only worth having if it arrives at control speed."""
+    driver = _driver(_fake_client(_LIVE_BLOCKS), meter_client=_fake_client({31657: [0, 0]}))
+    fast = next(g for g in driver.read_groups if g.scan_interval == "high")
+    assert "grid_power" in fast.keys
+    assert "grid_power" in {row["key"] for row in driver.sensor_definitions}
+
+
+@pytest.mark.asyncio
+async def test_a_silent_meter_costs_the_reading_and_nothing_else():
+    meter = _fake_client({})
+    driver = _driver(_fake_client(_LIVE_BLOCKS), meter_client=meter)
+    data = await driver.read_telemetry()
+    assert "grid_power" not in data
+    assert data["battery_soc"] == 61.0
+
+
+@pytest.mark.asyncio
+async def test_the_emma_is_found_by_its_model_name(monkeypatch):
+    """Users should not have to know their energy manager's unit id."""
+    inverter = {30000: _text("SUN2000-8K-MAP0", 15)}
+    emma = {30000: _text("SmartHEMS", 15)}
+    mod = _bus(monkeypatch, **{"1": {}, "0": emma, "4": inverter})
+    monkeypatch.setattr(mod, "_SLAVE_ID_CANDIDATES", (1, 0, 4))
+
+    found = await mod.HuaweiSolarDriver.find_emma_slave_id(MagicMock(), "1.2.3.4", 502)
+    assert found == 0
+
+
+@pytest.mark.asyncio
+async def test_a_bus_without_an_emma_reports_none(monkeypatch):
+    mod = _bus(monkeypatch, **{"4": {30000: _text("SUN2000-8K-MAP0", 15)}})
+    monkeypatch.setattr(mod, "_SLAVE_ID_CANDIDATES", (1, 4))
+    assert await mod.HuaweiSolarDriver.find_emma_slave_id(MagicMock(), "1.2.3.4", 502) is None
+
+
+@pytest.mark.asyncio
+async def test_a_discovered_emma_is_stored_with_the_battery(monkeypatch):
+    flow = _huawei_flow(
+        monkeypatch,
+        probe=(True, "SUN2000-8K-MAP0", 7000, 7000, "BT24B1457565", 8800),
+        devices={"dev-batt": _huawei_device(identifier="BT24B1457565")},
+        emma=0,
+    )
+    await flow.async_step_battery_connection_huawei(dict(_HUAWEI_INPUT))
+    assert flow._current_battery_data["huawei_emma_slave_id"] == 0
+
+
+def test_the_grid_sensor_is_named_in_every_language():
+    import glob
+    import json
+
+    for path in ["custom_components/omnibattery/strings.json"] + sorted(
+        glob.glob("custom_components/omnibattery/translations/*.json")
+    ):
+        entity = json.load(open(path, encoding="utf-8"))["entity"]["sensor"]
+        assert entity["grid_power"]["name"], path
+
+
+# ----------------------------------------------------------------------
+# releasing on shutdown
+#
+# A forcible command left standing does not expire in any useful sense: one
+# written at 04:32 was still in force at 09:22 on the reference installation,
+# and on this hybrid a latched discharge keeps the strings dark, so the roof
+# produces nothing until the registers are cleared by hand.
+# ----------------------------------------------------------------------
+@pytest.mark.asyncio
+async def test_shutdown_releases_over_the_path_the_commands_took():
+    """Releasing through the service while writing registers reaches nothing.
+
+    The direct path needs no huawei_solar device, so there is none to address,
+    and the failure is silent because shutdown suppresses the warning. That is
+    why switching the integration off did not end the fault.
+    """
+    driver, client = _direct(device_id="")
+    assert await driver.standby() is True
+    written = _written(client)
+    assert written[0] == (47100, [0]), "the mode register must be cleared first"
+    assert 47249 in {address for address, _values in written}
+
+
+@pytest.mark.asyncio
+async def test_the_service_path_still_releases_through_the_service():
+    hass = _hass_with_services()
+    driver = _driver(_fake_client(), hass=hass)
+    assert await driver.standby() is True
+    assert hass.services.async_call.await_args.args[1] == "stop_forcible_charge"
+
+
+# ----------------------------------------------------------------------
+# backup mode
+#
+# A hybrid has no backup switch to read: it reports a state, and this driver
+# names the three a SUN2000 distinguishes. The control layer compared against
+# the register convention alone (0 = on), which reads every one of those
+# strings as "off" — so a Huawei would keep taking commands through a power cut.
+# ----------------------------------------------------------------------
+@pytest.mark.parametrize(
+    "value, armed",
+    [
+        ("Off-grid", True),    # feeding the backup circuit right now
+        ("Ready", True),       # switch armed, still on grid
+        ("Disabled", False),
+        (0, True),             # the register convention: 0 is on
+        (1, False),
+        (None, False),
+    ],
+)
+def test_both_shapes_of_backup_state_are_understood(value, armed):
+    from custom_components.omnibattery import _backup_switch_enabled
+
+    assert _backup_switch_enabled(value) is armed
+
+
+def test_the_driver_only_ever_reports_states_the_guard_knows():
+    """A fourth spelling would silently disable the guard again."""
+    import inspect
+
+    from custom_components.omnibattery import _backup_switch_enabled
+    from custom_components.omnibattery.drivers import huawei
+
+    source = inspect.getsource(huawei.HuaweiSolarDriver.read_telemetry)
+    published = {
+        line.split('"')[1]
+        for line in source.split("\n")
+        if line.strip().startswith(('"Off-grid" if', 'else "Ready" if', 'else "Disabled"'))
+    }
+    assert published == {"Off-grid", "Ready", "Disabled"}
+    # Every one of them decides the guard one way or the other, none by accident.
+    assert _backup_switch_enabled("Off-grid") and _backup_switch_enabled("Ready")
+    assert not _backup_switch_enabled("Disabled")
+
+
+# ----------------------------------------------------------------------
+# the flows that come after setup
+#
+# Setup had a Huawei branch from the start; the two flows a user reaches later
+# did not, and both fell through to Marstek. Reported in review of the upstream
+# pull request.
+# ----------------------------------------------------------------------
+def test_the_options_limits_use_the_probed_hardware_not_a_marstek_default():
+    """Saving options would otherwise cut a 7 kW battery down to 2500 W."""
+    import inspect
+
+    from custom_components.omnibattery.config_flow import (
+        MarstekVenusConfigFlow,
+        OptionsFlowHandler,
+    )
+
+    for flow in (MarstekVenusConfigFlow, OptionsFlowHandler):
+        source = inspect.getsource(flow.async_step_battery_limits)
+        assert '_huawei_power_ceilings' in source, flow.__name__
+        assert 'brand == "huawei"' in source, flow.__name__
+
+
+def test_reconfiguring_a_huawei_battery_offers_the_huawei_form():
+    """It used to receive the Marstek form: a battery version, a slave id
+    meaning something else, and none of the fields this brand needs."""
+    import inspect
+
+    from custom_components.omnibattery.config_flow import MarstekVenusConfigFlow
+
+    routing = inspect.getsource(MarstekVenusConfigFlow.async_step_reconfigure_battery)
+    assert 'brand", "marstek") == "huawei"' in routing
+    assert "async_step_reconfigure_battery_huawei" in routing
+    assert hasattr(MarstekVenusConfigFlow, "async_step_reconfigure_battery_huawei")
+
+
+@pytest.mark.asyncio
+async def test_the_reconfigure_form_carries_the_battery_over(monkeypatch):
+    from types import SimpleNamespace
+
+    from custom_components.omnibattery import config_flow as mod
+
+    battery = {
+        "name": "Huawei LUNA2000", "host": "192.168.1.5", "port": 502, "slave_id": 4,
+        "brand": "huawei", "huawei_direct_write": True,
+    }
+    flow = mod.MarstekVenusConfigFlow()
+    flow.battery_index = 0
+    flow.hass = SimpleNamespace(
+        config_entries=SimpleNamespace(async_entries=lambda _domain: [object()])
+    )
+    entry = SimpleNamespace(data={"batteries": [battery]})
+    monkeypatch.setattr(mod.MarstekVenusConfigFlow, "_get_reconfigure_entry", lambda self: entry)
+
+    form = await flow.async_step_reconfigure_battery_huawei()
+    assert form["step_id"] == "reconfigure_battery_huawei"
+    fields = {marker.schema: marker for marker in form["data_schema"].schema}
+    assert "huawei_direct_write" in fields
+    # The current address is offered again rather than asked for afresh.
+    assert fields["host"].default() == "192.168.1.5"
+    assert fields["slave_id"].description["suggested_value"] == 4
+
+
+def test_the_reconfigure_step_is_named_in_every_language():
+    import glob
+    import json
+
+    for path in ["custom_components/omnibattery/strings.json"] + sorted(
+        glob.glob("custom_components/omnibattery/translations/*.json")
+    ):
+        step = json.load(open(path, encoding="utf-8"))["config"]["step"]
+        entry = step["reconfigure_battery_huawei"]
+        assert entry["title"] and entry["description"], path
+        assert entry["data"]["huawei_direct_write"], path
