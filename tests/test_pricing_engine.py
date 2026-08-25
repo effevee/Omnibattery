@@ -569,6 +569,7 @@ def test_remaining_fallback_is_conditioned_on_today_consumption():
         _consumption_tracker=SimpleNamespace(
             consumption_profile=profile,
             get_dynamic_base_consumption=get_average_consumption,
+            # The forecast is requested from the tracker, not the profile.
             forecast_consumption_between=lambda *_args, **_kwargs: forecast,
         ),
         _should_activate_grid_charging=should_activate,

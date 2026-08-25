@@ -225,6 +225,10 @@ def _make_history_tracker(history, charging_time_slots):
         charging_time_slots=charging_time_slots,
         predictive_charging_enabled=True,
     )
+    # __new__ skips __init__, so anything the methods under test read has to be
+    # set here. History loading filters vacation periods out of the restored
+    # days, and without this it fails on the attribute rather than the logic.
+    tracker._vacation_periods = []
     return tracker
 
 

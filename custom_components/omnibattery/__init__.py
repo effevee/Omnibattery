@@ -462,6 +462,58 @@ def _async_unregister_frontend_panel(hass: HomeAssistant) -> None:
         hass.data[DOMAIN][_PANEL_REGISTERED_KEY] = False
 
 
+def _apply_driver_dynamic_limit(coordinator, current_limit: int) -> int:
+    """Narrow a discharge limit to the live headroom the driver reports.
+
+    Only DC-coupled hybrids report one: battery and PV share an inverter there,
+    so the reachable discharge power falls as PV rises. Every other driver
+    returns None and keeps its static envelope.
+
+    Applied in the control path rather than on the coordinator's power
+    properties on purpose — those also drive the user-facing power sliders, and
+    a bound that moved with the sun would be unusable.
+    """
+    driver = getattr(coordinator, "driver", None)
+    limiter = getattr(driver, "dynamic_discharge_limit_w", None)
+    if limiter is None:
+        return current_limit
+    try:
+        dynamic = limiter(getattr(coordinator, "data", None) or {})
+    except Exception:  # a driver must never break the control cycle
+        _LOGGER.debug(
+            "[%s] dynamic discharge limit raised; keeping static limit",
+            getattr(coordinator, "name", "?"),
+            exc_info=True,
+        )
+        return current_limit
+    if dynamic is None or dynamic >= current_limit:
+        return current_limit
+    _LOGGER.debug(
+        "[%s] discharge limit narrowed %dW -> %dW by inverter AC headroom",
+        getattr(coordinator, "name", "?"), current_limit, dynamic,
+    )
+    return max(0, int(dynamic))
+
+
+def _backup_switch_enabled(value) -> bool:
+    """Whether a battery's backup output is armed, whatever shape it reports in.
+
+    Register drivers publish the switch itself: 0 is on, 1 is off. A hybrid
+    inverter has no such switch — it reports a state, and this driver names the
+    three a SUN2000 distinguishes: off-grid, ready to go off-grid, or the
+    function disabled outright.
+
+    Comparing against 0 alone reads every one of those strings as "off", which
+    would let a Huawei keep taking charge and discharge commands through a power
+    cut. Both shapes are answered here rather than at each call site.
+    """
+    if value is None:
+        return False
+    if isinstance(value, str):
+        return value in ("Off-grid", "Ready")
+    return value == 0
+
+
 class ChargeDischargeController:
     """Controller to manage charge/discharge logic for all batteries."""
 
@@ -2328,6 +2380,7 @@ class ChargeDischargeController:
                     coordinator.max_discharge_power,
                 ),
             )
+            limit = _apply_driver_dynamic_limit(coordinator, limit)
             return self._apply_slot_power_ceiling(coordinator, False, limit)
 
         limit = getattr(
@@ -3724,7 +3777,7 @@ class ChargeDischargeController:
 
         # From SWITCH_DEFINITIONS: command_on = 0 (enabled), command_off = 1 (disabled)
         backup_value = coordinator.data.get("backup_function")
-        if backup_value is None or backup_value != 0:
+        if not _backup_switch_enabled(backup_value):
             # Switch is off — clear any lingering cooldown and allow PD control
             self._backup_cooldown_until.pop(coordinator, None)
             return False
@@ -9210,6 +9263,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             hoymiles_model=battery_config.get("hoymiles_model"),
             serial_port=battery_config.get(CONF_SERIAL_PORT) or None,
             esphome_device_id=battery_config.get("esphome_device_id"),
+            huawei_battery_device_id=battery_config.get("huawei_battery_device_id"),
+            huawei_direct_write=battery_config.get("huawei_direct_write", False),
+            huawei_emma_slave_id=battery_config.get("huawei_emma_slave_id"),
             username=battery_config.get(CONF_USERNAME, ""),
             password=battery_config.get(CONF_PASSWORD, ""),
             battery_manual_mode_enabled=battery_config.get(
@@ -9763,7 +9819,9 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
                 # Skip batteries that are actively providing offgrid backup power
                 # (backup switch ON and ac_offgrid_power exceeds threshold, or sensor unavailable)
-                if coordinator.data and coordinator.data.get("backup_function") == 0:
+                if coordinator.data and _backup_switch_enabled(
+                    coordinator.data.get("backup_function")
+                ):
                     ac_offgrid = coordinator.data.get("ac_offgrid_power")
                     if ac_offgrid is None or ac_offgrid > coordinator.backup_offgrid_threshold:
                         _LOGGER.info("%s: Skipping shutdown writes - backup function active with offgrid load", coordinator.name)

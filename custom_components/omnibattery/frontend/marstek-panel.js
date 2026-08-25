@@ -49,7 +49,7 @@ const I18N = {
     tabResumen: "Overview", tabBaterias: "Batteries", tabControl: "Control",
     moreInfo: "Show history",
     zoomReset: "All",
-    infoModel: "Model", infoSoftware: "Software", infoSerial: "Serial",
+    infoModel: "Model", infoSoftware: "Software", infoSerial: "Serial", infoInverter: "Inverter", infoPowerModule: "Power module",
     placeholderMsg: "This view is coming in a future phase. For now, use the Overview view.",
     cardFlow: "Energy flow", cardSoc: "System status", cardDaily: "Energy today",
     cardWeekly: "Weekly energy", cardPower: "Power", cardSocToday: "SOC · today",
@@ -134,7 +134,7 @@ const I18N = {
     tabResumen: "Resumen", tabBaterias: "Baterías", tabControl: "Control",
     moreInfo: "Ver histórico",
     zoomReset: "Todo",
-    infoModel: "Modelo", infoSoftware: "Software", infoSerial: "N.º serie",
+    infoModel: "Modelo", infoSoftware: "Software", infoSerial: "N.º serie", infoInverter: "Inversor", infoPowerModule: "Módulo de potencia",
     placeholderMsg: "Esta vista llegará en una próxima fase. Por ahora, usa la vista Resumen.",
     cardFlow: "Flujo de energía", cardSoc: "Estado del sistema", cardDaily: "Energía hoy",
     cardWeekly: "Energía semanal", cardPower: "Potencias", cardSocToday: "SOC · hoy",
@@ -219,7 +219,7 @@ const I18N = {
     tabResumen: "Resum", tabBaterias: "Bateries", tabControl: "Control",
     moreInfo: "Veure històric",
     zoomReset: "Tot",
-    infoModel: "Model", infoSoftware: "Programari", infoSerial: "Núm. sèrie",
+    infoModel: "Model", infoSoftware: "Programari", infoSerial: "Núm. sèrie", infoInverter: "Inversor", infoPowerModule: "Mòdul de potència",
     placeholderMsg: "Aquesta vista arribarà en una fase futura. De moment, fes servir la vista Resum.",
     cardFlow: "Flux d'energia", cardSoc: "Estat del sistema", cardDaily: "Energia avui",
     cardWeekly: "Energia setmanal", cardPower: "Potències", cardSocToday: "SOC · avui",
@@ -300,7 +300,7 @@ const I18N = {
     tabResumen: "Übersicht", tabBaterias: "Batterien", tabControl: "Steuerung",
     moreInfo: "Verlauf anzeigen",
     zoomReset: "Alles",
-    infoModel: "Modell", infoSoftware: "Software", infoSerial: "Seriennr.",
+    infoModel: "Modell", infoSoftware: "Software", infoSerial: "Seriennr.", infoInverter: "Wechselrichter", infoPowerModule: "Leistungsmodul",
     placeholderMsg: "Diese Ansicht kommt in einer späteren Phase. Nutze vorerst die Übersicht.",
     cardFlow: "Energiefluss", cardSoc: "Systemstatus", cardDaily: "Energie heute",
     cardWeekly: "Wochenenergie", cardPower: "Leistung", cardSocToday: "SOC · heute",
@@ -381,7 +381,7 @@ const I18N = {
     tabResumen: "Résumé", tabBaterias: "Batteries", tabControl: "Contrôle",
     moreInfo: "Voir l'historique",
     zoomReset: "Tout",
-    infoModel: "Modèle", infoSoftware: "Logiciel", infoSerial: "N° série",
+    infoModel: "Modèle", infoSoftware: "Logiciel", infoSerial: "N° série", infoInverter: "Onduleur", infoPowerModule: "Module de puissance",
     placeholderMsg: "Cette vue arrivera dans une phase ultérieure. Pour l'instant, utilisez la vue Résumé.",
     cardFlow: "Flux d'énergie", cardSoc: "État du système", cardDaily: "Énergie aujourd'hui",
     cardWeekly: "Énergie hebdomadaire", cardPower: "Puissances", cardSocToday: "SOC · aujourd'hui",
@@ -462,7 +462,7 @@ const I18N = {
     tabResumen: "Overzicht", tabBaterias: "Batterijen", tabControl: "Bediening",
     moreInfo: "Geschiedenis tonen",
     zoomReset: "Alles",
-    infoModel: "Model", infoSoftware: "Software", infoSerial: "Serienr.",
+    infoModel: "Model", infoSoftware: "Software", infoSerial: "Serienr.", infoInverter: "Omvormer", infoPowerModule: "Vermogensmodule",
     placeholderMsg: "Deze weergave komt in een latere fase. Gebruik voorlopig het Overzicht.",
     cardFlow: "Energiestroom", cardSoc: "Systeemstatus", cardDaily: "Energie vandaag",
     cardWeekly: "Energie per week", cardPower: "Vermogen", cardSocToday: "SOC · vandaag",
@@ -821,6 +821,16 @@ const K = {
   cyclesCalc: "battery_cycle_count_calc",
   rte: "round_trip_efficiency_total",
   softwareVersion: "software_version",
+  powerModuleSerial: "power_module_serial_number",
+  powerModuleFirmware: "power_module_firmware_version",
+  inverterSerial: "inverter_serial_number",
+  inverterFirmware: "inverter_software_version",
+  pack1Firmware: "pack1_firmware_version",
+  pack2Firmware: "pack2_firmware_version",
+  pack3Firmware: "pack3_firmware_version",
+  pack1Serial: "pack1_serial_number",
+  pack2Serial: "pack2_serial_number",
+  pack3Serial: "pack3_serial_number",
   bmsVersion: "bms_version",
   vmsVersion: "vms_version",
   emsVersion: "ems_version",
@@ -5306,7 +5316,21 @@ class MarstekVenusPanel extends HTMLElement {
         entIdsDomain: idByTkDomain,
         info: {
           sw: this._sval(byTk[K.softwareVersion]),
-          serial: (devReg && devReg.serial_number) || null,
+          // Huawei publishes the serial as a sensor; the registry entry has none.
+          serial: (devReg && devReg.serial_number) || this._sval(byTk[K.powerModuleSerial]),
+          powerModuleFw: this._sval(byTk[K.powerModuleFirmware]),
+          inverterModel: this._sval(byTk[K.deviceName]),
+          inverterSn: this._sval(byTk[K.inverterSerial]),
+          inverterFw: this._sval(byTk[K.inverterFirmware]),
+          // A battery built from packs names each one. Empty slots answer with
+          // nothing and are left out rather than listed blank.
+          packs: [1, 2, 3]
+            .map((n) => ({
+              n,
+              fw: this._sval(byTk[K["pack" + n + "Firmware"]]),
+              sn: this._sval(byTk[K["pack" + n + "Serial"]]),
+            }))
+            .filter((pack) => pack.fw || pack.sn),
           bms: this._sval(byTk[K.bmsVersion]),
           vms: this._sval(byTk[K.vmsVersion]),
           ems: this._sval(byTk[K.emsVersion]),
@@ -5726,7 +5750,20 @@ class MarstekVenusPanel extends HTMLElement {
     }
     addRow("WiFi", wifi);
     addRow("MAC", b.info.mac);
-    addRow(this._t("infoSerial"), b.info.serial);
+    // A Huawei storage is three kinds of hardware — inverter, power module,
+    // packs — and each carries its own serial and firmware. Brands with a
+    // single identity keep the plain serial row.
+    if (b.info.powerModuleFw || b.info.inverterSn) {
+      addRow(
+        this._t("infoInverter"),
+        [b.info.inverterModel, b.info.inverterSn, b.info.inverterFw].filter(Boolean).join(" · ")
+      );
+      addRow(this._t("infoPowerModule"), [b.info.serial, b.info.powerModuleFw].filter(Boolean).join(" · "));
+    } else {
+      addRow(this._t("infoSerial"), b.info.serial);
+    }
+    for (const pack of b.info.packs || [])
+      addRow(`Pack ${pack.n}`, [pack.sn, pack.fw].filter(Boolean).join(" · "));
     r.infoGrid.innerHTML = rows.length ? rows.join("") : `<div class="dim">${this._t("noData")}</div>`;
 
     // controls (rebuilt when the available-control set changes; else value-patched)

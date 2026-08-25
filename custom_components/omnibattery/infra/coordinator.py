@@ -25,6 +25,7 @@ from ..drivers.zendure import ZendureLocalDriver, ZENDURE_MODEL_2400AC_PRO
 from ..drivers.anker import AnkerModbusDriver
 from ..drivers.sessy import SessyLocalDriver
 from ..drivers.hoymiles import HoymilesMqttDriver
+from ..drivers.huawei import HuaweiSolarDriver
 from ..drivers.base import SetpointResult
 from .alarm_notifier import AlarmNotifier
 from .mac_tracking import normalise_mac
@@ -121,6 +122,9 @@ class MarstekVenusDataUpdateCoordinator(DataUpdateCoordinator):
                  hoymiles_model: str | None = None,
                  serial_port: str | None = None,
                  esphome_device_id: str | None = None,
+                 huawei_battery_device_id: str | None = None,
+                 huawei_direct_write: bool = False,
+                 huawei_emma_slave_id: int | None = None,
                  username: str = "",
                  password: str = "",
                  battery_manual_mode_enabled: bool = False,
@@ -151,7 +155,7 @@ class MarstekVenusDataUpdateCoordinator(DataUpdateCoordinator):
         self.consumption_sensor = consumption_sensor
         self.brand = brand
         self.zendure_model = zendure_model
-        if self.brand in ("zendure", "anker", "hoymiles"):
+        if self.brand in ("zendure", "anker", "hoymiles", "huawei"):
             full_charge_voltage_taper_enabled = False
 
         # Validate and store battery version
@@ -290,6 +294,21 @@ class MarstekVenusDataUpdateCoordinator(DataUpdateCoordinator):
                 self.host, port=self.port,
                 username=username,
                 password=password,
+                max_charge_power_w=self.configured_max_charge_power,
+                max_discharge_power_w=self.configured_max_discharge_power,
+            )
+        elif self.brand == "huawei":
+            # Telemetry is read natively over Modbus; set-points go out through
+            # the huawei_solar integration, which owns the battery device named
+            # here. Both halves address the same inverter.
+            self.driver = HuaweiSolarDriver(
+                hass,
+                self.host,
+                port=self.port,
+                slave_id=self.slave_id,
+                battery_device_id=huawei_battery_device_id or "",
+                direct_write=huawei_direct_write,
+                emma_slave_id=huawei_emma_slave_id,
                 max_charge_power_w=self.configured_max_charge_power,
                 max_discharge_power_w=self.configured_max_discharge_power,
             )
@@ -564,6 +583,7 @@ class MarstekVenusDataUpdateCoordinator(DataUpdateCoordinator):
                 else "Anker" if self.brand == "anker"
                 else "Sessy" if self.brand == "sessy"
                 else "Hoymiles" if self.brand == "hoymiles"
+                else "Huawei" if self.brand == "huawei"
                 else "Marstek"
             ),
             "model": self.driver.model_label or (
@@ -574,6 +594,11 @@ class MarstekVenusDataUpdateCoordinator(DataUpdateCoordinator):
                 else "Venus"
             ),
         }
+        # The registry shows this on the device page, and the panel prefers it
+        # over the sensor. Drivers that cannot read one report None.
+        serial = getattr(getattr(self, "driver", None), "serial", None)
+        if serial:
+            info["serial_number"] = str(serial)
         # getattr: several tests build a stub coordinator and read this
         # property off it, so the attribute cannot be assumed present.
         if getattr(self, "mac", None):

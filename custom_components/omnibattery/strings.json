@@ -133,6 +133,17 @@
         "data": {"name": "Name", "host": "IP Address", "port": "HTTP Port", "username": "Username", "password": "Password"},
         "data_description": {"name": "Descriptive name to identify this battery", "host": "IP address of the Sessy device on your local network", "port": "HTTP port (default 80)", "username": "Local username printed on the Sessy dongle", "password": "Local password printed on the Sessy dongle"}
       },
+      "battery_connection_huawei": {
+        "title": "Configure battery {battery_num} — Connection (Huawei)",
+        "description": "Omnibattery reads this battery over Modbus and sends its set-points through the Huawei Solar integration, so it needs both: a Modbus endpoint and the battery device. Point the Modbus address at a Modbus proxy rather than straight at the inverter — the Huawei Solar integration already holds a connection to it.\n\nA Huawei inverter accepts only ONE Modbus connection at a time. If anything else talks to it besides Omnibattery — the Huawei Solar integration, evcc, another system — you need a Modbus proxy in front that fans the connection out to several clients, for example {proxy_url}. Enter the proxy's address and port instead of the inverter's. The slave id is searched for automatically when the one entered does not answer.",
+        "data": {"name": "Name", "host": "IP Address", "port": "Modbus Port", "slave_id": "Modbus slave id (leave empty to search)", "huawei_battery_device": "Huawei Solar battery device", "huawei_direct_write": "Direct Modbus writes"},
+        "data_description": {"name": "Descriptive name to identify this battery", "host": "Address of the Modbus proxy or inverter Omnibattery reads from", "port": "Modbus TCP port (default 502)", "slave_id": "Unit id of the inverter — not of the energy manager or a charger. Leave it empty and setup goes looking: it tries the usual ids, identifies each inverter by its model register and takes the one with a battery attached. If several answer — Huawei inverters can be cascaded — a selection step follows. The search takes about 15 seconds.", "huawei_battery_device": "Only needed when direct Modbus writes are off, in which case set-points go through the Huawei Solar integration's services. With direct writes, leave it empty.", "huawei_direct_write": "Write set-points as Modbus registers instead of calling the Huawei Solar integration's services. Same register sequence, but without the detour through the service layer or the wait on that integration's communication lock. Off by default — enable it once the proven path is working."}
+      },
+      "battery_connection_huawei_slave": {
+        "title": "Configure battery {battery_num} — Choose inverter",
+        "description": "{count} inverters with a battery answered on this Modbus endpoint. Huawei inverters can be cascaded — pick the one this battery belongs to. For a second battery, add another entry with the other slave id.",
+        "data": {"slave_id": "Inverter"}
+      },
       "battery_connection_anker": {
         "title": "Configure battery {battery_num} — Connection (Anker)",
         "description": "Enter connection details for Anker SOLIX Solarbank Max AC / 4 E5000 Pro battery {battery_num}. Enable Modbus TCP under Third-Party Control in the Anker app first. Only one Modbus client can connect at a time.",
@@ -624,6 +635,33 @@
           "slave_id": "Modbus slave/unit id (default 1)"
         }
       },
+          "reconfigure_battery_huawei_slave": {
+            "title": "Reconfigure battery {battery_num} — Which inverter?",
+            "description": "{count} inverters with a battery answered on this bus. Pick the one this battery belongs to.",
+            "data": {
+              "slave_id": "Inverter"
+            }
+          },
+        "reconfigure_battery_huawei": {
+          "title": "Reconfigure battery {battery_num} — Connection (Huawei)",
+          "description": "Update the Modbus access and the Huawei Solar battery device for battery {battery_num}. All other settings are preserved.",
+          "data": {
+            "name": "Name",
+            "host": "IP Address",
+            "port": "Modbus Port",
+            "slave_id": "Modbus slave id (leave empty to search)",
+            "huawei_battery_device": "Huawei Solar battery device",
+            "huawei_direct_write": "Direct Modbus writes"
+          },
+          "data_description": {
+            "name": "Descriptive name to identify this battery",
+            "host": "Address of the Modbus proxy or inverter Omnibattery reads from",
+            "port": "Modbus TCP port (default 502)",
+            "slave_id": "Unit id of the inverter — not of the energy manager or a charger. Leave it empty and setup goes looking: it tries the usual ids, identifies each inverter by its model register and takes the one with a battery attached. If several answer — Huawei inverters can be cascaded — a selection step follows. The search takes about 15 seconds.",
+            "huawei_battery_device": "Only needed when direct Modbus writes are off, in which case set-points go through the Huawei Solar integration's services. With direct writes, leave it empty.",
+            "huawei_direct_write": "Write set-points as Modbus registers instead of calling the Huawei Solar integration's services. Same register sequence, but without the detour through the service layer or the wait on that integration's communication lock. Off by default — enable it once the proven path is working."
+          }
+        },
       "reconfigure_battery_hoymiles": {
         "title": "Reconfigure battery {battery_num} — Hoymiles MQTT",
         "description": "Enter the Hoymiles MQTT device ID; Home Assistant manages the broker and Omnibattery detects the model.",
@@ -653,6 +691,10 @@
     "error": {
       "invalid_mac": "That does not look like a MAC address. Six pairs of hexadecimal digits are expected, for example dc:04:5a:14:6b:33.",
       "cannot_connect": "Cannot connect to the battery. Check the IP address and that the battery is accessible on the network.",
+      "no_battery": "Inverter reached, but it reports no battery. Check that the LUNA2000 is attached and the Modbus slave ID points at the inverter.",
+      "huawei_device_required": "Without direct Modbus writes, Omnibattery controls the battery through the Huawei Solar integration's services, and those address it by device. Either pick the device or enable direct writes.",
+      "huawei_solar_missing": "Without direct Modbus writes, Omnibattery controls the battery through the Huawei Solar integration's services — but that integration is not set up here. Install and configure it via HACS, or enable direct writes.",
+      "huawei_device_mismatch": "The chosen battery device belongs to a different inverter than the Modbus address points at. With cascaded inverters the readings would come from one unit while the commands landed on another. Check the device and the slave id.",
       "esphome_entities_missing": "The selected ESPHome device is missing required entities: {missing}. Make sure it runs the marstek-lilygo-rs485 firmware with the stock entity names.",
       "sensor_not_found": "Solar forecast sensor does not exist. Verify the sensor is available.",
       "invalid_unit": "Solar forecast sensor must have 'kWh' or 'Wh' as unit.",
@@ -1225,6 +1267,17 @@
         "data": {"name": "Name", "host": "IP Address", "port": "HTTP Port", "username": "Username", "password": "Password"},
         "data_description": {"name": "Descriptive name to identify this battery", "host": "IP address of the Sessy device on your local network", "port": "HTTP port (default 80)", "username": "Local username printed on the Sessy dongle", "password": "Local password printed on the Sessy dongle"}
       },
+      "battery_connection_huawei": {
+        "title": "Configure battery {battery_num} — Connection (Huawei)",
+        "description": "Modify the Modbus endpoint and the Huawei Solar battery device used for battery {battery_num}.\n\nA Huawei inverter accepts only ONE Modbus connection at a time. If anything else talks to it besides Omnibattery — the Huawei Solar integration, evcc, another system — you need a Modbus proxy in front that fans the connection out to several clients, for example {proxy_url}. Enter the proxy's address and port instead of the inverter's. The slave id is searched for automatically when the one entered does not answer.",
+        "data": {"name": "Name", "host": "IP Address", "port": "Modbus Port", "slave_id": "Modbus slave id (leave empty to search)", "huawei_battery_device": "Huawei Solar battery device", "huawei_direct_write": "Direct Modbus writes"},
+        "data_description": {"name": "Descriptive name to identify this battery", "host": "Address of the Modbus proxy or inverter Omnibattery reads from", "port": "Modbus TCP port (default 502)", "slave_id": "Unit id of the inverter — not of the energy manager or a charger. Leave it empty and setup goes looking: it tries the usual ids, identifies each inverter by its model register and takes the one with a battery attached. If several answer — Huawei inverters can be cascaded — a selection step follows. The search takes about 15 seconds.", "huawei_battery_device": "Only needed when direct Modbus writes are off, in which case set-points go through the Huawei Solar integration's services. With direct writes, leave it empty.", "huawei_direct_write": "Write set-points as Modbus registers instead of calling the Huawei Solar integration's services. Same register sequence, but without the detour through the service layer or the wait on that integration's communication lock. Off by default — enable it once the proven path is working."}
+      },
+      "battery_connection_huawei_slave": {
+        "title": "Configure battery {battery_num} — Choose inverter",
+        "description": "{count} inverters with a battery answered on this Modbus endpoint. Huawei inverters can be cascaded — pick the one this battery belongs to. For a second battery, add another entry with the other slave id.",
+        "data": {"slave_id": "Inverter"}
+      },
       "battery_connection_anker": {
         "title": "Configure battery {battery_num} — Connection (Anker)",
         "description": "Modify connection details for Anker SOLIX Solarbank Max AC / 4 E5000 Pro battery {battery_num}. Enable Modbus TCP under Third-Party Control in the Anker app first. Only one Modbus client can connect at a time.",
@@ -1245,6 +1298,10 @@
     "error": {
       "invalid_mac": "That does not look like a MAC address. Six pairs of hexadecimal digits are expected, for example dc:04:5a:14:6b:33.",
       "cannot_connect": "Cannot connect to the battery. Check the IP address and that the battery is accessible on the network.",
+      "no_battery": "Inverter reached, but it reports no battery. Check that the LUNA2000 is attached and the Modbus slave ID points at the inverter.",
+      "huawei_device_required": "Without direct Modbus writes, Omnibattery controls the battery through the Huawei Solar integration's services, and those address it by device. Either pick the device or enable direct writes.",
+      "huawei_solar_missing": "Without direct Modbus writes, Omnibattery controls the battery through the Huawei Solar integration's services — but that integration is not set up here. Install and configure it via HACS, or enable direct writes.",
+      "huawei_device_mismatch": "The chosen battery device belongs to a different inverter than the Modbus address points at. With cascaded inverters the readings would come from one unit while the commands landed on another. Check the device and the slave id.",
       "esphome_entities_missing": "The selected ESPHome device is missing required entities: {missing}. Make sure it runs the marstek-lilygo-rs485 firmware with the stock entity names.",
       "sensor_not_found": "Solar forecast sensor does not exist. Verify the sensor is available.",
       "invalid_unit": "Solar forecast sensor must have 'kWh' or 'Wh' as unit.",
@@ -1696,6 +1753,72 @@
       },
       "software_version": {
         "name": "Software Version"
+      },
+      "pv1_voltage": {
+        "name": "PV1 Voltage"
+      },
+      "pv2_voltage": {
+        "name": "PV2 Voltage"
+      },
+      "pv3_voltage": {
+        "name": "PV3 Voltage"
+      },
+      "pv4_voltage": {
+        "name": "PV4 Voltage"
+      },
+      "pack1_firmware_version": {
+        "name": "Battery Pack 1 Firmware"
+      },
+      "pack2_firmware_version": {
+        "name": "Battery Pack 2 Firmware"
+      },
+      "pack3_firmware_version": {
+        "name": "Battery Pack 3 Firmware"
+      },
+      "pack1_serial_number": {
+        "name": "Battery Pack 1 Serial Number"
+      },
+      "pack2_serial_number": {
+        "name": "Battery Pack 2 Serial Number"
+      },
+      "pack3_serial_number": {
+        "name": "Battery Pack 3 Serial Number"
+      },
+      "backup_function": {
+        "name": "Backup Function"
+      },
+      "inverter_software_version": {
+        "name": "Inverter Firmware"
+      },
+      "grid_power": {
+        "name": "Grid Power"
+      },
+      "inverter_ac_power": {
+        "name": "Inverter AC Power"
+      },
+      "charging_cutoff_capacity": {
+        "name": "Charging Cutoff"
+      },
+      "discharging_cutoff_capacity": {
+        "name": "Discharging Cutoff"
+      },
+      "user_work_mode": {
+        "name": "Work Mode"
+      },
+      "inverter_max_power": {
+        "name": "Inverter Max Power"
+      },
+      "inverter_rated_power": {
+        "name": "Inverter Rated Power"
+      },
+      "power_module_serial_number": {
+        "name": "Power Module Serial Number"
+      },
+      "power_module_firmware_version": {
+        "name": "Power Module Firmware"
+      },
+      "inverter_serial_number": {
+        "name": "Inverter Serial Number"
       },
       "battery_runtime_estimate": {
         "name": "Battery Runtime Estimate"

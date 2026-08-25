@@ -604,6 +604,33 @@
           "slave_id": "Modbus slave/unit id (default 1)"
         }
       },
+          "reconfigure_battery_huawei_slave": {
+            "title": "Batterie {battery_num} neu konfigurieren — Welcher Wechselrichter?",
+            "description": "An diesem Bus haben {count} Wechselrichter mit Batterie geantwortet. Wähle den, zu dem diese Batterie gehört.",
+            "data": {
+              "slave_id": "Wechselrichter"
+            }
+          },
+        "reconfigure_battery_huawei": {
+          "title": "Batterie {battery_num} neu konfigurieren — Verbindung (Huawei)",
+          "description": "Modbus-Zugang und Huawei-Solar-Batteriegerät für Batterie {battery_num} ändern. Alle übrigen Einstellungen bleiben erhalten.",
+          "data": {
+            "name": "Name",
+            "host": "IP-Adresse",
+            "port": "Modbus-Port",
+            "slave_id": "Modbus-Slave-ID (leer lassen zum Suchen)",
+            "huawei_battery_device": "Huawei-Solar-Batteriegerät",
+            "huawei_direct_write": "Direkte Modbus-Schreibzugriffe"
+          },
+          "data_description": {
+            "name": "Sprechender Name für diese Batterie",
+            "host": "Adresse des Modbus-Proxys oder Wechselrichters, von dem Omnibattery liest",
+            "port": "Modbus-TCP-Port (Standard 502)",
+            "slave_id": "Unit-ID des Wechselrichters — nicht die der EMMA oder einer Wallbox. Leer lassen, dann sucht die Einrichtung sie selbst: sie fragt die üblichen IDs ab, erkennt jeden Wechselrichter an seinem Modellregister und übernimmt den, an dem eine Batterie hängt. Melden sich mehrere — Huawei-Wechselrichter lassen sich kaskadieren — kommt ein Auswahlschritt. Die Suche dauert etwa 15 Sekunden.",
+            "huawei_battery_device": "Nur nötig, wenn direkte Modbus-Schreibzugriffe ausgeschaltet sind — dann laufen die Sollwerte über die Dienste der Huawei-Solar-Integration. Mit direkten Schreibzugriffen bleibt das Feld leer.",
+            "huawei_direct_write": "Sollwerte direkt als Modbus-Register schreiben statt über die Dienste der Huawei-Solar-Integration. Dieselbe Registerfolge, aber ohne Umweg über die Dienstschicht und ohne Wartezeit an deren Kommunikationssperre. Standardmäßig aus — erst einschalten, wenn der bewährte Weg läuft."
+          }
+        },
       "reconfigure_battery_hoymiles": {
         "title": "Batterie {battery_num} neu konfigurieren — Hoymiles MQTT",
         "description": "Geben Sie die Hoymiles MQTT-Geräte-ID ein; Home Assistant verwaltet den Broker und Omnibattery erkennt das Modell.",
@@ -635,6 +662,17 @@
         "data": {"name": "Name", "host": "IP-Adresse", "port": "HTTP-Port", "username": "Benutzername", "password": "Passwort"},
         "data_description": {"name": "Beschreibender Name zur Identifizierung dieser Batterie", "host": "IP-Adresse des Sessy-Geräts im lokalen Netzwerk", "port": "HTTP-Port (Standard 80)", "username": "Auf dem Sessy-Dongle aufgedruckter lokaler Benutzername", "password": "Auf dem Sessy-Dongle aufgedrucktes lokales Passwort"}
       },
+      "battery_connection_huawei": {
+        "title": "Batterie {battery_num} einrichten — Verbindung (Huawei)",
+        "description": "Omnibattery liest diese Batterie über Modbus und schickt die Sollwerte über die Huawei-Solar-Integration. Deshalb werden beide Angaben gebraucht: ein Modbus-Zugang und das Batteriegerät. Trage als Modbus-Adresse besser einen Modbus-Proxy ein statt des Wechselrichters selbst — die Huawei-Solar-Integration hält dort bereits eine Verbindung.\n\nEin Huawei-Wechselrichter nimmt jeweils nur EINE Modbus-Verbindung an. Wenn außer Omnibattery noch etwas anderes darauf zugreift — etwa die Huawei-Solar-Integration, evcc oder ein anderes System — brauchst du einen Modbus-Proxy davor, der die Verbindung auf mehrere Clients aufteilt, zum Beispiel {proxy_url}. Trage dann Adresse und Port des Proxys ein statt die des Wechselrichters. Die Slave-ID wird automatisch gesucht, wenn die eingetragene nicht antwortet.",
+        "data": {"name": "Name", "host": "IP-Adresse", "port": "Modbus-Port", "slave_id": "Modbus-Slave-ID (leer lassen zum Suchen)", "huawei_battery_device": "Huawei-Solar-Batteriegerät", "huawei_direct_write": "Direkte Modbus-Schreibzugriffe"},
+        "data_description": {"name": "Sprechender Name für diese Batterie", "host": "Adresse des Modbus-Proxys oder Wechselrichters, von dem Omnibattery liest", "port": "Modbus-TCP-Port (Standard 502)", "slave_id": "Unit-ID des Wechselrichters — nicht die der EMMA oder einer Wallbox. Leer lassen, dann sucht die Einrichtung sie selbst: sie fragt die üblichen IDs ab, erkennt jeden Wechselrichter an seinem Modellregister und übernimmt den, an dem eine Batterie hängt. Melden sich mehrere — Huawei-Wechselrichter lassen sich kaskadieren — kommt ein Auswahlschritt. Die Suche dauert etwa 15 Sekunden.", "huawei_battery_device": "Nur nötig, wenn direkte Modbus-Schreibzugriffe ausgeschaltet sind — dann laufen die Sollwerte über die Dienste der Huawei-Solar-Integration. Mit direkten Schreibzugriffen bleibt das Feld leer.", "huawei_direct_write": "Sollwerte direkt als Modbus-Register schreiben statt über die Dienste der Huawei-Solar-Integration. Dieselbe Registerfolge, aber ohne Umweg über die Dienstschicht und ohne Wartezeit an deren Kommunikationssperre. Standardmäßig aus — erst einschalten, wenn der bewährte Weg läuft."}
+      },
+      "battery_connection_huawei_slave": {
+        "title": "Batterie {battery_num} einrichten — Wechselrichter wählen",
+        "description": "Auf diesem Modbus-Zugang haben {count} Wechselrichter mit Batterie geantwortet. Huawei-Wechselrichter lassen sich kaskadieren — wähle den, zu dem diese Batterie gehört. Für eine zweite Batterie legst du einen weiteren Eintrag mit der anderen Slave-ID an.",
+        "data": {"slave_id": "Wechselrichter"}
+      },
       "battery_connection_anker": {
         "title": "Configure battery {battery_num} — Connection (Anker)",
         "description": "Enter connection details for Anker SOLIX Solarbank Max AC / 4 E5000 Pro battery {battery_num}. Enable Modbus TCP under Third-Party Control in the Anker app first. Only one Modbus client can connect at a time.",
@@ -654,6 +692,10 @@
     },
     "error": {
       "cannot_connect": "Verbindung zur Batterie nicht möglich. Überprüfen Sie die IP-Adresse und dass die Batterie im Netzwerk erreichbar ist.",
+      "no_battery": "Wechselrichter erreichbar, meldet aber keine Batterie. Prüfe, ob die LUNA2000 angeschlossen ist und die Modbus-Slave-ID auf den Wechselrichter zeigt.",
+      "huawei_device_required": "Ohne direkte Modbus-Schreibzugriffe steuert Omnibattery die Batterie über die Dienste der Huawei-Solar-Integration, und die sprechen das Batteriegerät an. Wähle also entweder das Gerät aus oder aktiviere die direkten Schreibzugriffe.",
+      "huawei_solar_missing": "Ohne direkte Modbus-Schreibzugriffe steuert Omnibattery die Batterie über die Dienste der Huawei-Solar-Integration — die ist hier aber nicht eingerichtet. Installiere sie über HACS und richte sie ein, oder aktiviere die direkten Schreibzugriffe.",
+      "huawei_device_mismatch": "Das gewählte Batteriegerät gehört zu einem anderen Wechselrichter als die angegebene Modbus-Adresse. Bei kaskadierten Wechselrichtern kämen die Messwerte dann von dem einen und die Befehle beim anderen an. Prüfe Gerät und Slave-ID.",
       "esphome_entities_missing": "Dem ausgewählten ESPHome-Gerät fehlen erforderliche Entitäten: {missing}. Stelle sicher, dass es die marstek-lilygo-rs485-Firmware mit den Original-Entitätsnamen ausführt.",
       "sensor_not_found": "Solarprognose-Sensor existiert nicht. Überprüfen Sie, dass der Sensor verfügbar ist.",
       "invalid_unit": "Solarprognose-Sensor muss 'kWh' oder 'Wh' als Einheit haben.",
@@ -1226,6 +1268,17 @@
         "data": {"name": "Name", "host": "IP-Adresse", "port": "HTTP-Port", "username": "Benutzername", "password": "Passwort"},
         "data_description": {"name": "Beschreibender Name zur Identifizierung dieser Batterie", "host": "IP-Adresse des Sessy-Geräts im lokalen Netzwerk", "port": "HTTP-Port (Standard 80)", "username": "Auf dem Sessy-Dongle aufgedruckter lokaler Benutzername", "password": "Auf dem Sessy-Dongle aufgedrucktes lokales Passwort"}
       },
+      "battery_connection_huawei": {
+        "title": "Batterie {battery_num} einrichten — Verbindung (Huawei)",
+        "description": "Modbus-Zugang und Huawei-Solar-Batteriegerät für Batterie {battery_num} ändern.\n\nEin Huawei-Wechselrichter nimmt jeweils nur EINE Modbus-Verbindung an. Wenn außer Omnibattery noch etwas anderes darauf zugreift — etwa die Huawei-Solar-Integration, evcc oder ein anderes System — brauchst du einen Modbus-Proxy davor, der die Verbindung auf mehrere Clients aufteilt, zum Beispiel {proxy_url}. Trage dann Adresse und Port des Proxys ein statt die des Wechselrichters. Die Slave-ID wird automatisch gesucht, wenn die eingetragene nicht antwortet.",
+        "data": {"name": "Name", "host": "IP-Adresse", "port": "Modbus-Port", "slave_id": "Modbus-Slave-ID (leer lassen zum Suchen)", "huawei_battery_device": "Huawei-Solar-Batteriegerät", "huawei_direct_write": "Direkte Modbus-Schreibzugriffe"},
+        "data_description": {"name": "Sprechender Name für diese Batterie", "host": "Adresse des Modbus-Proxys oder Wechselrichters, von dem Omnibattery liest", "port": "Modbus-TCP-Port (Standard 502)", "slave_id": "Unit-ID des Wechselrichters — nicht die der EMMA oder einer Wallbox. Leer lassen, dann sucht die Einrichtung sie selbst: sie fragt die üblichen IDs ab, erkennt jeden Wechselrichter an seinem Modellregister und übernimmt den, an dem eine Batterie hängt. Melden sich mehrere — Huawei-Wechselrichter lassen sich kaskadieren — kommt ein Auswahlschritt. Die Suche dauert etwa 15 Sekunden.", "huawei_battery_device": "Nur nötig, wenn direkte Modbus-Schreibzugriffe ausgeschaltet sind — dann laufen die Sollwerte über die Dienste der Huawei-Solar-Integration. Mit direkten Schreibzugriffen bleibt das Feld leer.", "huawei_direct_write": "Sollwerte direkt als Modbus-Register schreiben statt über die Dienste der Huawei-Solar-Integration. Dieselbe Registerfolge, aber ohne Umweg über die Dienstschicht und ohne Wartezeit an deren Kommunikationssperre. Standardmäßig aus — erst einschalten, wenn der bewährte Weg läuft."}
+      },
+      "battery_connection_huawei_slave": {
+        "title": "Batterie {battery_num} einrichten — Wechselrichter wählen",
+        "description": "Auf diesem Modbus-Zugang haben {count} Wechselrichter mit Batterie geantwortet. Huawei-Wechselrichter lassen sich kaskadieren — wähle den, zu dem diese Batterie gehört. Für eine zweite Batterie legst du einen weiteren Eintrag mit der anderen Slave-ID an.",
+        "data": {"slave_id": "Wechselrichter"}
+      },
       "battery_connection_anker": {
         "title": "Configure battery {battery_num} — Connection (Anker)",
         "description": "Modify connection details for Anker SOLIX Solarbank Max AC / 4 E5000 Pro battery {battery_num}. Enable Modbus TCP under Third-Party Control in the Anker app first. Only one Modbus client can connect at a time.",
@@ -1245,6 +1298,10 @@
     },
     "error": {
       "cannot_connect": "Verbindung zur Batterie nicht möglich. Überprüfen Sie die IP-Adresse und dass die Batterie im Netzwerk erreichbar ist.",
+      "no_battery": "Wechselrichter erreichbar, meldet aber keine Batterie. Prüfe, ob die LUNA2000 angeschlossen ist und die Modbus-Slave-ID auf den Wechselrichter zeigt.",
+      "huawei_device_required": "Ohne direkte Modbus-Schreibzugriffe steuert Omnibattery die Batterie über die Dienste der Huawei-Solar-Integration, und die sprechen das Batteriegerät an. Wähle also entweder das Gerät aus oder aktiviere die direkten Schreibzugriffe.",
+      "huawei_solar_missing": "Ohne direkte Modbus-Schreibzugriffe steuert Omnibattery die Batterie über die Dienste der Huawei-Solar-Integration — die ist hier aber nicht eingerichtet. Installiere sie über HACS und richte sie ein, oder aktiviere die direkten Schreibzugriffe.",
+      "huawei_device_mismatch": "Das gewählte Batteriegerät gehört zu einem anderen Wechselrichter als die angegebene Modbus-Adresse. Bei kaskadierten Wechselrichtern kämen die Messwerte dann von dem einen und die Befehle beim anderen an. Prüfe Gerät und Slave-ID.",
       "esphome_entities_missing": "Dem ausgewählten ESPHome-Gerät fehlen erforderliche Entitäten: {missing}. Stelle sicher, dass es die marstek-lilygo-rs485-Firmware mit den Original-Entitätsnamen ausführt.",
       "sensor_not_found": "Solarprognose-Sensor existiert nicht. Überprüfen Sie, dass der Sensor verfügbar ist.",
       "invalid_unit": "Solarprognose-Sensor muss 'kWh' oder 'Wh' als Einheit haben.",
@@ -1692,6 +1749,72 @@
       },
       "software_version": {
         "name": "Softwareversion"
+      },
+      "pv1_voltage": {
+        "name": "PV1 Spannung"
+      },
+      "pv2_voltage": {
+        "name": "PV2 Spannung"
+      },
+      "pv3_voltage": {
+        "name": "PV3 Spannung"
+      },
+      "pv4_voltage": {
+        "name": "PV4 Spannung"
+      },
+      "pack1_firmware_version": {
+        "name": "Batteriepack 1 Firmware"
+      },
+      "pack2_firmware_version": {
+        "name": "Batteriepack 2 Firmware"
+      },
+      "pack3_firmware_version": {
+        "name": "Batteriepack 3 Firmware"
+      },
+      "pack1_serial_number": {
+        "name": "Batteriepack 1 Seriennummer"
+      },
+      "pack2_serial_number": {
+        "name": "Batteriepack 2 Seriennummer"
+      },
+      "pack3_serial_number": {
+        "name": "Batteriepack 3 Seriennummer"
+      },
+      "backup_function": {
+        "name": "Notstromfunktion"
+      },
+      "inverter_software_version": {
+        "name": "Wechselrichter-Firmware"
+      },
+      "grid_power": {
+        "name": "Netzleistung"
+      },
+      "inverter_ac_power": {
+        "name": "Wechselrichter-AC-Leistung"
+      },
+      "charging_cutoff_capacity": {
+        "name": "Ladeschlussgrenze"
+      },
+      "discharging_cutoff_capacity": {
+        "name": "Entladeschlussgrenze"
+      },
+      "user_work_mode": {
+        "name": "Betriebsmodus"
+      },
+      "inverter_max_power": {
+        "name": "Max. Wechselrichterleistung"
+      },
+      "inverter_rated_power": {
+        "name": "Nennleistung Wechselrichter"
+      },
+      "power_module_serial_number": {
+        "name": "Leistungsmodul-Seriennummer"
+      },
+      "power_module_firmware_version": {
+        "name": "Leistungsmodul-Firmware"
+      },
+      "inverter_serial_number": {
+        "name": "Wechselrichter-Seriennummer"
       },
       "battery_runtime_estimate": {
         "name": "Geschätzte Batterielaufzeit"
