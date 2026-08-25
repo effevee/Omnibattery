@@ -41,6 +41,13 @@ _ADDR_POWER_SETPOINT = 10071
 _ADDR_CHARGE_SOC_LIMIT = 60000
 _ADDR_DISCHARGE_SOC_LIMIT = 60001
 _ADDR_BATTERY_SOC = 10014
+_ADDR_PV_POWER = 10002
+_ADDR_THIRD_PARTY_PV_POWER = 10004
+_ADDR_PV_TOTAL_GENERATION = 10018
+_ADDR_DEVICE_MODEL = 32768
+_DEVICE_MODEL_REG_COUNT = 5
+_ADDR_DEVICE_SN = 10100
+_DEVICE_SN_REG_COUNT = 12
 
 # Family continuous envelope (Max AC). Live caps come from 10036/10038; this is
 # only an upper clamp so peak/aggregate readings cannot inflate PD limits.
@@ -103,6 +110,14 @@ _FIELD_SPECS: list[dict] = [
      "data_type": "int32", "count": 2},
     {"key": "battery_soc", "address": 10014, "register_type": "input",
      "data_type": "uint16", "count": 1},
+    # The official map exposes aggregate PV only. PV total is the PCS value;
+    # third_party_pv_power is an additional source that must be added to it.
+    {"key": "pv_power", "address": _ADDR_PV_POWER, "register_type": "input",
+     "data_type": "int32", "count": 2},
+    {"key": "third_party_pv_power", "address": _ADDR_THIRD_PARTY_PV_POWER,
+     "register_type": "input", "data_type": "int32", "count": 2},
+    {"key": "pv_total_generation", "address": _ADDR_PV_TOTAL_GENERATION,
+     "register_type": "input", "data_type": "uint32", "count": 2},
     {"key": "max_charge_power", "address": 10036, "register_type": "input",
      "data_type": "int32", "count": 2},
     {"key": "max_discharge_power", "address": 10038, "register_type": "input",
@@ -138,6 +153,12 @@ SENSOR_DEFINITIONS: list[dict] = [
     {"key": "grid_power", "name": "Grid Power", "unit": "W",
      "device_class": "power", "state_class": "measurement", "scale": 1, "precision": 0,
      "scan_interval": "high", "enabled_by_default": True},
+    # Official PV power is aggregate only (10002 + 10004), not four MPPT
+    # channels. Keep this canonical key so the shared solar tracker can consume
+    # it without pretending that the channels are individually observable.
+    {"key": "solar_power", "name": "Solar Power", "unit": "W",
+     "device_class": "power", "state_class": "measurement", "scale": 1,
+     "precision": 0, "scan_interval": "high", "enabled_by_default": True},
     {"key": "temperature", "name": "Temperature", "unit": "°C",
      "device_class": "temperature", "state_class": "measurement", "scale": 0.1, "precision": 1,
      "scan_interval": "low", "enabled_by_default": True},
@@ -198,6 +219,9 @@ SENSOR_DEFINITIONS: list[dict] = [
     {"key": "total_discharging_energy", "name": "Total Discharging Energy", "unit": "kWh",
      "device_class": "energy", "state_class": "total_increasing", "scale": 0.1, "precision": 2,
      "scan_interval": "low", "enabled_by_default": True},
+    {"key": "pv_total_generation", "name": "PV Total Generation", "unit": "kWh",
+     "device_class": "energy", "state_class": "total_increasing", "scale": 0.1,
+     "precision": 2, "scan_interval": "low", "enabled_by_default": True},
 ]
 
 NUMBER_DEFINITIONS: list[dict] = [
@@ -234,12 +258,28 @@ def _clamp_soc(value: float, lo: int, hi: int) -> int:
     return max(lo, min(hi, int(round(value))))
 
 
+def _extract_product_code(value: Optional[str]) -> Optional[str]:
+    """Extract a known Anker product code from a model value or serial number.
+
+    Anker serial numbers embed the four-character product code rather than
+    necessarily returning it as the first four characters. For example,
+    ``AK7DN7M0G22`` contains ``DN7M``.
+    """
+    if not value:
+        return None
+    normalized = "".join(char for char in str(value).upper() if char.isalnum())
+    if normalized in _PRODUCT_LABELS:
+        return normalized
+    for product_code in sorted(_PRODUCT_LABELS, key=len, reverse=True):
+        if product_code in normalized:
+            return product_code
+    return None
+
+
 def _label_for_product_code(code: Optional[str]) -> str:
-    """Map an official product code to a short model label."""
-    if not code:
-        return _DEFAULT_MODEL_LABEL
-    key = str(code).strip().upper()
-    return _PRODUCT_LABELS.get(key, _DEFAULT_MODEL_LABEL)
+    """Map an official product code or serial number to a model label."""
+    product_code = _extract_product_code(code)
+    return _PRODUCT_LABELS.get(product_code, _DEFAULT_MODEL_LABEL)
 
 
 class AnkerModbusDriver(BatteryDriver):
@@ -279,6 +319,7 @@ class AnkerModbusDriver(BatteryDriver):
             min_charge_power_w=_MIN_OPERATING_POWER_W,
             min_discharge_power_w=_MIN_OPERATING_POWER_W,
             has_mppt_pv=False,
+            has_solar_telemetry=True,
             has_alarm_registers=False,
             has_rs485_control=False,
             has_energy_counters=True,
@@ -376,14 +417,25 @@ class AnkerModbusDriver(BatteryDriver):
         return True
 
     async def _refresh_product_code(self) -> None:
-        """Read device_model (input 32768, 5 regs) for product-code → label."""
-        regs = await self._client.async_read_input_block(32768, 5)
-        if not regs:
+        """Read model code, falling back to the product code in the serial."""
+        model_regs = await self._client.async_read_input_block(
+            _ADDR_DEVICE_MODEL, _DEVICE_MODEL_REG_COUNT
+        )
+        model_value = decode_registers(model_regs, "char") if model_regs else None
+        product_code = _extract_product_code(model_value)
+        if product_code:
+            self._product_code = product_code
             return
-        value = decode_registers(regs, "char")
-        if isinstance(value, str) and value.strip():
-            code = value.strip().upper()
-            self._product_code = code[:4] if len(code) >= 4 else code
+
+        # Some Solarbank firmware returns a generic value from device_model.
+        # The official product code is still embedded in device_sn (10100).
+        serial_regs = await self._client.async_read_input_block(
+            _ADDR_DEVICE_SN, _DEVICE_SN_REG_COUNT
+        )
+        serial_value = decode_registers(serial_regs, "char") if serial_regs else None
+        product_code = _extract_product_code(serial_value)
+        if product_code:
+            self._product_code = product_code
 
     async def close(self) -> None:
         await self._client.async_close()
@@ -400,6 +452,10 @@ class AnkerModbusDriver(BatteryDriver):
     async def read_telemetry(self, keys: Optional[list[str]] = None) -> TelemetrySnapshot:
         self._client.unit_id = self._slave_id
         wanted = set(keys) if keys is not None else set(self._field_by_key)
+        # solar_power is a semantic aggregate rather than a Modbus field. Pull
+        # both official source registers when a caller requests the canonical key.
+        if "solar_power" in wanted:
+            wanted.update({"pv_power", "third_party_pv_power"})
         snapshot: TelemetrySnapshot = {}
 
         # Group wanted fields by the official batch range they belong to.
@@ -431,9 +487,9 @@ class AnkerModbusDriver(BatteryDriver):
                     value = -int(value)
                 snapshot[field["key"]] = value
                 if field["key"] == "device_model" and isinstance(value, str) and value:
-                    # Official product codes are short SKUs prefixes (e.g. DN7M).
-                    code = value.strip().upper()
-                    self._product_code = code[:4] if len(code) >= 4 else code
+                    product_code = _extract_product_code(value)
+                    if product_code:
+                        self._product_code = product_code
                 if field["key"] == "max_charge_power" and isinstance(value, (int, float)):
                     # Cap at the static family envelope so peak/aggregate readings
                     # (e.g. 7000 W) do not inflate the PD clamp beyond continuous
@@ -445,6 +501,19 @@ class AnkerModbusDriver(BatteryDriver):
                     capped = max(0, min(_HW_MAX_POWER_W, int(value)))
                     snapshot[field["key"]] = capped or _HW_MAX_POWER_W
                     self._dynamic_max_discharge_w = snapshot[field["key"]]
+
+        pv_power = snapshot.get("pv_power")
+        third_party_pv_power = snapshot.get("third_party_pv_power")
+        if isinstance(pv_power, (int, float)) or isinstance(
+            third_party_pv_power, (int, float)
+        ):
+            # PV production is physically non-negative. Clamp malformed or
+            # transitional signed-register values before exposing the canonical
+            # solar sensor and feeding the consumption tracker.
+            snapshot["solar_power"] = max(
+                0,
+                int(pv_power or 0) + int(third_party_pv_power or 0),
+            )
 
         # Publish semantic aliases expected by the brand-agnostic entity and
         # control layers. Values remain raw here; coordinator scaling is applied

@@ -110,8 +110,10 @@ class ExternalLoads:
         * while drawing: charging may resume for genuine residual export;
         * a >=200 W solar rise starts a new 20-second yield;
         * without a solar sensor, a 20-second probe runs every five minutes;
-        * when power drops: charging remains blocked for five minutes so the
-          external controller can restart after clouds or a phase transition.
+        * when power drops: charging remains blocked for a short restart grace
+          so the external controller can restart after clouds or a phase
+          transition, then genuine residual export may charge the battery;
+          discharge remains blocked for the full five-minute restart hold.
         * with Cover Home disabled: discharge remains blocked throughout every
           active phase so stale telemetry cannot hide grid import from the
           external controller.
@@ -233,9 +235,47 @@ class ExternalLoads:
                 hold_until = self._dynamic_hold_until.get(key)
                 if hold_until is not None and now < hold_until:
                     priority_devices.append(sensor_id)
-                    blocked_devices.append(sensor_id)
                     if block_discharge:
                         discharge_blocked_devices.append(sensor_id)
+
+                    # A power-only sensor cannot distinguish a completed
+                    # charge from a short controller pause. Give the wallbox
+                    # the same short opportunity used by the initial yield,
+                    # but do not keep solar-residual charging blocked for the
+                    # entire five-minute safety hold.
+                    if was_drawing:
+                        yield_until = now + DYNAMIC_CONTROL_INITIAL_YIELD
+                        self._dynamic_yield_until[key] = yield_until
+                        if solar_w is not None:
+                            self._dynamic_solar_reference_w[key] = solar_w
+                    else:
+                        yield_until = self._dynamic_yield_until.get(key, now)
+
+                    if solar_w is not None:
+                        reference_w = self._dynamic_solar_reference_w.get(key, solar_w)
+                        if solar_w < reference_w:
+                            self._dynamic_solar_reference_w[key] = solar_w
+                        elif solar_w - reference_w >= DYNAMIC_CONTROL_SOLAR_STEP_W:
+                            # Keep an existing grace intact if it is longer
+                            # than the re-yield; otherwise start a fresh
+                            # twenty-second opportunity for the wallbox.
+                            re_yield_until = now + DYNAMIC_CONTROL_REYIELD
+                            yield_until = max(yield_until, re_yield_until)
+                            self._dynamic_yield_until[key] = yield_until
+                            self._dynamic_solar_reference_w[key] = solar_w
+                            _LOGGER.debug(
+                                "Dynamic power control for %s: solar rose %.0fW during restart hold, re-yielding for %ds",
+                                sensor_id,
+                                solar_w - reference_w,
+                                int(DYNAMIC_CONTROL_REYIELD.total_seconds()),
+                            )
+
+                    if now < yield_until:
+                        blocked_devices.append(sensor_id)
+                        max_yield_remaining = max(
+                            max_yield_remaining,
+                            int((yield_until - now).total_seconds()),
+                        )
                     phases[sensor_id] = "restart_hold"
                     max_hold_remaining = max(
                         max_hold_remaining,
@@ -359,14 +399,16 @@ class ExternalLoads:
         # device is only what's left AFTER the genuine home load, not the raw PV.
         # base_load = home_consumption − Σ(in-home excluded devices); the surplus
         # is a shared budget so multiple surplus devices don't each claim it all.
-        # None = Home Consumption unavailable → conservative full exclusion below.
+        # None = Home Consumption unavailable or held after an invalid balance
+        # → conservative full exclusion below. The display sensor may retain a
+        # numeric last value, but control must not act on that stale estimate.
         # solar_remaining tracks the FULL PV left (before the home reservation) so a
         # device with cover_home_when_active can be offset by raw PV (pre-#415 rule),
         # letting the battery cover the home deficit instead of sitting idle (#42).
         surplus_remaining: float | None = None
         solar_remaining = self._read_sensor_w(solar_sensor_id) if solar_sensor_id else 0.0
         if solar_sensor_id:
-            home_w = self._read_sensor_w_opt(
+            home_w = self._read_home_consumption_w_opt(
                 getattr(self._controller, "home_consumption_sensor", None)
             )
             if home_w is not None:
@@ -477,6 +519,35 @@ class ExternalLoads:
             return None
         state = self._hass.states.get(entity_id)
         if state is None or state.state in ("unknown", "unavailable"):
+            return None
+        try:
+            raw = float(state.state)
+        except (ValueError, TypeError):
+            return None
+        unit = state.attributes.get("unit_of_measurement", "W")
+        return raw if unit == "W" else raw * 1000.0
+
+    def _read_home_consumption_w_opt(self, entity_id: str | None) -> float | None:
+        """Read Home Consumption only when its balance is currently coherent.
+
+        The display entity intentionally holds its last valid value across a
+        transient balance mismatch. Excluded-load control must not interpret
+        that held value as live telemetry, so it falls back to its conservative
+        unavailable path until ``balance_quality`` returns to ``calculated``.
+        Entities without this diagnostic attribute remain supported.
+        """
+        if not entity_id:
+            return None
+        state = self._hass.states.get(entity_id)
+        if state is None or state.state in ("unknown", "unavailable"):
+            return None
+        quality = state.attributes.get("balance_quality")
+        if quality is not None and quality != "calculated":
+            _LOGGER.debug(
+                "Home Consumption %s is %s; ignoring held value for load control",
+                entity_id,
+                quality,
+            )
             return None
         try:
             raw = float(state.state)

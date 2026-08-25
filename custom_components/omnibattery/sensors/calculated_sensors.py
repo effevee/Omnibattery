@@ -72,7 +72,7 @@ class MarstekVenusEfficiencySensor(CoordinatorEntity, RestoreEntity, SensorEntit
         self._attr_entity_category = EntityCategory.DIAGNOSTIC
         self._attr_should_poll = False
         self._dependency_keys = definition["dependency_keys"]
-        # On Venus D/A the AC-side hardware energy counters can't see DC-coupled
+        # On DC-coupled-PV units the AC-side hardware energy counters can't see
         # PV charging the cells, so their round-trip ratio runs >100%. For those
         # units measure the real inverter loss directly while PV is idle (MPPT=0):
         # the AC port (ac_power) and the DC battery terminal (battery_power) are
@@ -80,7 +80,11 @@ class MarstekVenusEfficiencySensor(CoordinatorEntity, RestoreEntity, SensorEntit
         # is the ratio of two simultaneous power readings, so unlike a cumulative
         # charge/discharge ratio it has no SoC-endpoint dependence and can't blow
         # up on partial cycles. AC-only models keep the accurate hardware counters.
-        self._integrate_mode = coordinator.capabilities.has_mppt_pv
+        capabilities = getattr(coordinator, "capabilities", None)
+        self._integrate_mode = bool(
+            getattr(capabilities, "has_mppt_pv", False)
+            or getattr(capabilities, "has_solar_telemetry", False)
+        )
         self._mppt_keys = ["mppt1_power", "mppt2_power", "mppt3_power", "mppt4_power"]
         # Energy on each plane, split by direction (kWh), MPPT=0 windows only.
         self._charge_ac_kwh = 0.0      # AC drawn while charging the cells
@@ -186,7 +190,12 @@ class MarstekVenusEfficiencySensor(CoordinatorEntity, RestoreEntity, SensorEntit
         ac = data.get("ac_power")            # AC port, opposite sign to battery
         if battery is None or ac is None:
             return
-        solar = sum(v for k in self._mppt_keys if (v := data.get(k)) is not None)
+        if getattr(
+            getattr(self.coordinator, "capabilities", None), "has_mppt_pv", False
+        ):
+            solar = sum(v for k in self._mppt_keys if (v := data.get(k)) is not None)
+        else:
+            solar = data.get("solar_power") or 0.0
 
         now = time.monotonic()
         last = self._last_mono

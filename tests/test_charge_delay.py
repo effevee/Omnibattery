@@ -314,6 +314,22 @@ def test_balanced_day_holds_with_deadband():
     assert ctrl._charge_delay_forecast_cache == pytest.approx(15.76)
 
 
+def test_balance_cache_recomputes_when_forecast_source_changes():
+    states = {
+        "sensor.forecast": _state(10.0),
+        "sensor.remaining": _state(10.0),
+    }
+    ctrl = _controller(solar_forecast_remaining_sensor="sensor.remaining")
+    mgr = _make_mgr(ctrl, states=states)
+
+    mgr._should_delay_charge(80)
+    assert ctrl._charge_delay_forecast_source_cache == "remaining"
+
+    states["sensor.remaining"] = _state("unavailable")
+    mgr._should_delay_charge(80)
+    assert ctrl._charge_delay_forecast_source_cache == "today"
+
+
 def test_low_forecast_price_release_holds_for_cheaper_hour():
     # Genuine deficit, cheaper import hour ahead before solar -> hold, do not unlock.
     ctrl = _controller(_solar_t_start=8.0)

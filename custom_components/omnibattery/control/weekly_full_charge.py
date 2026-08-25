@@ -60,6 +60,11 @@ class WeeklyFullChargeManager:
         self._store = Store(hass, 1, f"{DOMAIN}.{config_entry.entry_id}.weekly_charge_state")
         # Per-battery debounce counter for BMS-cutoff detection (in-memory only).
         self._bms_cutoff_counts: dict[str, int] = {}
+        # Re-apply the temporary 100% cutoff once per HA session.  This set is
+        # intentionally not persisted: an empty set after restart makes the
+        # active weekly run re-assert 100% while retaining the persisted
+        # original SOC values for the eventual restore.
+        self._cutoff_applied_names: set[str] = set()
         # Edge-trigger guard so the "already completed" debug line logs once per
         # completion, not once per is_active() call (called per-battery per-cycle).
         self._already_complete_logged = False
@@ -102,6 +107,7 @@ class WeeklyFullChargeManager:
             if soc >= 99 or in_taper_zone:
                 power = c.data.get("battery_power", None)
                 inv_state = c.data.get("inverter_state", None)
+                is_zendure = getattr(c, "brand", None) == "zendure"
                 # A real top-of-charge cutoff only counts when we are actually
                 # commanding the battery to charge but it refuses (≤10 W +
                 # Standby). A battery that is merely idle — not allocated charge
@@ -113,10 +119,15 @@ class WeeklyFullChargeManager:
                 commanded = getattr(c, "commanded_charge_power", 0) or 0
                 cutoff = (
                     power is not None
-                    and inv_state is not None
                     and commanded > _BMS_CUTOFF_POWER_W
                     and power <= _BMS_CUTOFF_POWER_W
-                    and inv_state == _INVERTER_STATE_STANDBY
+                    and (
+                        inv_state == _INVERTER_STATE_STANDBY
+                        # Zendure's local API has no inverter_state field.  Its
+                        # commanded setpoint is the equivalent idle guard, and
+                        # the SOC >= 99 gate above prevents lower-SOC false hits.
+                        or (is_zendure and inv_state is None and soc >= 99)
+                    )
                 )
                 if cutoff:
                     count = self._bms_cutoff_counts.get(c.name, 0) + 1
@@ -227,6 +238,14 @@ class WeeklyFullChargeManager:
                 # Just exited the target day - reset flags for next week
                 _LOGGER.info("Weekly Full Charge: Exited %s, resetting flags for next week",
                             ctrl.weekly_full_charge_day.upper())
+                if ctrl.weekly_full_charge_registers_written and not ctrl.weekly_full_charge_complete:
+                    # The charge may not have reached its completion condition
+                    # before midnight. Resetting the flags alone would leave a
+                    # Zendure socSet=100 in place until the next weekly run.
+                    ctrl._weekly_charge_needs_restore = True
+                    _LOGGER.info(
+                        "Weekly Full Charge: Mid-charge day rollover detected - hardware restore pending"
+                    )
                 ctrl.weekly_full_charge_complete = False
                 ctrl.weekly_full_charge_registers_written = False
                 ctrl._force_full_charge = False
@@ -291,16 +310,40 @@ class WeeklyFullChargeManager:
                 # Restore delay state
                 ctrl._charge_delay_unlocked = data.get("delay_unlocked", False)
                 ctrl._solar_t_start = data.get("solar_t_start")
+                ctrl._weekly_charge_needs_restore = bool(data.get("restore_pending", False))
+                self._restore_saved_max_soc(data.get("saved_max_soc"))
+                getattr(self, "_cutoff_applied_names", set()).clear()
                 _LOGGER.info(
                     "Weekly Full Charge: Restored state - complete=%s, "
-                    "registers_written=%s, delay_unlocked=%s",
+                    "registers_written=%s, delay_unlocked=%s, restore_pending=%s",
                     ctrl.weekly_full_charge_complete,
                     ctrl.weekly_full_charge_registers_written,
                     ctrl._charge_delay_unlocked,
+                    ctrl._weekly_charge_needs_restore,
                 )
             else:
-                _LOGGER.debug("Weekly Full Charge: Stored state is from %s, today is %s - ignoring",
-                              stored_date, today_iso)
+                # A run may span midnight, or HA may restart the next day. The
+                # normal same-day restoration path cannot run in that case, so
+                # carry the original limits forward and restore them before the
+                # next weekly evaluation.
+                restore_pending = bool(data.get("restore_pending", False))
+                unfinished_run = bool(data.get("registers_written", False)) and not data.get("complete", False)
+                self._restore_saved_max_soc(data.get("saved_max_soc"))
+                getattr(self, "_cutoff_applied_names", set()).clear()
+                if restore_pending or unfinished_run:
+                    ctrl.weekly_full_charge_complete = bool(data.get("complete", False))
+                    ctrl.weekly_full_charge_registers_written = False
+                    ctrl._weekly_charge_needs_restore = True
+                    ctrl._weekly_charge_status["state"] = (
+                        "Complete" if ctrl.weekly_full_charge_complete else "Idle"
+                    )
+                    _LOGGER.info(
+                        "Weekly Full Charge: Stored state from %s needs cutoff restoration before continuing",
+                        stored_date,
+                    )
+                else:
+                    _LOGGER.debug("Weekly Full Charge: Stored state is from %s, today is %s - ignoring",
+                                  stored_date, today_iso)
 
         except Exception as e:
             _LOGGER.error("Weekly Full Charge: Failed to load persisted state: %s", e)
@@ -317,6 +360,8 @@ class WeeklyFullChargeManager:
                 "complete": ctrl.weekly_full_charge_complete,
                 "registers_written": ctrl.weekly_full_charge_registers_written,
                 "state": ctrl._weekly_charge_status.get("state", "Idle"),
+                "restore_pending": bool(getattr(ctrl, "_weekly_charge_needs_restore", False)),
+                "saved_max_soc": dict(getattr(ctrl, "_weekly_charge_saved_max_soc", {})),
                 "date": date.today().isoformat(),
                 "timestamp": now.isoformat(),
                 # Delay state (bundled in the same store for legacy reasons)
@@ -327,6 +372,86 @@ class WeeklyFullChargeManager:
             _LOGGER.debug("Weekly Full Charge: Saved state to storage")
         except Exception as e:
             _LOGGER.error("Weekly Full Charge: Failed to save state: %s", e)
+
+    def _restore_saved_max_soc(self, stored: Any) -> None:
+        """Restore per-battery SOC values saved before a 100% override."""
+        saved = getattr(self._controller, "_weekly_charge_saved_max_soc", None)
+        if saved is None:
+            return
+        saved.clear()
+        if not isinstance(stored, dict):
+            return
+        for name, value in stored.items():
+            try:
+                value_int = int(value)
+            except (TypeError, ValueError):
+                continue
+            if 0 <= value_int <= 100:
+                saved[str(name)] = value_int
+
+    @staticmethod
+    def _get_configured_max_soc(coordinator: Any) -> int:
+        """Return the persisted user ceiling before falling back to live telemetry."""
+        fallback = getattr(coordinator, "max_soc", 100)
+        config_entry = getattr(coordinator, "_config_entry", None)
+        entry_data = getattr(config_entry, "data", {})
+        battery_configs = entry_data.get("batteries", []) if isinstance(entry_data, dict) else []
+        for battery_config in battery_configs:
+            if battery_config.get("name") == getattr(coordinator, "name", None):
+                fallback = battery_config.get("max_soc", fallback)
+                break
+        try:
+            return max(0, min(100, int(fallback)))
+        except (TypeError, ValueError):
+            return 100
+
+    async def _restore_hardware_cutoffs(self, reason: str) -> bool:
+        """Restore saved hardware SOC cutoffs and report whether all writes worked."""
+        ctrl = self._controller
+        all_ok = True
+        saved = getattr(ctrl, "_weekly_charge_saved_max_soc", {})
+        for coordinator in ctrl.coordinators:
+            if getattr(coordinator, "battery_manual_mode_enabled", False):
+                continue
+            if ctrl._is_backup_function_active(coordinator):
+                continue
+            if not coordinator.capabilities.hardware_soc_cutoff:
+                _LOGGER.debug(
+                    "%s: No hardware cutoff to restore (software-enforced battery)",
+                    coordinator.name,
+                )
+                continue
+
+            original_max_soc = saved.get(
+                coordinator.name, self._get_configured_max_soc(coordinator)
+            )
+            try:
+                ok = await coordinator.set_charge_cutoff(original_max_soc)
+            except Exception as e:
+                ok = False
+                _LOGGER.error(
+                    "%s: Failed to restore charging cutoff to %d%% after %s: %s",
+                    coordinator.name,
+                    original_max_soc,
+                    reason,
+                    e,
+                )
+            if ok:
+                _LOGGER.info(
+                    "%s: Restored hardware cutoff to %d%% after %s",
+                    coordinator.name,
+                    original_max_soc,
+                    reason,
+                )
+            else:
+                all_ok = False
+                _LOGGER.error(
+                    "%s: Charging cutoff restore to %d%% was rejected after %s; will retry",
+                    coordinator.name,
+                    original_max_soc,
+                    reason,
+                )
+        return all_ok
 
     async def handle_registers(self) -> None:
         """Manage weekly full charge register writes and completion detection.
@@ -350,29 +475,18 @@ class WeeklyFullChargeManager:
         # Restore hardware cutoff to max_soc before anything else.
         if ctrl._weekly_charge_needs_restore:
             _LOGGER.info("Weekly Full Charge: Restoring hardware cutoff registers after mid-charge abort")
-            for coordinator in ctrl.coordinators:
-                if getattr(coordinator, "battery_manual_mode_enabled", False):
-                    continue
-                if ctrl._is_backup_function_active(coordinator):
-                    continue
-                if not coordinator.capabilities.hardware_soc_cutoff:
-                    _LOGGER.debug("%s: No hardware cutoff register to restore (v3 battery)", coordinator.name)
-                    continue
-                try:
-                    # Use the saved value captured before writing 100%; fall back to current max_soc
-                    # only if no saved value exists (e.g. HA restarted mid-charge).
-                    original_max_soc = ctrl._weekly_charge_saved_max_soc.get(
-                        coordinator.name, coordinator.max_soc
-                    )
-                    await coordinator.set_charge_cutoff(original_max_soc)
-                    _LOGGER.info("%s: Restored hardware cutoff to %d%% after mid-charge abort",
-                                 coordinator.name, original_max_soc)
-                except Exception as e:
-                    _LOGGER.error("%s: Failed to restore charging cutoff register: %s", coordinator.name, e)
+            was_complete = ctrl.weekly_full_charge_complete
+            restored = await self._restore_hardware_cutoffs("mid-charge abort")
+            if not restored:
+                await self.save_state()
+                return
             ctrl._weekly_charge_saved_max_soc.clear()
+            getattr(self, "_cutoff_applied_names", set()).clear()
             ctrl._weekly_charge_needs_restore = False
-            ctrl._weekly_charge_status["state"] = "Idle"
-            ctrl._weekly_charge_status.pop("completion_reason", None)
+            if not was_complete:
+                ctrl._weekly_charge_status["state"] = "Idle"
+                ctrl._weekly_charge_status.pop("completion_reason", None)
+            await self.save_state()
 
         if not ctrl.weekly_full_charge_enabled and not ctrl._force_full_charge:
             return
@@ -400,11 +514,22 @@ class WeeklyFullChargeManager:
 
         # Write register 44000 to 100% on first activation (v2 only - v3 uses software enforcement).
         # Also re-write after HA restart: registers_written may be True (from persisted state)
-        # but async_setup_entry wrote max_soc back to the hardware register.  The empty
-        # _weekly_charge_saved_max_soc dict is a reliable proxy for "not yet applied this
-        # session" because it is in-memory only and starts empty on every restart.
-        need_write = (not ctrl.weekly_full_charge_registers_written
-                      or not ctrl._weekly_charge_saved_max_soc)
+        # but async_setup_entry wrote max_soc back to the hardware register.  The
+        # in-memory _cutoff_applied_names set starts empty on every restart, so the
+        # persisted original SOC can be retained while 100% is re-applied.
+        applied_names = getattr(self, "_cutoff_applied_names", set())
+        pending_hardware = {
+            coordinator.name
+            for coordinator in ctrl.coordinators
+            if not getattr(coordinator, "battery_manual_mode_enabled", False)
+            and not ctrl._is_backup_function_active(coordinator)
+            and coordinator.capabilities.hardware_soc_cutoff
+        }
+        need_write = (
+            not ctrl.weekly_full_charge_registers_written
+            or not ctrl._weekly_charge_saved_max_soc
+            or bool(pending_hardware - applied_names)
+        )
         if need_write:
             is_restart_reapply = ctrl.weekly_full_charge_registers_written
             if is_restart_reapply:
@@ -426,17 +551,34 @@ class WeeklyFullChargeManager:
                     )
                     # v3 batteries: mark as verified so the restart-proxy check doesn't
                     # loop forever when all coordinators are v3.
-                    ctrl._weekly_charge_saved_max_soc[coordinator.name] = coordinator.max_soc
+                    ctrl._weekly_charge_saved_max_soc.setdefault(
+                        coordinator.name, int(coordinator.max_soc)
+                    )
+                    applied_names.add(coordinator.name)
                     continue
 
                 # v2 batteries: write hardware register
                 try:
-                    # Save original max_soc before overwriting the hardware register
-                    ctrl._weekly_charge_saved_max_soc[coordinator.name] = coordinator.max_soc
+                    # Save original max_soc before overwriting the hardware register.
+                    # setdefault preserves the value restored from storage after HA
+                    # restarts, when the live poll already reports 100%.
+                    ctrl._weekly_charge_saved_max_soc.setdefault(
+                        coordinator.name, self._get_configured_max_soc(coordinator)
+                    )
                     # Raise the hardware charging cutoff to 100%
-                    await coordinator.set_charge_cutoff(100)
-                    _LOGGER.debug("%s: Set hardware charging cutoff to 100%% (saved original max_soc=%d%%)",
-                                  coordinator.name, coordinator.max_soc)
+                    ok = await coordinator.set_charge_cutoff(100)
+                    if ok:
+                        applied_names.add(coordinator.name)
+                        _LOGGER.debug(
+                            "%s: Set hardware charging cutoff to 100%% (saved original max_soc=%d%%)",
+                            coordinator.name,
+                            ctrl._weekly_charge_saved_max_soc[coordinator.name],
+                        )
+                    else:
+                        _LOGGER.error(
+                            "%s: Failed to set hardware charging cutoff to 100%%; will retry",
+                            coordinator.name,
+                        )
                 except Exception as e:
                     _LOGGER.error("%s: Failed to write charging cutoff register: %s", coordinator.name, e)
 
@@ -508,44 +650,49 @@ class WeeklyFullChargeManager:
         ctrl._weekly_charge_status["batteries"] = completion_batteries
 
         # Preserve the post-cutoff measurement request while clearing the
-        # debounce counters used by the weekly completion detector.
+        # debounce counters used by the weekly completion detector. A Venus E
+        # pack may be cut by its BMS below 3.60 V, so this is not exclusive to
+        # the coupled Venus A/D path.
         measurement_state = getattr(
             ctrl, "_normal_balance_bms_cutoff_measurement", None
         )
         if measurement_state is not None:
             for coordinator in ctrl.coordinators:
+                data = coordinator.data or {}
+                try:
+                    vmax = float(data.get("max_cell_voltage"))
+                except (TypeError, ValueError):
+                    vmax = None
+                taper_latched = getattr(
+                    ctrl, "_normal_balance_voltage_tapered", {}
+                ).get(coordinator, False)
+                in_taper_zone = (
+                    vmax is not None
+                    and vmax >= NORMAL_BALANCE_TAPER_CELL_VOLTAGE
+                )
                 if (
-                    getattr(coordinator, "battery_version", None)
-                    in NORMAL_BALANCE_BMS_CUTOFF_VERSIONS
-                    and self._bms_cutoff_counts.get(coordinator.name, 0)
+                    self._bms_cutoff_counts.get(coordinator.name, 0)
                     >= _BMS_CUTOFF_REQUIRED_CYCLES
+                    and (
+                        getattr(coordinator, "battery_version", None)
+                        in NORMAL_BALANCE_BMS_CUTOFF_VERSIONS
+                        or in_taper_zone
+                        or taper_latched
+                    )
                 ):
                     measurement_state[coordinator] = "pending"
         self._bms_cutoff_counts.clear()
 
-        # Restore register 44000 to original max_soc values (v2 only).
-        for coordinator in ctrl.coordinators:
-            if getattr(coordinator, "battery_manual_mode_enabled", False):
-                continue
-            if ctrl._is_backup_function_active(coordinator):
-                _LOGGER.debug("%s: Skipping cutoff restore - backup function is active", coordinator.name)
-                continue
-
-            if not coordinator.capabilities.hardware_soc_cutoff:
-                _LOGGER.debug("%s: No hardware cutoff register to restore (v3 battery)", coordinator.name)
-                continue
-
-            try:
-                original_max_soc = ctrl._weekly_charge_saved_max_soc.get(
-                    coordinator.name, coordinator.max_soc
-                )
-                await coordinator.set_charge_cutoff(original_max_soc)
-                _LOGGER.debug("%s: Restored hardware cutoff to %d%%",
-                              coordinator.name, original_max_soc)
-            except Exception as e:
-                _LOGGER.error("%s: Failed to restore charging cutoff register: %s", coordinator.name, e)
-
-        ctrl._weekly_charge_saved_max_soc.clear()
+        # Restore the saved hardware ceiling. Keep the saved values when a write
+        # fails so the next control cycle can retry instead of silently
+        # completing with the device still at 100%.
+        restored = await self._restore_hardware_cutoffs("weekly charge completion")
+        if restored:
+            ctrl._weekly_charge_saved_max_soc.clear()
+            getattr(self, "_cutoff_applied_names", set()).clear()
+            ctrl._weekly_charge_needs_restore = False
+        else:
+            ctrl._weekly_charge_needs_restore = True
 
         # Clear the normal top-charge pause so next week starts fresh.
 
@@ -559,8 +706,9 @@ class WeeklyFullChargeManager:
                 measurement_state is not None
                 and measurement_state.get(coordinator) == "pending"
             ):
-                # Venus A/D get their 60 s measurement after the confirmed BMS
-                # cutoff; do not replace it with the immediate fallback sample.
+                # A BMS cutoff measurement gets its 60 s rest window in the
+                # normal measurement handler; do not replace it with the
+                # immediate completion snapshot.
                 continue
             if coordinator in measured:
                 continue

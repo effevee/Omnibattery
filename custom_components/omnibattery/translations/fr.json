@@ -15,6 +15,10 @@
     "solar_forecast_unusable": {
       "title": "Prévision solaire inutilisable",
       "description": "Le capteur de prévision solaire configuré {sensor} est indisponible ou illisible depuis plus de {minutes} minutes. Omnibattery continue de fonctionner, mais tout ce qui dépend de la prévision avance à l'aveugle : le report de charge se libère pour le reste de la journée, les décisions de charge depuis le réseau supposent une absence totale de soleil et peuvent réserver des créneaux inutiles, et l'estimation du solaire restant indique 0 kWh. Vérifiez le capteur ou l'intégration qui le fournit."
+    },
+    "solar_forecast_remaining_recommended": {
+      "title": "Utiliser une prévision solaire restante",
+      "description": "{sensor} est une ancienne prévision solaire pour toute la journée. Omnibattery la prend toujours en charge, mais les erreurs de prévision déjà survenues peuvent rendre les décisions intrajournalières imprécises. Configurez dans les options d'Omnibattery le capteur du fournisseur pour la prévision \"restant aujourd'hui\" afin de calculer plus précisément le solaire restant."
     }
   },
   "config": {
@@ -28,7 +32,8 @@
         "description": "Sélectionnez le capteur qui mesure l'importation/exportation du réseau électrique. Optionnellement, configurez le capteur de prévision solaire pour les fonctionnalités avancées.",
         "data": {
           "consumption_sensor": "Capteur de consommation réseau",
-          "solar_forecast_sensor": "Capteur de prévision solaire (optionnel)",
+          "solar_forecast_sensor": "Capteur de prévision solaire de la journée entière (ancien)",
+          "solar_forecast_remaining_sensor": "Capteur de prévision solaire restante aujourd'hui (recommandé)",
           "solar_production_sensor": "Capteur de production solaire (optionnel)",
           "meter_inverted": "Signe du compteur inversé",
           "max_contracted_power": "Puissance maximale souscrite (W)",
@@ -36,7 +41,8 @@
         },
         "data_description": {
           "consumption_sensor": "Capteur temps réel de puissance importée (+) ou exportée (-) vers le réseau. Des mises à jour toutes les 1-2 secondes sont recommandées. Les capteurs plus lents sont acceptés, mais les mesures retardées réduisent la qualité de régulation ; la dernière mesure est suivie pendant 65 secondes au maximum.",
-          "solar_forecast_sensor": "Capteur fournissant la prévision de production solaire en kWh (ex : Solcast). S'il est configuré ici, il sera utilisé automatiquement pour la charge prédictive et le retard de charge solaire.",
+          "solar_forecast_sensor": "Ancien capteur fournissant la prévision solaire de la journée entière. Les installations existantes peuvent continuer à l'utiliser pendant la transition ; pour les nouvelles configurations, préférez Restant aujourd'hui.",
+          "solar_forecast_remaining_sensor": "Capteur fournissant la production solaire encore attendue aujourd'hui en kWh. Lors de l'enregistrement, il remplace l'ancienne prévision de la journée entière et n'est jamais diminué de la production déjà mesurée.",
           "solar_production_sensor": "Capteur de puissance de production photovoltaïque en temps réel (W/kW) d'un onduleur externe non raccordé aux entrées MPPT de la batterie. Utilisé pour afficher le nœud Solaire dans le diagramme de flux d'énergie du tableau de bord. Laissez vide si vos panneaux alimentent directement le MPPT de la batterie.",
           "meter_inverted": "Activez cette option si votre compteur utilise la convention opposée : positif = exportation, négatif = importation. L'unité (W/kW) est détectée automatiquement.",
           "max_contracted_power": "Puissance totale souscrite en watts. Le système ne dépassera pas cette limite lors de la charge pour éviter de déclencher le disjoncteur",
@@ -163,7 +169,7 @@
           "full_charge_voltage_taper_enabled": "Lorsque la cible est 100%, limite la charge à 200 W à partir de 3.48 V de tension maximale de cellule. Les Venus E s'arrêtent à 3.60 V pour mesurer le déséquilibre après 60 secondes ; les Venus A/D avec des packs couplés continuent à 200 W jusqu'à la coupure du BMS.",
           "battery_capacity_kwh": "Capacité utilisable nominale du pack de batteries. Elle sert à calculer l'énergie stockée et l'efficacité à partir du SOC. Pour Sessy, saisissez la capacité réelle ; pour les autres batteries, laissez 0 si elle est inconnue.",
           "battery_phase": "Phase AC physique (L1/L2/L3) à laquelle cette batterie est raccordée, ou Non assignée hors du schéma de phases protégées. Une batterie sans phase est exclue de l'enveloppe triphasée et continue à fonctionner normalement en automatique.",
-          "track_mac": "L'adresse MAC est l'adresse matérielle permanente de la batterie : contrairement à l'adresse IP ci-dessus, elle ne change jamais. Home Assistant s'en sert pour retrouver la batterie et mettre l'adresse IP à jour tout seul.",
+          "track_mac": "L'adresse MAC est l'adresse matérielle permanente de la batterie : contrairement à l'adresse IP ci-dessus, elle ne change jamais. Home Assistant s'en sert pour retrouver la batterie et mettre l'adresse IP à jour tout seul. Derrière un pont Wi-Fi vers Ethernet ou un adaptateur CPL, l'adresse visible est celle de l'adaptateur et couvre tout ce qui est derrière : le suivi ne fonctionne alors que si une seule batterie s'y trouve.",
           "mac": "Adresse matérielle permanente de l'interface que la batterie utilise sur le réseau. Prenez-la dans la liste des appareils de votre box : une batterie peut annoncer une adresse différente de celle de son interface filaire. Remplie automatiquement quand le cache DHCP de Home Assistant est disponible."
         }
       },
@@ -227,7 +233,23 @@
           "battery_6__soc_min": "Batterie 6 — SOC min. (%)",
           "battery_6__soc_max": "Batterie 6 — SOC max. (%)",
           "battery_6__max_charge_power_w": "Batterie 6 — Puissance max. charge (W)",
-          "battery_6__max_discharge_power_w": "Batterie 6 — Puissance max. décharge (W)"
+          "battery_6__max_discharge_power_w": "Batterie 6 — Puissance max. décharge (W)",
+          "battery_7__soc_min": "Batterie 7 — SOC min. (%)",
+          "battery_7__soc_max": "Batterie 7 — SOC max. (%)",
+          "battery_7__max_charge_power_w": "Batterie 7 — Puissance max. charge (W)",
+          "battery_7__max_discharge_power_w": "Batterie 7 — Puissance max. décharge (W)",
+          "battery_8__soc_min": "Batterie 8 — SOC min. (%)",
+          "battery_8__soc_max": "Batterie 8 — SOC max. (%)",
+          "battery_8__max_charge_power_w": "Batterie 8 — Puissance max. charge (W)",
+          "battery_8__max_discharge_power_w": "Batterie 8 — Puissance max. décharge (W)",
+          "battery_9__soc_min": "Batterie 9 — SOC min. (%)",
+          "battery_9__soc_max": "Batterie 9 — SOC max. (%)",
+          "battery_9__max_charge_power_w": "Batterie 9 — Puissance max. charge (W)",
+          "battery_9__max_discharge_power_w": "Batterie 9 — Puissance max. décharge (W)",
+          "battery_10__soc_min": "Batterie 10 — SOC min. (%)",
+          "battery_10__soc_max": "Batterie 10 — SOC max. (%)",
+          "battery_10__max_charge_power_w": "Batterie 10 — Puissance max. charge (W)",
+          "battery_10__max_discharge_power_w": "Batterie 10 — Puissance max. décharge (W)"
         },
         "data_description": {
           "soc_min": "La batterie ne se déchargera pas sous ce SOC pendant la plage (plancher 12%).",
@@ -586,6 +608,13 @@
           "slave_id": "Modbus slave/unit id (default 1)"
         }
       },
+          "reconfigure_battery_huawei_slave": {
+            "title": "Reconfigurer la batterie {battery_num} — Quel onduleur ?",
+            "description": "{count} onduleurs avec batterie ont répondu sur ce bus. Choisis celui auquel appartient cette batterie.",
+            "data": {
+              "slave_id": "Inverter"
+            }
+          },
         "reconfigure_battery_huawei": {
           "title": "Reconfigurer la batterie {battery_num} — Connexion (Huawei)",
           "description": "Mets à jour l'accès Modbus et l'appareil batterie de Huawei Solar pour la batterie {battery_num}. Les autres réglages sont conservés.",
@@ -698,6 +727,7 @@
     },
     "abort": {
       "ip_updated": "L'adresse IP de la batterie a changé ; la connexion a été mise à jour toute seule.",
+      "candidate_silent": "Une nouvelle adresse IP a été annoncée pour cette batterie, mais rien n'y a répondu ; la connexion n'a pas été modifiée.",
       "no_tracked_battery": "Aucune batterie configurée n'est suivie par l'adresse MAC de cet appareil.",
       "already_configured": "Cette intégration est déjà configurée.",
       "reconfigure_successful": "Paramètres de connexion de la batterie mis à jour avec succès.",
@@ -755,7 +785,8 @@
         "description": "Configurez les capteurs utilisés par l'intégration.",
         "data": {
           "consumption_sensor": "Capteur de consommation réseau",
-          "solar_forecast_sensor": "Capteur de prévision solaire (optionnel)",
+          "solar_forecast_sensor": "Capteur de prévision solaire de la journée entière (ancien)",
+          "solar_forecast_remaining_sensor": "Capteur de prévision solaire restante aujourd'hui (recommandé)",
           "solar_production_sensor": "Capteur de production solaire (optionnel)",
           "meter_inverted": "Signe du compteur inversé",
           "max_contracted_power": "Puissance maximale souscrite (W)",
@@ -763,7 +794,8 @@
         },
         "data_description": {
           "consumption_sensor": "Capteur temps réel de puissance importée (+) ou exportée (-) vers le réseau. Des mises à jour toutes les 1-2 secondes sont recommandées. Les capteurs plus lents sont acceptés, mais les mesures retardées réduisent la qualité de régulation ; la dernière mesure est suivie pendant 65 secondes au maximum.",
-          "solar_forecast_sensor": "Capteur fournissant la prévision de production solaire en kWh (ex : Solcast). S'il est configuré ici, il sera utilisé automatiquement pour la charge prédictive et le retard de charge solaire.",
+          "solar_forecast_sensor": "Ancien capteur fournissant la prévision solaire de la journée entière. Les installations existantes peuvent continuer à l'utiliser pendant la transition ; pour les nouvelles configurations, préférez Restant aujourd'hui.",
+          "solar_forecast_remaining_sensor": "Capteur fournissant la production solaire encore attendue aujourd'hui en kWh. Lors de l'enregistrement, il remplace l'ancienne prévision de la journée entière et n'est jamais diminué de la production déjà mesurée.",
           "solar_production_sensor": "Capteur de puissance de production photovoltaïque en temps réel (W/kW) d'un onduleur externe non raccordé aux entrées MPPT de la batterie. Utilisé pour afficher le nœud Solaire dans le diagramme de flux d'énergie du tableau de bord. Laissez vide si vos panneaux alimentent directement le MPPT de la batterie.",
           "meter_inverted": "Activez cette option si votre compteur utilise la convention opposée : positif = exportation, négatif = importation. L'unité (W/kW) est détectée automatiquement.",
           "max_contracted_power": "Puissance totale souscrite en watts. Le système ne dépassera pas cette limite lors de la charge pour éviter de déclencher le disjoncteur",
@@ -859,7 +891,7 @@
           "full_charge_voltage_taper_enabled": "Lorsque la cible est 100%, limite la charge à 200 W à partir de 3.48 V de tension maximale de cellule. Les Venus E s'arrêtent à 3.60 V pour mesurer le déséquilibre après 60 secondes ; les Venus A/D avec des packs couplés continuent à 200 W jusqu'à la coupure du BMS.",
           "battery_capacity_kwh": "Capacité utilisable nominale du pack de batteries. Elle sert à calculer l'énergie stockée et l'efficacité à partir du SOC. Pour Sessy, saisissez la capacité réelle ; pour les autres batteries, laissez 0 si elle est inconnue.",
           "battery_phase": "Phase AC physique (L1/L2/L3) à laquelle cette batterie est raccordée, ou Non assignée hors du schéma de phases protégées. Une batterie sans phase est exclue de l'enveloppe triphasée et continue à fonctionner normalement en automatique.",
-          "track_mac": "L'adresse MAC est l'adresse matérielle permanente de la batterie : contrairement à l'adresse IP ci-dessus, elle ne change jamais. Home Assistant s'en sert pour retrouver la batterie et mettre l'adresse IP à jour tout seul.",
+          "track_mac": "L'adresse MAC est l'adresse matérielle permanente de la batterie : contrairement à l'adresse IP ci-dessus, elle ne change jamais. Home Assistant s'en sert pour retrouver la batterie et mettre l'adresse IP à jour tout seul. Derrière un pont Wi-Fi vers Ethernet ou un adaptateur CPL, l'adresse visible est celle de l'adaptateur et couvre tout ce qui est derrière : le suivi ne fonctionne alors que si une seule batterie s'y trouve.",
           "mac": "Adresse matérielle permanente de l'interface que la batterie utilise sur le réseau. Prenez-la dans la liste des appareils de votre box : une batterie peut annoncer une adresse différente de celle de son interface filaire. Remplie automatiquement quand le cache DHCP de Home Assistant est disponible."
         }
       },
@@ -923,7 +955,23 @@
           "battery_6__soc_min": "Batterie 6 — SOC min. (%)",
           "battery_6__soc_max": "Batterie 6 — SOC max. (%)",
           "battery_6__max_charge_power_w": "Batterie 6 — Puissance max. charge (W)",
-          "battery_6__max_discharge_power_w": "Batterie 6 — Puissance max. décharge (W)"
+          "battery_6__max_discharge_power_w": "Batterie 6 — Puissance max. décharge (W)",
+          "battery_7__soc_min": "Batterie 7 — SOC min. (%)",
+          "battery_7__soc_max": "Batterie 7 — SOC max. (%)",
+          "battery_7__max_charge_power_w": "Batterie 7 — Puissance max. charge (W)",
+          "battery_7__max_discharge_power_w": "Batterie 7 — Puissance max. décharge (W)",
+          "battery_8__soc_min": "Batterie 8 — SOC min. (%)",
+          "battery_8__soc_max": "Batterie 8 — SOC max. (%)",
+          "battery_8__max_charge_power_w": "Batterie 8 — Puissance max. charge (W)",
+          "battery_8__max_discharge_power_w": "Batterie 8 — Puissance max. décharge (W)",
+          "battery_9__soc_min": "Batterie 9 — SOC min. (%)",
+          "battery_9__soc_max": "Batterie 9 — SOC max. (%)",
+          "battery_9__max_charge_power_w": "Batterie 9 — Puissance max. charge (W)",
+          "battery_9__max_discharge_power_w": "Batterie 9 — Puissance max. décharge (W)",
+          "battery_10__soc_min": "Batterie 10 — SOC min. (%)",
+          "battery_10__soc_max": "Batterie 10 — SOC max. (%)",
+          "battery_10__max_charge_power_w": "Batterie 10 — Puissance max. charge (W)",
+          "battery_10__max_discharge_power_w": "Batterie 10 — Puissance max. décharge (W)"
         },
         "data_description": {
           "soc_min": "La batterie ne se déchargera pas sous ce SOC pendant la plage (plancher 12%).",
@@ -1372,6 +1420,9 @@
       "predictive_charging": {
         "name": "Charge Prédictive"
       },
+      "vacation_mode": {
+        "name": "Mode vacances"
+      },
       "charge_delay": {
         "name": "Délai de Charge"
       },
@@ -1489,6 +1540,15 @@
       "system_daily_home_energy": {
         "name": "Consommation Domestique Quotidienne"
       },
+      "expected_home_consumption_profile": {
+        "name": "Profil de consommation domestique prévu"
+      },
+      "consumption_profile_capture": {
+        "name": "Capture actuelle du profil de consommation"
+      },
+      "daily_operation_timeline": {
+        "name": "Chronologie quotidienne de fonctionnement"
+      },
       "system_pd_control_quality": {
         "name": "Qualité du Contrôle PD",
         "state": {
@@ -1497,6 +1557,7 @@
           "oscillating": "Oscillant",
           "sluggish": "Lent",
           "battery_limited": "Limité par batterie",
+          "blocked": "Bloqué",
           "collecting_data": "Collecte de données"
         }
       },
@@ -1602,6 +1663,9 @@
       },
       "total_discharging_energy": {
         "name": "Énergie de Décharge Totale"
+      },
+      "pv_total_generation": {
+        "name": "Production photovoltaïque totale"
       },
       "total_daily_charging_energy": {
         "name": "Énergie de Charge Journalière"

@@ -48,6 +48,12 @@ MAX_POWER_BY_VERSION = {
 }
 DEFAULT_VERSION = "v2"
 
+# Maximum number of independently controllable battery devices in one entry.
+# Keep the aggregate system-power slider envelope in sync with the largest
+# supported per-battery power ceiling.
+MAX_BATTERIES = 10
+MAX_SYSTEM_POWER_W = MAX_BATTERIES * max(MAX_POWER_BY_VERSION.values())
+
 # Multi-battery activation thresholds derived from efficiency tables (η external)
 # Crossover = power at which splitting load across 2 batteries becomes more efficient
 # than running a single battery.  Based on Venus efficiency measurements at 2500 W max.
@@ -74,9 +80,39 @@ MULTI_BATTERY_SELECTION_HOLD_SECONDS = 120
 
 # Predictive Grid Charging Configuration
 CONF_ENABLE_PREDICTIVE_CHARGING = "enable_predictive_charging"
+# A manual, persistent learning pause. The exact affected periods and the
+# measured overnight baseline live in ConsumptionTracker's Store; this flag is
+# kept in the entry so the switch restores before the first control cycle.
+CONF_VACATION_MODE_ENABLED = "vacation_mode_enabled"
 CONF_CHARGING_TIME_SLOT = "charging_time_slot"
 CONF_SOLAR_FORECAST_SENSOR = "solar_forecast_sensor"
+# Explicit post-now forecast.  The old key remains a whole-day ``today`` value
+# for backwards compatibility and must not be silently reinterpreted.
+CONF_SOLAR_FORECAST_REMAINING_SENSOR = "solar_forecast_remaining_sensor"
 CONF_SOLAR_PRODUCTION_SENSOR = "solar_production_sensor"
+# Temporal solar profile.  The normal behaviour is automatic: the learned
+# curve takes over once it is mature, and the historical sinusoid remains the
+# safe fallback while it learns.  ``shadow`` is retained only as a legacy
+# value so existing config entries can be normalized without data loss.
+CONF_SOLAR_PROFILE_MODE = "solar_profile_mode"
+SOLAR_PROFILE_MODE_OFF = "off"
+SOLAR_PROFILE_MODE_SHADOW = "shadow"
+SOLAR_PROFILE_MODE_ACTIVE = "active"
+SOLAR_PROFILE_MODES = (
+    SOLAR_PROFILE_MODE_OFF,
+    SOLAR_PROFILE_MODE_SHADOW,
+    SOLAR_PROFILE_MODE_ACTIVE,
+)
+DEFAULT_SOLAR_PROFILE_MODE = SOLAR_PROFILE_MODE_ACTIVE
+
+
+def normalize_solar_profile_mode(mode: str | None) -> str:
+    """Normalize legacy rollout values to the current automatic behaviour."""
+    if mode == SOLAR_PROFILE_MODE_OFF:
+        return SOLAR_PROFILE_MODE_OFF
+    return SOLAR_PROFILE_MODE_ACTIVE
+
+
 CONF_HOUSEHOLD_CONSUMPTION_SENSOR = "household_consumption_sensor"  # legacy; migrated out in v6
 CONF_MAX_CONTRACTED_POWER = "max_contracted_power"
 
@@ -325,10 +361,17 @@ SLOW_SENSOR_WARNING_INTERVAL_S = 10.0
 # shorten the promised tolerance.
 MAX_SENSOR_STALE_S = 65.0
 
-# Consecutive real main-sensor intervals at the same cadence class before creating
-# or clearing the slow-sensor repair. Debouncing prevents a single outage/restart
-# gap from flagging an otherwise fast sensor.
+# Consecutive slow main-sensor intervals before the slow-sensor repair is raised.
+# Debouncing prevents a single outage/restart gap from flagging an otherwise fast
+# sensor. Clearing uses SLOW_SENSOR_RECOVERY_INTERVALS instead.
 SLOW_SENSOR_WARN_INTERVALS = 3
+
+# Consecutive fast intervals before an existing slow-sensor repair is cleared.
+# Deliberately much longer than SLOW_SENSOR_WARN_INTERVALS: clearing is the
+# hysteresis side, and a sensor hovering around the threshold would otherwise
+# create and delete the repair over and over. At a 3 s meter this is about a
+# minute of sustained fast cadence.
+SLOW_SENSOR_RECOVERY_INTERVALS = 20
 
 # How often the dynamic-pricing handler re-parses the price sensor purely to
 # refresh _price_data_status for the health check. The parse itself is cheap but
@@ -774,6 +817,7 @@ NORDPOOL_REFRESH_MINUTES = 60
 # Marker for CONFIG_NUMBER_DEFINITIONS entries whose slider bounds are derived
 # at runtime; the authored min/max become the fallback.
 DYNAMIC_BOUNDS_SYSTEM_POWER = "system_power"
+DYNAMIC_BOUNDS_SYSTEM_POWER_CAP = "system_power_cap"
 
 # Configuration Number Definitions (for config entities exposed in the UI)
 CONFIG_NUMBER_DEFINITIONS = [
@@ -893,29 +937,37 @@ CONFIG_NUMBER_DEFINITIONS = [
         "key": CONF_SYSTEM_MAX_CHARGE_POWER,
         "name": "System Max Charge Power",
         "min": 0,
-        "max": 15000,
+        # Fallback only; the live maximum is the configured sum of charge
+        # limits, so batteries with 4 kW (or higher) ceilings are supported.
+        "max": MAX_SYSTEM_POWER_W,
         "step": 50,
         "unit": "W",
         "default": DEFAULT_SYSTEM_MAX_CHARGE_POWER,
         "icon": "mdi:battery-arrow-up-outline",
         "condition": CONF_ENABLE_SYSTEM_POWER_LIMITS,
+        "dynamic_bounds": DYNAMIC_BOUNDS_SYSTEM_POWER_CAP,
+        "power_direction": "charge",
     },
     {
         "key": CONF_SYSTEM_MAX_DISCHARGE_POWER,
         "name": "System Max Discharge Power",
         "min": 0,
-        "max": 15000,
+        # Fallback only; the live maximum is the configured sum of discharge
+        # limits, so batteries with 4 kW (or higher) ceilings are supported.
+        "max": MAX_SYSTEM_POWER_W,
         "step": 50,
         "unit": "W",
         "default": DEFAULT_SYSTEM_MAX_DISCHARGE_POWER,
         "icon": "mdi:battery-arrow-down-outline",
         "condition": CONF_ENABLE_SYSTEM_POWER_LIMITS,
+        "dynamic_bounds": DYNAMIC_BOUNDS_SYSTEM_POWER_CAP,
+        "power_direction": "discharge",
     },
     {
         "key": CONF_MAX_CONTRACTED_POWER,
         "name": "Max Contracted Power",
         "min": 1000,
-        "max": 15000,
+        "max": 20000,
         "step": 100,
         "unit": "W",
         "default": 7000,

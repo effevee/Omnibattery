@@ -12,6 +12,10 @@
       "title": "Solar forecast unusable",
       "description": "The configured solar forecast sensor {sensor} has been unavailable or unreadable for over {minutes} minutes. Omnibattery keeps running, but every feature that depends on the forecast is now blind: the charge delay unlocks for the rest of the day, grid-charge decisions assume no sun at all and may book grid slots you do not need, and remaining-solar estimates read as 0 kWh. Check the sensor or the integration that provides it."
     },
+    "solar_forecast_remaining_recommended": {
+      "title": "Use a remaining solar forecast",
+      "description": "{sensor} is a legacy whole-day solar forecast. Omnibattery still supports it, but past forecast errors can make intraday decisions inaccurate. Configure the provider's \"remaining today\" forecast sensor in Omnibattery options for a more accurate remaining-solar calculation."
+    },
     "three_phase_manual_mode": {
       "title": "Three-phase protection can be bypassed by manual commands",
       "description": "Three-phase protection is enabled, but manual register or manual time-slot commands can write directly to a battery without the automatic phase envelope. Keep those commands within the configured phase limits."
@@ -28,7 +32,8 @@
         "description": "Select the sensor that measures grid import/export power. Optionally, configure the solar forecast sensor for advanced features.",
         "data": {
           "consumption_sensor": "Grid consumption sensor",
-          "solar_forecast_sensor": "Solar forecast sensor (optional)",
+          "solar_forecast_sensor": "Whole-day solar forecast sensor (legacy)",
+          "solar_forecast_remaining_sensor": "Solar forecast remaining today sensor (recommended)",
           "solar_production_sensor": "Solar production sensor (optional)",
           "meter_inverted": "Inverted meter sign",
           "max_contracted_power": "Maximum contracted power (W)",
@@ -36,7 +41,8 @@
         },
         "data_description": {
           "consumption_sensor": "Real-time sensor for imported (+) or exported (-) grid power. Updates every 1-2 seconds are recommended. Slower sensors are accepted, but delayed readings reduce regulation quality; the latest reading is followed for up to 65 seconds.",
-          "solar_forecast_sensor": "Sensor providing solar production forecast in kWh (e.g., Solcast). If configured here, it will be used automatically for predictive charging and solar charge delay.",
+          "solar_forecast_sensor": "Legacy sensor providing the whole-day solar forecast. Existing installations can keep using it during the transition; prefer Remaining Today for new configurations.",
+          "solar_forecast_remaining_sensor": "Sensor providing solar production still expected today in kWh. Saving it replaces the legacy whole-day forecast and it is never reduced by production already measured.",
           "solar_production_sensor": "Real-time PV production power sensor (W/kW) from an external inverter not wired through the battery MPPT inputs. Used to show the Solar node in the dashboard energy-flow diagram. Leave empty if your panels feed the battery MPPT directly.",
           "meter_inverted": "Enable this option if your meter uses the opposite convention: positive = export, negative = import. The unit (W/kW) is detected automatically.",
           "max_contracted_power": "Total contracted power in watts. System won't exceed this limit when charging to avoid tripping the breaker",
@@ -165,7 +171,7 @@
           "full_charge_voltage_taper_enabled": "When the target is 100%, limit charge to 200 W from 3.48 V max cell voltage. Venus E models stop at 3.60 V to measure imbalance after 60 seconds; Venus A/D with coupled packs keep charging at 200 W until the BMS cuts off.",
           "battery_capacity_kwh": "Nominal usable capacity of the battery pack. Used to calculate stored energy and efficiency from SOC. Sessy requires its actual capacity; for other batteries, leave at 0 if unknown.",
           "battery_phase": "Physical AC phase (L1/L2/L3) where this battery is wired, or Unassigned when it is outside the protected phase layout. An unassigned battery is outside the three-phase envelope and continues normal automatic operation.",
-          "track_mac": "The MAC address is the battery's permanent hardware address: unlike the IP address above, it never changes. Home Assistant uses it to find the battery again and update the IP address by itself.",
+          "track_mac": "The MAC address is the battery's permanent hardware address: unlike the IP address above, it never changes. Home Assistant uses it to find the battery again and update the IP address by itself. Behind a Wi-Fi-to-LAN bridge or a powerline adapter the address you see is the adapter's own, shared with everything behind it, so tracking only works while a single battery sits behind that adapter.",
           "mac": "Permanent hardware address of the interface the battery uses on your network. Take it from your router's device list: a battery can report a different MAC than the one its wired interface actually uses. Filled in automatically when Home Assistant's DHCP cache is available."
         }
       },
@@ -229,7 +235,23 @@
           "battery_6__soc_min": "Battery 6 — Min SOC (%)",
           "battery_6__soc_max": "Battery 6 — Max SOC (%)",
           "battery_6__max_charge_power_w": "Battery 6 — Max charge power",
-          "battery_6__max_discharge_power_w": "Battery 6 — Max discharge power"
+          "battery_6__max_discharge_power_w": "Battery 6 — Max discharge power",
+          "battery_7__soc_min": "Battery 7 — Min SOC (%)",
+          "battery_7__soc_max": "Battery 7 — Max SOC (%)",
+          "battery_7__max_charge_power_w": "Battery 7 — Max charge power",
+          "battery_7__max_discharge_power_w": "Battery 7 — Max discharge power",
+          "battery_8__soc_min": "Battery 8 — Min SOC (%)",
+          "battery_8__soc_max": "Battery 8 — Max SOC (%)",
+          "battery_8__max_charge_power_w": "Battery 8 — Max charge power",
+          "battery_8__max_discharge_power_w": "Battery 8 — Max discharge power",
+          "battery_9__soc_min": "Battery 9 — Min SOC (%)",
+          "battery_9__soc_max": "Battery 9 — Max SOC (%)",
+          "battery_9__max_charge_power_w": "Battery 9 — Max charge power",
+          "battery_9__max_discharge_power_w": "Battery 9 — Max discharge power",
+          "battery_10__soc_min": "Battery 10 — Min SOC (%)",
+          "battery_10__soc_max": "Battery 10 — Max SOC (%)",
+          "battery_10__max_charge_power_w": "Battery 10 — Max charge power",
+          "battery_10__max_discharge_power_w": "Battery 10 — Max discharge power"
         }
       },
       "add_more_slots": {
@@ -582,6 +604,13 @@
           "slave_id": "Modbus slave/unit id (default 1)"
         }
       },
+          "reconfigure_battery_huawei_slave": {
+            "title": "Reconfigure battery {battery_num} — Which inverter?",
+            "description": "{count} inverters with a battery answered on this bus. Pick the one this battery belongs to.",
+            "data": {
+              "slave_id": "Inverter"
+            }
+          },
         "reconfigure_battery_huawei": {
           "title": "Reconfigure battery {battery_num} — Connection (Huawei)",
           "description": "Update the Modbus access and the Huawei Solar battery device for battery {battery_num}. All other settings are preserved.",
@@ -694,6 +723,7 @@
     },
     "abort": {
       "ip_updated": "The battery's IP address changed; the connection was updated automatically.",
+      "candidate_silent": "A new IP address was announced for this battery, but nothing answered there; the connection was left unchanged.",
       "no_tracked_battery": "No configured battery is tracked by this device's MAC address.",
       "already_configured": "This integration is already configured.",
       "reconfigure_successful": "Battery connection settings updated successfully.",
@@ -726,7 +756,8 @@
         "description": "Configure the sensors used by the integration.",
         "data": {
           "consumption_sensor": "Grid consumption sensor",
-          "solar_forecast_sensor": "Solar forecast sensor (optional)",
+          "solar_forecast_sensor": "Whole-day solar forecast sensor (legacy)",
+          "solar_forecast_remaining_sensor": "Solar forecast remaining today sensor (recommended)",
           "solar_production_sensor": "Solar production sensor (optional)",
           "meter_inverted": "Inverted meter sign",
           "max_contracted_power": "Maximum contracted power (W)",
@@ -734,7 +765,8 @@
         },
         "data_description": {
           "consumption_sensor": "Real-time sensor for imported (+) or exported (-) grid power. Updates every 1-2 seconds are recommended. Slower sensors are accepted, but delayed readings reduce regulation quality; the latest reading is followed for up to 65 seconds.",
-          "solar_forecast_sensor": "Sensor providing solar production forecast in kWh (e.g., Solcast). If configured here, it will be used automatically for predictive charging and solar charge delay.",
+          "solar_forecast_sensor": "Legacy sensor providing the whole-day solar forecast. Existing installations can keep using it during the transition; prefer Remaining Today for new configurations.",
+          "solar_forecast_remaining_sensor": "Sensor providing solar production still expected today in kWh. Saving it replaces the legacy whole-day forecast and it is never reduced by production already measured.",
           "solar_production_sensor": "Real-time PV production power sensor (W/kW) from an external inverter not wired through the battery MPPT inputs. Used to show the Solar node in the dashboard energy-flow diagram. Leave empty if your panels feed the battery MPPT directly.",
           "meter_inverted": "Enable this option if your meter uses the opposite convention: positive = export, negative = import. The unit (W/kW) is detected automatically.",
           "max_contracted_power": "Total contracted power in watts. System won't exceed this limit when charging to avoid tripping the breaker",
@@ -857,7 +889,7 @@
           "full_charge_voltage_taper_enabled": "When the target is 100%, limit charge to 200 W from 3.48 V max cell voltage. Venus E models stop at 3.60 V to measure imbalance after 60 seconds; Venus A/D with coupled packs keep charging at 200 W until the BMS cuts off.",
           "battery_capacity_kwh": "Nominal usable capacity of the battery pack. Used to calculate stored energy and efficiency from SOC. Sessy requires its actual capacity; for other batteries, leave at 0 if unknown.",
           "battery_phase": "Physical AC phase (L1/L2/L3) where this battery is wired, or Unassigned when it is outside the protected phase layout. An unassigned battery is outside the three-phase envelope and continues normal automatic operation.",
-          "track_mac": "The MAC address is the battery's permanent hardware address: unlike the IP address above, it never changes. Home Assistant uses it to find the battery again and update the IP address by itself.",
+          "track_mac": "The MAC address is the battery's permanent hardware address: unlike the IP address above, it never changes. Home Assistant uses it to find the battery again and update the IP address by itself. Behind a Wi-Fi-to-LAN bridge or a powerline adapter the address you see is the adapter's own, shared with everything behind it, so tracking only works while a single battery sits behind that adapter.",
           "mac": "Permanent hardware address of the interface the battery uses on your network. Take it from your router's device list: a battery can report a different MAC than the one its wired interface actually uses. Filled in automatically when Home Assistant's DHCP cache is available."
         }
       },
@@ -921,7 +953,23 @@
           "battery_6__soc_min": "Battery 6 — Min SOC (%)",
           "battery_6__soc_max": "Battery 6 — Max SOC (%)",
           "battery_6__max_charge_power_w": "Battery 6 — Max charge power",
-          "battery_6__max_discharge_power_w": "Battery 6 — Max discharge power"
+          "battery_6__max_discharge_power_w": "Battery 6 — Max discharge power",
+          "battery_7__soc_min": "Battery 7 — Min SOC (%)",
+          "battery_7__soc_max": "Battery 7 — Max SOC (%)",
+          "battery_7__max_charge_power_w": "Battery 7 — Max charge power",
+          "battery_7__max_discharge_power_w": "Battery 7 — Max discharge power",
+          "battery_8__soc_min": "Battery 8 — Min SOC (%)",
+          "battery_8__soc_max": "Battery 8 — Max SOC (%)",
+          "battery_8__max_charge_power_w": "Battery 8 — Max charge power",
+          "battery_8__max_discharge_power_w": "Battery 8 — Max discharge power",
+          "battery_9__soc_min": "Battery 9 — Min SOC (%)",
+          "battery_9__soc_max": "Battery 9 — Max SOC (%)",
+          "battery_9__max_charge_power_w": "Battery 9 — Max charge power",
+          "battery_9__max_discharge_power_w": "Battery 9 — Max discharge power",
+          "battery_10__soc_min": "Battery 10 — Min SOC (%)",
+          "battery_10__soc_max": "Battery 10 — Max SOC (%)",
+          "battery_10__max_charge_power_w": "Battery 10 — Max charge power",
+          "battery_10__max_discharge_power_w": "Battery 10 — Max discharge power"
         }
       },
       "add_more_slots": {
@@ -1387,6 +1435,9 @@
       "predictive_charging": {
         "name": "Predictive Charging"
       },
+      "vacation_mode": {
+        "name": "Vacation Mode"
+      },
       "charge_delay": {
         "name": "Charge Delay"
       },
@@ -1486,6 +1537,15 @@
       "system_daily_home_energy": {
         "name": "Daily Home Consumption"
       },
+      "expected_home_consumption_profile": {
+        "name": "Expected Home Consumption Profile"
+      },
+      "consumption_profile_capture": {
+        "name": "Current Consumption Profile Capture"
+      },
+      "daily_operation_timeline": {
+        "name": "Daily Operation Timeline"
+      },
       "home_consumption": {
         "name": "Home Consumption"
       },
@@ -1497,6 +1557,7 @@
           "oscillating": "Oscillating",
           "sluggish": "Sluggish",
           "battery_limited": "Battery limited",
+          "blocked": "Blocked",
           "collecting_data": "Collecting data"
         }
       },
@@ -1599,6 +1660,9 @@
       },
       "total_discharging_energy": {
         "name": "Total Discharging Energy"
+      },
+      "pv_total_generation": {
+        "name": "PV Total Generation"
       },
       "total_daily_charging_energy": {
         "name": "Total Daily Charging Energy"
@@ -2178,6 +2242,11 @@
       "reevaluate_dynamic_pricing": {
         "name": "Re-evaluate Dynamic Pricing"
       }
+    }
+  },
+  "exceptions": {
+    "manual_control_required": {
+      "message": "{battery} is under automatic control, so Force Mode and the charge/discharge setpoints are rewritten every control cycle. Enable Manual Mode (system-wide or for this battery) before commanding it directly."
     }
   }
 }

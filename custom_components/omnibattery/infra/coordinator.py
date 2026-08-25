@@ -154,6 +154,7 @@ class MarstekVenusDataUpdateCoordinator(DataUpdateCoordinator):
         self.serial_port = serial_port
         self.consumption_sensor = consumption_sensor
         self.brand = brand
+        self.zendure_model = zendure_model
         if self.brand in ("zendure", "anker", "hoymiles", "huawei"):
             full_charge_voltage_taper_enabled = False
 
@@ -619,9 +620,81 @@ class MarstekVenusDataUpdateCoordinator(DataUpdateCoordinator):
         """Connect to the battery via the driver."""
         connected = await self.driver.connect()
         if connected:
+            sync_model = getattr(self, "_sync_detected_zendure_model", None)
+            if sync_model is not None:
+                sync_model()
             self._is_connected = True
             self._consecutive_failures = 0
         return connected
+
+    def _sync_detected_zendure_model(self) -> None:
+        """Promote legacy Zendure entries when the device reports a new profile."""
+        if getattr(self, "brand", None) != "zendure":
+            return
+        detected_model = getattr(self.driver, "model_key", None)
+        if not detected_model:
+            return
+
+        driver_caps = self.driver.capabilities
+        model_changed = detected_model != getattr(self, "zendure_model", None)
+        charge_cap_changed = (
+            self.device_max_charge_power != driver_caps.max_charge_power_w
+        )
+        discharge_cap_changed = (
+            self.device_max_discharge_power != driver_caps.max_discharge_power_w
+        )
+        if not (model_changed or charge_cap_changed or discharge_cap_changed):
+            return
+
+        if model_changed:
+            self.zendure_model = detected_model
+            driver_definitions = getattr(self.driver, "all_definitions", None)
+            if driver_definitions is not None:
+                self._def_by_key = {d["key"]: d for d in driver_definitions}
+            self.persist_battery_config("zendure_model", detected_model)
+        if charge_cap_changed:
+            self.device_max_charge_power = driver_caps.max_charge_power_w
+            self.persist_battery_config(
+                "device_max_charge_power", driver_caps.max_charge_power_w
+            )
+        if discharge_cap_changed:
+            self.device_max_discharge_power = driver_caps.max_discharge_power_w
+            self.persist_battery_config(
+                "device_max_discharge_power", driver_caps.max_discharge_power_w
+            )
+        _LOGGER.info(
+            "[%s] Synchronized Zendure device profile %s (%d W charge / %d W discharge)",
+            self.name,
+            detected_model,
+            self.device_max_charge_power,
+            self.device_max_discharge_power,
+        )
+
+    def _sync_zendure_inverse_max_power(self) -> None:
+        """Keep Zendure's reported inverter cap on the canonical control path."""
+        if getattr(self, "brand", None) != "zendure" or not self.data:
+            return
+        reported_limit = self.data.get("inverse_max_power")
+        if reported_limit is None:
+            return
+        try:
+            reported_limit = int(reported_limit)
+        except (TypeError, ValueError):
+            return
+        if reported_limit <= 0:
+            return
+        if reported_limit == self.configured_max_discharge_power:
+            return
+
+        old_limit = self.effective_max_discharge_power
+        self.configured_max_discharge_power = reported_limit
+        self.persist_battery_config("max_discharge_power", reported_limit)
+        _LOGGER.info(
+            "[%s] Synchronized Zendure inverseMaxPower %d W → %d W",
+            self.name,
+            old_limit,
+            self.effective_max_discharge_power,
+        )
 
     async def disconnect(self) -> None:
         """Disconnect from the battery via the driver."""
@@ -649,6 +722,9 @@ class MarstekVenusDataUpdateCoordinator(DataUpdateCoordinator):
             connected = await self.driver.connect()
 
             if connected:
+                sync_model = getattr(self, "_sync_detected_zendure_model", None)
+                if sync_model is not None:
+                    sync_model()
                 self._consecutive_failures = 0
                 self._is_connected = True
                 self._suspension_reset_time = None
@@ -1064,6 +1140,15 @@ class MarstekVenusDataUpdateCoordinator(DataUpdateCoordinator):
 
         # Update the coordinator's data
         self.data.update(updated_data)
+
+        # Zendure names its writable discharge ceiling ``inverseMaxPower``.
+        # Treat the reported value like the canonical max_discharge_power used
+        # by register-backed drivers so an existing 4000 W device setting repairs
+        # a legacy 2400 W config entry immediately after startup, without requiring
+        # the user to move the number entity once after upgrading.
+        sync_inverse_max = getattr(self, "_sync_zendure_inverse_max_power", None)
+        if sync_inverse_max is not None:
+            sync_inverse_max()
 
         # Drivers without a hardware nominal-capacity value (Zendure and Sessy)
         # need the configured value surfaced as battery_total_energy so stored

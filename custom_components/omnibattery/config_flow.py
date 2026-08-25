@@ -38,6 +38,7 @@ from homeassistant.helpers.selector import (
 )
 
 from .infra.mac_tracking import (
+    CANDIDATE_SILENT,
     CONF_MAC,
     CONF_TRACK_MAC,
     detect_mac,
@@ -54,11 +55,13 @@ from .config_backup import (
     async_load_config_backup,
     async_restore_config_backup,
 )
+from .solar_forecast import normalize_solar_forecast_config
 from .const import (
     DOMAIN,
     CONF_ENABLE_PREDICTIVE_CHARGING,
     CONF_CHARGING_TIME_SLOT,
     CONF_SOLAR_FORECAST_SENSOR,
+    CONF_SOLAR_FORECAST_REMAINING_SENSOR,
     CONF_SOLAR_PRODUCTION_SENSOR,
     CONF_MAX_CONTRACTED_POWER,
     CONF_THREE_PHASE_ENABLED,
@@ -88,6 +91,7 @@ from .const import (
     CONF_SERIAL_PORT,
     DEFAULT_VERSION,
     MAX_POWER_BY_VERSION,
+    MAX_BATTERIES,
     CONF_ENABLE_SYSTEM_POWER_LIMITS,
     CONF_CAPACITY_PROTECTION_ENABLED,
     CONF_CAPACITY_PROTECTION_EXCLUDED_DEVICES,
@@ -718,6 +722,19 @@ def _battery_scope_options(battery_configs: list[dict]) -> list[dict]:
     return opts
 
 
+def _battery_count_schema(default: int = 1) -> vol.Schema:
+    """Build the shared selector for the number of controllable batteries."""
+    return vol.Schema(
+        {
+            vol.Required("num_batteries", default=default): NumberSelector(
+                NumberSelectorConfig(
+                    min=1, max=MAX_BATTERIES, mode=NumberSelectorMode.SLIDER
+                )
+            )
+        }
+    )
+
+
 def _scope_value_in_options(scope: str, opts: list[dict]) -> bool:
     return any(o["value"] == scope for o in opts)
 
@@ -950,8 +967,20 @@ def _parse_step_b_battery_limits(step_b: dict | None) -> dict[str, dict]:
     return out
 
 
-def _finalize_slot(step_a: dict, step_b: dict | None) -> dict:
-    """Merge step A and optional step B into the persisted slot shape."""
+def _finalize_slot(
+    step_a: dict, step_b: dict | None, existing: dict | None = None
+) -> dict:
+    """Merge step A and optional step B into the persisted slot shape.
+
+    ``existing`` is the stored slot occupying this position, when there is one.
+    Every stored key the form does not emit — today that is ``enabled``, written
+    by the per-slot enable switch — is carried over from it, so re-saving the
+    flow does not reset it to its default.
+
+    The carry-over only happens when the form still describes the same schedule.
+    Editing a slot into a different window replaces it, and a replacement must
+    not inherit a disabled state that has no form field to reveal it.
+    """
     soc_on = bool(step_a.get("soc_override_enabled", False))
     power_on = bool(step_a.get("power_override_enabled", False))
     parsed = _parse_step_b_battery_limits(step_b) if (soc_on or power_on) else {}
@@ -971,11 +1000,10 @@ def _finalize_slot(step_a: dict, step_b: dict | None) -> dict:
                 entry["max_discharge_power_w"] = limits["max_discharge_power_w"]
         if entry:
             battery_limits[b_key] = entry
-    return {
+    slot = {
         "start_time": step_a["start_time"],
         "end_time": step_a["end_time"],
         "days": step_a["days"],
-        "enabled": True,
         "battery_scope": step_a.get("battery_scope", SLOT_BATTERY_SCOPE_ALL),
         "allow_charge": bool(step_a.get("allow_charge", False)),
         "allow_discharge": bool(step_a.get("allow_discharge", True)),
@@ -984,6 +1012,13 @@ def _finalize_slot(step_a: dict, step_b: dict | None) -> dict:
         "battery_limits": battery_limits,
         "mode": step_a.get("mode", DEFAULT_SLOT_MODE),
     }
+    identity = ("start_time", "end_time", "days", "battery_scope")
+    replaces_same_slot = bool(existing) and all(
+        existing.get(key) == slot[key] for key in identity
+    )
+    merged = {**existing, **slot} if replaces_same_slot else dict(slot)
+    merged.setdefault("enabled", True)
+    return merged
 
 
 
@@ -1076,14 +1111,21 @@ class MarstekVenusConfigFlow(LegacyDomainMigrationMixin, ConfigFlow, domain=DOMA
         slave_id: int = DEFAULT_SLAVE_ID,
         brand: str = "marstek",
         serial_port: str | None = None,
+        username: str = "",
+        password: str = "",
     ) -> bool:
-        """Test connection to a battery."""
+        """Test connection to a battery.
+
+        ``username`` and ``password`` are only read for Sessy, whose local API
+        can require authentication: probing it with empty credentials returns a
+        refusal that is indistinguishable from an absent device (#289).
+        """
         if brand == "zendure":
             _LOGGER.info("Probing Zendure device at %s:%s", host, port)
             result, _ = await ZendureLocalDriver.probe(host, port)
         elif brand == "sessy":
             _LOGGER.info("Probing Sessy device at %s:%s", host, port)
-            result = await SessyLocalDriver.probe(host, port)
+            result = await SessyLocalDriver.probe(host, port, username, password)
         elif brand == "anker":
             _LOGGER.info("Probing Anker Solarbank at %s:%s slave %s", host, port, slave_id)
             result, _ = await AnkerModbusDriver.probe(host, port, slave_id)
@@ -1122,16 +1164,23 @@ class MarstekVenusConfigFlow(LegacyDomainMigrationMixin, ConfigFlow, domain=DOMA
         errors = {}
 
         if user_input is not None:
-            # Validate solar forecast sensor if provided
+            # The old field remains explicitly whole-day; the new field is the
+            # provider's post-now value. Saving it replaces the legacy whole-day
+            # value instead of persisting both forecast horizons.
             forecast_sensor = user_input.get(CONF_SOLAR_FORECAST_SENSOR)
-            if forecast_sensor:
-                forecast_state = self.hass.states.get(forecast_sensor)
-                if forecast_state is None:
-                    errors["solar_forecast_sensor"] = "sensor_not_found"
-                else:
-                    unit = forecast_state.attributes.get("unit_of_measurement", "")
-                    if unit not in ["kWh", "Wh"]:
-                        errors["solar_forecast_sensor"] = "invalid_unit"
+            remaining_sensor = user_input.get(CONF_SOLAR_FORECAST_REMAINING_SENSOR)
+            forecast_candidates = (
+                ((CONF_SOLAR_FORECAST_REMAINING_SENSOR, remaining_sensor),)
+                if remaining_sensor
+                else ((CONF_SOLAR_FORECAST_SENSOR, forecast_sensor),)
+            )
+            for key, sensor in forecast_candidates:
+                if sensor:
+                    forecast_state = self.hass.states.get(sensor)
+                    if forecast_state is None:
+                        errors[key] = "sensor_not_found"
+                    elif forecast_state.attributes.get("unit_of_measurement", "") not in ["kWh", "Wh"]:
+                        errors[key] = "invalid_unit"
 
             # Validate solar production sensor if provided
             solar_sensor = user_input.get(CONF_SOLAR_PRODUCTION_SENSOR)
@@ -1146,7 +1195,12 @@ class MarstekVenusConfigFlow(LegacyDomainMigrationMixin, ConfigFlow, domain=DOMA
 
             if not errors:
                 self.config_data["consumption_sensor"] = user_input["consumption_sensor"]
-                self.config_data[CONF_SOLAR_FORECAST_SENSOR] = forecast_sensor
+                if remaining_sensor:
+                    self.config_data.pop(CONF_SOLAR_FORECAST_SENSOR, None)
+                    self.config_data[CONF_SOLAR_FORECAST_REMAINING_SENSOR] = remaining_sensor
+                else:
+                    self.config_data[CONF_SOLAR_FORECAST_SENSOR] = forecast_sensor
+                    self.config_data[CONF_SOLAR_FORECAST_REMAINING_SENSOR] = None
                 self.config_data[CONF_SOLAR_PRODUCTION_SENSOR] = solar_sensor
                 self.config_data[CONF_METER_INVERTED] = user_input.get(CONF_METER_INVERTED, False)
                 self.config_data["max_contracted_power"] = user_input["max_contracted_power"]
@@ -1168,10 +1222,12 @@ class MarstekVenusConfigFlow(LegacyDomainMigrationMixin, ConfigFlow, domain=DOMA
                     vol.Required("max_contracted_power", default=7000):
                         NumberSelector(
                             NumberSelectorConfig(
-                                min=1000, max=15000, step=100, mode=NumberSelectorMode.BOX
+                                min=1000, max=20000, step=100, mode=NumberSelectorMode.BOX
                             )
                         ),
                     vol.Optional(CONF_SOLAR_FORECAST_SENSOR):
+                        EntitySelector(EntitySelectorConfig(domain="sensor")),
+                    vol.Optional(CONF_SOLAR_FORECAST_REMAINING_SENSOR):
                         EntitySelector(EntitySelectorConfig(domain="sensor")),
                     vol.Optional(CONF_SOLAR_PRODUCTION_SENSOR):
                         EntitySelector(EntitySelectorConfig(domain="sensor")),
@@ -1257,16 +1313,7 @@ class MarstekVenusConfigFlow(LegacyDomainMigrationMixin, ConfigFlow, domain=DOMA
 
         return self.async_show_form(
             step_id="batteries",
-            data_schema=vol.Schema(
-                {
-                    vol.Required("num_batteries", default=1):
-                        NumberSelector(
-                            NumberSelectorConfig(
-                                min=1, max=6, mode=NumberSelectorMode.SLIDER
-                            )
-                        ),
-                }
-            ),
+            data_schema=_battery_count_schema(),
         )
 
     async def async_step_battery_brand(
@@ -2251,12 +2298,15 @@ class MarstekVenusConfigFlow(LegacyDomainMigrationMixin, ConfigFlow, domain=DOMA
         """Step 11a: Configure time slot predictive grid charging."""
         errors = {}
         # Check if solar forecast sensor was already configured in step 1
-        has_global_sensor = bool(self.config_data.get(CONF_SOLAR_FORECAST_SENSOR))
+        has_global_sensor = bool(
+            self.config_data.get(CONF_SOLAR_FORECAST_REMAINING_SENSOR)
+            or self.config_data.get(CONF_SOLAR_FORECAST_SENSOR)
+        )
 
         if user_input is not None:
                 try:
                     if has_global_sensor:
-                        forecast_sensor = self.config_data[CONF_SOLAR_FORECAST_SENSOR]
+                        forecast_sensor = self.config_data.get(CONF_SOLAR_FORECAST_SENSOR)
                     else:
                         forecast_sensor = user_input.get("solar_forecast_sensor")
                         if forecast_sensor:
@@ -2295,7 +2345,6 @@ class MarstekVenusConfigFlow(LegacyDomainMigrationMixin, ConfigFlow, domain=DOMA
         schema_dict[vol.Optional(CONF_PREDICTIVE_GRID_CHARGE_MARGIN_PCT, default=DEFAULT_PREDICTIVE_GRID_CHARGE_MARGIN_PCT)] = NumberSelector(
             NumberSelectorConfig(min=0, max=100, step=5, unit_of_measurement="%", mode=NumberSelectorMode.BOX)
         )
-
         return self.async_show_form(
             step_id="predictive_charging_config",
             data_schema=vol.Schema(schema_dict),
@@ -2307,7 +2356,10 @@ class MarstekVenusConfigFlow(LegacyDomainMigrationMixin, ConfigFlow, domain=DOMA
     ) -> FlowResult:
         """Step 11b: Configure dynamic pricing predictive grid charging."""
         errors = {}
-        has_global_sensor = bool(self.config_data.get(CONF_SOLAR_FORECAST_SENSOR))
+        has_global_sensor = bool(
+            self.config_data.get(CONF_SOLAR_FORECAST_REMAINING_SENSOR)
+            or self.config_data.get(CONF_SOLAR_FORECAST_SENSOR)
+        )
 
         if user_input is not None:
             try:
@@ -2356,7 +2408,7 @@ class MarstekVenusConfigFlow(LegacyDomainMigrationMixin, ConfigFlow, domain=DOMA
 
                 # Validate solar forecast sensor if not global
                 if has_global_sensor:
-                    forecast_sensor = self.config_data[CONF_SOLAR_FORECAST_SENSOR]
+                    forecast_sensor = self.config_data.get(CONF_SOLAR_FORECAST_SENSOR)
                 else:
                     forecast_sensor = user_input.get("solar_forecast_sensor")
                     if forecast_sensor:
@@ -2497,7 +2549,10 @@ class MarstekVenusConfigFlow(LegacyDomainMigrationMixin, ConfigFlow, domain=DOMA
     ) -> FlowResult:
         """Step 11d: Configure real-time price charging mode."""
         errors = {}
-        has_global_sensor = bool(self.config_data.get(CONF_SOLAR_FORECAST_SENSOR))
+        has_global_sensor = bool(
+            self.config_data.get(CONF_SOLAR_FORECAST_REMAINING_SENSOR)
+            or self.config_data.get(CONF_SOLAR_FORECAST_SENSOR)
+        )
 
         if user_input is not None:
             try:
@@ -2507,7 +2562,7 @@ class MarstekVenusConfigFlow(LegacyDomainMigrationMixin, ConfigFlow, domain=DOMA
                     errors[CONF_PRICE_SENSOR] = "sensor_not_found"
 
                 if has_global_sensor:
-                    forecast_sensor = self.config_data[CONF_SOLAR_FORECAST_SENSOR]
+                    forecast_sensor = self.config_data.get(CONF_SOLAR_FORECAST_SENSOR)
                 else:
                     forecast_sensor = user_input.get("solar_forecast_sensor")
                     if forecast_sensor:
@@ -2559,7 +2614,6 @@ class MarstekVenusConfigFlow(LegacyDomainMigrationMixin, ConfigFlow, domain=DOMA
         schema_dict[vol.Optional(CONF_PREDICTIVE_GRID_CHARGE_MARGIN_PCT, default=DEFAULT_PREDICTIVE_GRID_CHARGE_MARGIN_PCT)] = NumberSelector(
             NumberSelectorConfig(min=0, max=100, step=5, unit_of_measurement="%", mode=NumberSelectorMode.BOX)
         )
-
         return self.async_show_form(
             step_id="realtime_price_config",
             data_schema=vol.Schema(schema_dict),
@@ -2588,7 +2642,10 @@ class MarstekVenusConfigFlow(LegacyDomainMigrationMixin, ConfigFlow, domain=DOMA
         self.config_data.setdefault(CONF_ENABLE_SYSTEM_POWER_LIMITS, False)
         self.config_data.setdefault(CONF_THREE_PHASE_ENABLED, DEFAULT_THREE_PHASE_ENABLED)
         self.config_data[CONF_ENABLE_BALANCE_MONITOR] = True
-        return self.async_create_entry(title="Omnibattery", data=self.config_data)
+        return self.async_create_entry(
+            title="Omnibattery",
+            data=normalize_solar_forecast_config(self.config_data),
+        )
 
     def _migrate_battery_registry_ids(
         self,
@@ -3059,55 +3116,141 @@ class MarstekVenusConfigFlow(LegacyDomainMigrationMixin, ConfigFlow, domain=DOMA
                 )
             else:
                 found = slave_id
+                cascade = []
                 if found is None:
                     candidates = await HuaweiSolarDriver.scan_slave_ids(self.hass, host, port)
                     with_battery = [candidate for candidate in candidates if candidate[2]]
-                    found = with_battery[0][0] if len(with_battery) == 1 else None
+                    if len(with_battery) > 1:
+                        # A cascade is not a failure to connect; only the user
+                        # can say which inverter this battery belongs to.
+                        cascade = with_battery
+                    elif with_battery:
+                        found = with_battery[0][0]
                 ok, model, max_charge, max_discharge, serial, inverter_max = (
                     await HuaweiSolarDriver.probe(self.hass, host, port, found)
                     if found is not None
                     else (False, None, None, None, None, None)
                 )
-                if not ok:
-                    errors["base"] = "cannot_connect"
-                else:
-                    old_host, old_port = current.get(CONF_HOST), current.get(CONF_PORT, 502)
-                    if old_host and (old_host != host or old_port != port):
-                        self._migrate_battery_registry_ids(entry, old_host, old_port, host, port)
-                    updated = dict(current)
-                    updated.update({
+                if cascade:
+                    self._huawei_candidates = cascade
+                    self._huawei_pending = {
                         CONF_NAME: user_input[CONF_NAME],
                         CONF_HOST: host,
                         CONF_PORT: port,
-                        CONF_SLAVE_ID: found,
-                        "brand": "huawei",
                         "huawei_battery_device_id": device_id,
                         "huawei_direct_write": direct_write,
-                        "huawei_model": model,
-                    })
-                    if max_charge:
-                        updated["device_max_charge_power"] = int(max_charge)
-                    if max_discharge:
-                        updated["device_max_discharge_power"] = int(max_discharge)
-                    if inverter_max:
-                        updated["device_inverter_max_power"] = int(inverter_max)
-                    emma = await HuaweiSolarDriver.find_emma_slave_id(self.hass, host, port)
-                    if emma is not None:
-                        updated["huawei_emma_slave_id"] = emma
-                    self._reconfigure_batteries.append(updated)
-                    self.battery_index += 1
-                    if self.battery_index >= len(entry.data.get("batteries", [])):
-                        return self.async_update_reload_and_abort(
-                            entry, data_updates={"batteries": self._reconfigure_batteries}
-                        )
-                    return await self.async_step_reconfigure_battery()
-
+                    }
+                    self._huawei_reconfigure_current = current
+                    return await self.async_step_reconfigure_battery_huawei_slave()
+                if not ok:
+                    errors["base"] = "cannot_connect"
+                elif (
+                    device_id
+                    and serial
+                    and (device_serial := _huawei_inverter_serial(self.hass, device_id))
+                    and serial.upper() not in device_serial.upper()
+                ):
+                    # Same check the setup flow makes: telemetry and commands
+                    # must reach the same inverter, which a cascade can break.
+                    errors["huawei_battery_device"] = "huawei_device_mismatch"
+                else:
+                    return await self._huawei_reconfigure_store(
+                        entry, current, user_input, host, port, found,
+                        model, max_charge, max_discharge, inverter_max,
+                    )
         return self.async_show_form(
             step_id="reconfigure_battery_huawei",
             data_schema=self._huawei_schema(current, self.battery_index + 1),
             errors=errors,
             description_placeholders={"battery_num": str(self.battery_index + 1)},
         )
+
+    async def async_step_reconfigure_battery_huawei_slave(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Pick which inverter of a cascade this battery belongs to."""
+        candidates = getattr(self, "_huawei_candidates", [])
+        if user_input is not None:
+            entry = self._get_reconfigure_entry()
+            current = self._huawei_reconfigure_current
+            pending = self._huawei_pending
+            slave_id = int(user_input[CONF_SLAVE_ID])
+            ok, model, max_charge, max_discharge, serial, inverter_max = (
+                await HuaweiSolarDriver.probe(
+                    self.hass, pending[CONF_HOST], pending[CONF_PORT], slave_id
+                )
+            )
+            if ok:
+                return await self._huawei_reconfigure_store(
+                    entry, current, pending, pending[CONF_HOST], pending[CONF_PORT],
+                    slave_id, model, max_charge, max_discharge, inverter_max,
+                )
+            return self.async_show_form(
+                step_id="reconfigure_battery_huawei_slave",
+                data_schema=self._huawei_slave_schema(candidates),
+                errors={"base": "cannot_connect"},
+                description_placeholders={"count": str(len(candidates))},
+            )
+        return self.async_show_form(
+            step_id="reconfigure_battery_huawei_slave",
+            data_schema=self._huawei_slave_schema(candidates),
+            description_placeholders={"count": str(len(candidates))},
+        )
+
+    async def _huawei_reconfigure_store(
+        self, entry, current, values, host, port, slave_id,
+        model, max_charge, max_discharge, inverter_max,
+    ) -> FlowResult:
+        """Write the updated battery back, carrying its history with it."""
+        old_host = current.get(CONF_HOST)
+        old_port = current.get(CONF_PORT, 502)
+        old_slave = current.get(CONF_SLAVE_ID, DEFAULT_SLAVE_ID)
+        # The slave id is part of a battery's identity, so changing it renames
+        # every entity and the device itself unless the registry follows.
+        if old_host and (old_host != host or old_port != port or old_slave != slave_id):
+            self._migrate_battery_registry_ids(
+                entry, old_host, old_port, host, port, old_slave, slave_id
+            )
+
+        device_id = (
+            values.get("huawei_battery_device_id")
+            or values.get("huawei_battery_device")
+            or ""
+        )
+        updated = dict(current)
+        updated.update({
+            CONF_NAME: values[CONF_NAME],
+            CONF_HOST: host,
+            CONF_PORT: port,
+            CONF_SLAVE_ID: slave_id,
+            "brand": "huawei",
+            "huawei_battery_device_id": device_id,
+            "huawei_direct_write": bool(values.get("huawei_direct_write", False)),
+            "huawei_model": model,
+        })
+        if max_charge:
+            updated["device_max_charge_power"] = int(max_charge)
+        if max_discharge:
+            updated["device_max_discharge_power"] = int(max_discharge)
+        if inverter_max:
+            updated["device_inverter_max_power"] = int(inverter_max)
+
+        # Re-detect rather than carry over: pointed at a different endpoint, a
+        # remembered unit id would have the driver reading a grid meter that is
+        # not there, or worse, some other device answering on that id.
+        emma = await HuaweiSolarDriver.find_emma_slave_id(self.hass, host, port)
+        if emma is not None:
+            updated["huawei_emma_slave_id"] = emma
+        else:
+            updated.pop("huawei_emma_slave_id", None)
+
+        self._reconfigure_batteries.append(updated)
+        self.battery_index += 1
+        if self.battery_index >= len(entry.data.get("batteries", [])):
+            return self.async_update_reload_and_abort(
+                entry, data_updates={"batteries": self._reconfigure_batteries}
+            )
+        return await self.async_step_reconfigure_battery()
 
     async def async_step_reconfigure_battery_hoymiles(self, user_input: dict[str, Any] | None = None) -> FlowResult:
         """Update the MQTT device id without asking for broker credentials."""
@@ -3158,15 +3301,25 @@ class MarstekVenusConfigFlow(LegacyDomainMigrationMixin, ConfigFlow, domain=DOMA
 
         Reached through the ``registered_devices`` matcher in the manifest, which
         fires for any device whose MAC sits in the device registry. All this step
-        does is turn the lease into a verdict and act on it; every guard lives in
-        ``infra.mac_tracking`` so it can be tested without a running Home
-        Assistant. It always aborts — there is no user-facing flow here.
+        does is turn the lease into a verdict and act on it; the decision guards
+        live in ``infra.mac_tracking`` so they can be tested without a running
+        Home Assistant, and the one guard that needs the network — the candidate
+        has to answer as the battery — runs here. It always aborts; there is no
+        user-facing flow.
         """
         reason = await self._async_apply_dhcp_lease(
             getattr(discovery_info, "macaddress", None),
             getattr(discovery_info, "ip", "") or "",
         )
         return self.async_abort(reason=reason)
+
+    def _dhcp_coordinator(self, entry: ConfigEntry, index: int):
+        """Return the live coordinator of battery *index*, or None if there is none."""
+        data = (self.hass.data.get(DOMAIN) or {}).get(entry.entry_id) or {}
+        coordinators = data.get("coordinators") or []
+        if index >= len(coordinators):
+            return None
+        return coordinators[index]
 
     def _dhcp_reachability_probe(self, entry: ConfigEntry):
         """Return a callable answering whether battery *index* still responds.
@@ -3176,13 +3329,59 @@ class MarstekVenusConfigFlow(LegacyDomainMigrationMixin, ConfigFlow, domain=DOMA
         """
 
         def _is_reachable(index: int) -> bool:
-            data = (self.hass.data.get(DOMAIN) or {}).get(entry.entry_id) or {}
-            coordinators = data.get("coordinators") or []
-            if index >= len(coordinators):
-                return False
-            return bool(getattr(coordinators[index], "is_available", False))
+            coordinator = self._dhcp_coordinator(entry, index)
+            return bool(getattr(coordinator, "is_available", False))
 
         return _is_reachable
+
+    async def _async_probe_battery_endpoint(self, battery: dict, host: str) -> bool:
+        """Open a connection to ``host`` using this battery's stored settings."""
+        return await self._test_connection(
+            host,
+            battery.get(CONF_PORT),
+            battery.get(CONF_BATTERY_VERSION, DEFAULT_VERSION),
+            battery.get(CONF_SLAVE_ID, DEFAULT_SLAVE_ID),
+            brand=battery.get("brand", "marstek"),
+            username=battery.get(CONF_USERNAME, ""),
+            password=battery.get(CONF_PASSWORD, ""),
+        )
+
+    async def _async_probe_candidate(
+        self, entry: ConfigEntry, index: int, battery: dict, host: str
+    ) -> bool:
+        """Require the candidate address to answer before moving a battery onto it.
+
+        A matching MAC only proves that *something* at ``host`` carries the
+        battery's hardware address. A Wi-Fi-to-LAN bridge or a powerline adapter
+        answers for everything behind it, so one MAC can cover both the battery
+        and the bridge's own management address (#289): the lease alone cannot
+        say which one arrived. Talking to the candidate is what tells them apart.
+
+        It also makes the move symmetric with ``STILL_REACHABLE``. That guard
+        refuses to leave an endpoint that answers; without this one, the same
+        code would happily arrive on an endpoint that never did.
+
+        The battery's own coordinator is closed first: a v3 Marstek accepts a
+        single Modbus TCP connection at a time, and ``is_available`` being False
+        does not prove its socket was released. On failure the previous
+        connection is restored, so a lease that leads nowhere leaves the battery
+        exactly as it was. On success it is left closed on purpose, because the
+        entry is reloaded immediately after and rebuilds it on the new address.
+        """
+        coordinator = self._dhcp_coordinator(entry, index)
+        if coordinator is None:
+            return await self._async_probe_battery_endpoint(battery, host)
+
+        async with coordinator.lock:
+            await coordinator.driver.close()
+            # Same settle margins as the options-flow probe: the device needs a
+            # moment to release the slot before it accepts the next connection.
+            await asyncio.sleep(0.5)
+            answered = await self._async_probe_battery_endpoint(battery, host)
+            if not answered:
+                await asyncio.sleep(0.3)
+                await coordinator.driver.connect()
+            return answered
 
     async def _async_apply_dhcp_lease(self, mac: Any, host: str) -> str:
         """Move a battery onto ``host`` when exactly one may safely be moved.
@@ -3190,6 +3389,7 @@ class MarstekVenusConfigFlow(LegacyDomainMigrationMixin, ConfigFlow, domain=DOMA
         Returns the abort reason, which doubles as the log line: every refusal
         names the single guard that fired.
         """
+        refusal = "no_tracked_battery"
         for entry in self.hass.config_entries.async_entries(DOMAIN):
             batteries = [dict(b) for b in entry.data.get("batteries", [])]
             verdict = evaluate_lease(
@@ -3204,6 +3404,19 @@ class MarstekVenusConfigFlow(LegacyDomainMigrationMixin, ConfigFlow, domain=DOMA
                 continue
 
             battery = batteries[verdict.index]
+
+            # Last guard, and the only one that needs the network: the address
+            # has to answer as this battery before anything is written.
+            if not await self._async_probe_candidate(
+                entry, verdict.index, battery, host
+            ):
+                _LOGGER.debug(
+                    "DHCP lease %s -> %s not applied to %s: %s",
+                    mac, host, entry.title, CANDIDATE_SILENT,
+                )
+                refusal = CANDIDATE_SILENT
+                continue
+
             old_host = battery.get(CONF_HOST) or ""
             port = battery.get(CONF_PORT)
             slave = battery.get(CONF_SLAVE_ID, DEFAULT_SLAVE_ID)
@@ -3223,7 +3436,7 @@ class MarstekVenusConfigFlow(LegacyDomainMigrationMixin, ConfigFlow, domain=DOMA
             )
             await self.hass.config_entries.async_reload(entry.entry_id)
             return "ip_updated"
-        return "no_tracked_battery"
+        return refusal
 
 
 class OptionsFlowHandler(OptionsFlow):
@@ -3300,6 +3513,7 @@ class OptionsFlowHandler(OptionsFlow):
         """Merge config_data into existing entry data, save, and reload."""
         new_data = dict(self.config_entry.data)
         new_data.update(self.config_data)
+        new_data = normalize_solar_forecast_config(new_data)
         new_data[CONF_ENABLE_BALANCE_MONITOR] = True
         self.hass.config_entries.async_update_entry(
             self.config_entry, data=new_data
@@ -3332,16 +3546,21 @@ class OptionsFlowHandler(OptionsFlow):
         )
         try:
             if user_input is not None:
-                # Validate solar forecast sensor if provided
+                # Validate both explicit forecast horizons.
                 forecast_sensor = user_input.get(CONF_SOLAR_FORECAST_SENSOR)
-                if forecast_sensor:
-                    forecast_state = self.hass.states.get(forecast_sensor)
-                    if forecast_state is None:
-                        errors["solar_forecast_sensor"] = "sensor_not_found"
-                    else:
-                        unit = forecast_state.attributes.get("unit_of_measurement", "")
-                        if unit not in ["kWh", "Wh"]:
-                            errors["solar_forecast_sensor"] = "invalid_unit"
+                remaining_sensor = user_input.get(CONF_SOLAR_FORECAST_REMAINING_SENSOR)
+                forecast_candidates = (
+                    ((CONF_SOLAR_FORECAST_REMAINING_SENSOR, remaining_sensor),)
+                    if remaining_sensor
+                    else ((CONF_SOLAR_FORECAST_SENSOR, forecast_sensor),)
+                )
+                for key, sensor in forecast_candidates:
+                    if sensor:
+                        forecast_state = self.hass.states.get(sensor)
+                        if forecast_state is None:
+                            errors[key] = "sensor_not_found"
+                        elif forecast_state.attributes.get("unit_of_measurement", "") not in ["kWh", "Wh"]:
+                            errors[key] = "invalid_unit"
 
                 # Validate solar production sensor if provided
                 solar_sensor = user_input.get(CONF_SOLAR_PRODUCTION_SENSOR)
@@ -3356,7 +3575,14 @@ class OptionsFlowHandler(OptionsFlow):
 
                 if not errors:
                     self.config_data["consumption_sensor"] = user_input["consumption_sensor"]
-                    self.config_data[CONF_SOLAR_FORECAST_SENSOR] = forecast_sensor
+                    if remaining_sensor:
+                        self.config_data.pop(CONF_SOLAR_FORECAST_SENSOR, None)
+                        self.config_data[CONF_SOLAR_FORECAST_REMAINING_SENSOR] = remaining_sensor
+                    else:
+                        self.config_data[CONF_SOLAR_FORECAST_SENSOR] = forecast_sensor
+                        # This explicit marker removes a prior remaining sensor
+                        # during the merge in `_save_and_finish`.
+                        self.config_data[CONF_SOLAR_FORECAST_REMAINING_SENSOR] = None
                     self.config_data[CONF_SOLAR_PRODUCTION_SENSOR] = solar_sensor
                     self.config_data[CONF_METER_INVERTED] = user_input.get(CONF_METER_INVERTED, False)
                     self.config_data["max_contracted_power"] = user_input["max_contracted_power"]
@@ -3374,6 +3600,7 @@ class OptionsFlowHandler(OptionsFlow):
             # Load current configuration with defensive defaults
             current_sensor = self.config_entry.data.get("consumption_sensor", "")
             current_forecast = self.config_entry.data.get(CONF_SOLAR_FORECAST_SENSOR, "")
+            current_remaining_forecast = self.config_entry.data.get(CONF_SOLAR_FORECAST_REMAINING_SENSOR, "")
             current_solar = self.config_entry.data.get(CONF_SOLAR_PRODUCTION_SENSOR, "")
             current_inverted = self.config_entry.data.get(CONF_METER_INVERTED, False)
             current_max_power = self.config_entry.data.get("max_contracted_power", 7000)
@@ -3392,10 +3619,12 @@ class OptionsFlowHandler(OptionsFlow):
                     vol.Required("max_contracted_power", default=current_max_power):
                         NumberSelector(
                             NumberSelectorConfig(
-                                min=1000, max=15000, step=100, mode=NumberSelectorMode.BOX
+                                min=1000, max=20000, step=100, mode=NumberSelectorMode.BOX
                             )
                         ),
                     vol.Optional(CONF_SOLAR_FORECAST_SENSOR, description={"suggested_value": current_forecast} if current_forecast else {}):
+                        EntitySelector(EntitySelectorConfig(domain="sensor")),
+                    vol.Optional(CONF_SOLAR_FORECAST_REMAINING_SENSOR, description={"suggested_value": current_remaining_forecast} if current_remaining_forecast else {}):
                         EntitySelector(EntitySelectorConfig(domain="sensor")),
                     vol.Optional(CONF_SOLAR_PRODUCTION_SENSOR, description={"suggested_value": current_solar} if current_solar else {}):
                         EntitySelector(EntitySelectorConfig(domain="sensor")),
@@ -3513,16 +3742,7 @@ class OptionsFlowHandler(OptionsFlow):
 
         return self.async_show_form(
             step_id="batteries",
-            data_schema=vol.Schema(
-                {
-                    vol.Required("num_batteries", default=current_batteries):
-                        NumberSelector(
-                            NumberSelectorConfig(
-                                min=1, max=6, mode=NumberSelectorMode.SLIDER
-                            )
-                        ),
-                }
-            ),
+            data_schema=_battery_count_schema(current_batteries),
         )
 
     async def async_step_battery_brand(self, user_input: dict[str, Any] | None = None) -> FlowResult:
@@ -4473,7 +4693,11 @@ class OptionsFlowHandler(OptionsFlow):
         """Persist the pending slot and advance the flow."""
         if self._pending_slot_step_a is None:
             return await self.async_step_add_time_slot()
-        slot = _finalize_slot(self._pending_slot_step_a, step_b)
+        slot = _finalize_slot(
+            self._pending_slot_step_a,
+            step_b,
+            self._options_slot_defaults(len(self.time_slots)),
+        )
         self.time_slots.append(slot)
         self._pending_slot_step_a = None
         if len(self.time_slots) < MAX_TIME_SLOTS:
@@ -4573,6 +4797,21 @@ class OptionsFlowHandler(OptionsFlow):
                 "cover_home_when_active": user_input.get("cover_home_when_active", False),
                 "ev_charger_no_telemetry": ev_no_telemetry,
             }
+            # The Enabled switch and the Exclusion % slider write straight into
+            # the stored record and have no field on this form. Lay the form
+            # result over the stored device so those keys survive a re-save.
+            # Only do that while the form still describes the same device:
+            # replacing the device at this position must not inherit a disabled
+            # state the user cannot see here, let alone change.
+            stored = self.config_entry.data.get("excluded_devices", [])
+            index = len(self.excluded_devices)
+            previous = stored[index] if index < len(stored) else {}
+            identity_field = (
+                "power_sensor" if previous.get("power_sensor") else "activity_sensor"
+            )
+            previous_id = previous.get(identity_field)
+            if previous_id and previous_id == excluded_device.get(identity_field):
+                excluded_device = {**previous, **excluded_device}
             self.excluded_devices.append(excluded_device)
 
             # Check if user wants to add more devices (max 4)
@@ -4739,12 +4978,15 @@ class OptionsFlowHandler(OptionsFlow):
         existing_windows = _normalize_charging_windows(existing_config.get("charging_time_slot"))
         forecast_sensor_current = existing_config.get("solar_forecast_sensor", "")
 
-        has_global_sensor = bool(self.config_entry.data.get(CONF_SOLAR_FORECAST_SENSOR))
+        has_global_sensor = bool(
+            self.config_entry.data.get(CONF_SOLAR_FORECAST_REMAINING_SENSOR)
+            or self.config_entry.data.get(CONF_SOLAR_FORECAST_SENSOR)
+        )
 
         if user_input is not None:
             try:
                 if has_global_sensor:
-                    forecast_sensor = self.config_entry.data[CONF_SOLAR_FORECAST_SENSOR]
+                    forecast_sensor = self.config_entry.data.get(CONF_SOLAR_FORECAST_SENSOR)
                 else:
                     forecast_sensor = user_input.get("solar_forecast_sensor")
                     if forecast_sensor:
@@ -4788,7 +5030,6 @@ class OptionsFlowHandler(OptionsFlow):
         schema_dict[vol.Optional(CONF_PREDICTIVE_GRID_CHARGE_MARGIN_PCT, default=defaults["grid_margin"])] = NumberSelector(
             NumberSelectorConfig(min=0, max=100, step=5, unit_of_measurement="%", mode=NumberSelectorMode.BOX)
         )
-
         return self.async_show_form(
             step_id="predictive_charging_config",
             data_schema=vol.Schema(schema_dict),
@@ -4800,7 +5041,10 @@ class OptionsFlowHandler(OptionsFlow):
     ) -> FlowResult:
         """Configure dynamic pricing predictive grid charging in options flow."""
         errors = {}
-        has_global_sensor = bool(self.config_entry.data.get(CONF_SOLAR_FORECAST_SENSOR))
+        has_global_sensor = bool(
+            self.config_entry.data.get(CONF_SOLAR_FORECAST_REMAINING_SENSOR)
+            or self.config_entry.data.get(CONF_SOLAR_FORECAST_SENSOR)
+        )
         existing_config = self.config_entry.data
 
         if user_input is not None:
@@ -4848,7 +5092,7 @@ class OptionsFlowHandler(OptionsFlow):
                                 errors[CONF_PRICE_SENSOR] = "no_price_data"
 
                 if has_global_sensor:
-                    forecast_sensor = self.config_entry.data[CONF_SOLAR_FORECAST_SENSOR]
+                    forecast_sensor = self.config_entry.data.get(CONF_SOLAR_FORECAST_SENSOR)
                 else:
                     forecast_sensor = user_input.get("solar_forecast_sensor")
                     if forecast_sensor:
@@ -5030,7 +5274,10 @@ class OptionsFlowHandler(OptionsFlow):
         """Configure real-time price charging mode in options flow."""
         errors = {}
         existing_config = self.config_entry.data
-        has_global_sensor = bool(self.config_entry.data.get(CONF_SOLAR_FORECAST_SENSOR))
+        has_global_sensor = bool(
+            self.config_entry.data.get(CONF_SOLAR_FORECAST_REMAINING_SENSOR)
+            or self.config_entry.data.get(CONF_SOLAR_FORECAST_SENSOR)
+        )
 
         if user_input is not None:
             try:
@@ -5040,7 +5287,7 @@ class OptionsFlowHandler(OptionsFlow):
                     errors[CONF_PRICE_SENSOR] = "sensor_not_found"
 
                 if has_global_sensor:
-                    forecast_sensor = self.config_entry.data[CONF_SOLAR_FORECAST_SENSOR]
+                    forecast_sensor = self.config_entry.data.get(CONF_SOLAR_FORECAST_SENSOR)
                 else:
                     forecast_sensor = user_input.get("solar_forecast_sensor")
                     if forecast_sensor:
@@ -5106,7 +5353,6 @@ class OptionsFlowHandler(OptionsFlow):
         schema_dict[vol.Optional(CONF_PREDICTIVE_GRID_CHARGE_MARGIN_PCT, default=default_grid_margin)] = NumberSelector(
             NumberSelectorConfig(min=0, max=100, step=5, unit_of_measurement="%", mode=NumberSelectorMode.BOX)
         )
-
         return self.async_show_form(
             step_id="realtime_price_config",
             data_schema=vol.Schema(schema_dict),

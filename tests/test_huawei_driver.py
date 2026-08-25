@@ -2109,3 +2109,136 @@ def test_the_reconfigure_step_is_named_in_every_language():
         entry = step["reconfigure_battery_huawei"]
         assert entry["title"] and entry["description"], path
         assert entry["data"]["huawei_direct_write"], path
+
+
+# ----------------------------------------------------------------------
+# reconfiguration, second review pass
+#
+# Setup grew these guards one at a time; the reconfigure step was written later
+# and had none of them. Reported upstream.
+# ----------------------------------------------------------------------
+def _reconfigure_flow(monkeypatch, *, probe, battery=None, devices=None,
+                      emma=None, scan=None):
+    from types import SimpleNamespace
+
+    from custom_components.omnibattery import config_flow as mod
+
+    current = battery or {
+        "name": "Huawei LUNA2000", "host": "192.168.1.5", "port": 502, "slave_id": 4,
+        "brand": "huawei", "huawei_direct_write": True,
+    }
+    flow = mod.MarstekVenusConfigFlow()
+    flow.battery_index = 0
+    flow._reconfigure_batteries = []
+    flow.hass = SimpleNamespace(
+        config_entries=SimpleNamespace(async_entries=lambda _domain: [object()])
+    )
+    entry = SimpleNamespace(data={"batteries": [current]})
+    monkeypatch.setattr(mod.MarstekVenusConfigFlow, "_get_reconfigure_entry", lambda self: entry)
+    monkeypatch.setattr(mod.HuaweiSolarDriver, "probe", AsyncMock(return_value=probe))
+    monkeypatch.setattr(mod.HuaweiSolarDriver, "find_emma_slave_id", AsyncMock(return_value=emma))
+    monkeypatch.setattr(mod.HuaweiSolarDriver, "scan_slave_ids", AsyncMock(return_value=scan or []))
+    registry = MagicMock()
+    registry.async_get.side_effect = (devices or {}).get
+    monkeypatch.setattr(mod.dr, "async_get", lambda hass: registry)
+    flow._migrated = []
+    monkeypatch.setattr(
+        mod.MarstekVenusConfigFlow, "_migrate_battery_registry_ids",
+        lambda self, *args: flow._migrated.append(args[1:]),
+    )
+    monkeypatch.setattr(
+        mod.MarstekVenusConfigFlow, "async_update_reload_and_abort",
+        lambda self, _entry, data_updates: {"type": "abort", "data": data_updates},
+    )
+    return flow, current
+
+
+_RECONF_INPUT = {
+    "name": "Huawei LUNA2000", "host": "192.168.1.5", "port": 502, "slave_id": 4,
+    "huawei_battery_device": "dev-batt", "huawei_direct_write": False,
+}
+_PROBE_OK = (True, "SUN2000-8K-MAP0", 7000, 7000, "BT24B1457565", 8800)
+
+
+@pytest.mark.asyncio
+async def test_reconfiguration_refuses_a_device_from_another_inverter(monkeypatch):
+    """The check setup makes, which a cascade can otherwise break silently."""
+    flow, _ = _reconfigure_flow(
+        monkeypatch, probe=_PROBE_OK,
+        devices={"dev-batt": _huawei_device(identifier="BT24B9999999")},
+    )
+    form = await flow.async_step_reconfigure_battery_huawei(dict(_RECONF_INPUT))
+    assert form["errors"] == {"huawei_battery_device": "huawei_device_mismatch"}
+
+
+@pytest.mark.asyncio
+async def test_a_changed_slave_id_takes_the_history_with_it(monkeypatch):
+    """The slave id is part of a battery's identity, so entities are renamed."""
+    flow, _ = _reconfigure_flow(
+        monkeypatch, probe=_PROBE_OK,
+        devices={"dev-batt": _huawei_device(identifier="BT24B1457565")},
+    )
+    await flow.async_step_reconfigure_battery_huawei(dict(_RECONF_INPUT, slave_id=11))
+    assert flow._migrated == [("192.168.1.5", 502, "192.168.1.5", 502, 4, 11)]
+
+
+@pytest.mark.asyncio
+async def test_an_unchanged_address_moves_nothing(monkeypatch):
+    flow, _ = _reconfigure_flow(
+        monkeypatch, probe=_PROBE_OK,
+        devices={"dev-batt": _huawei_device(identifier="BT24B1457565")},
+    )
+    await flow.async_step_reconfigure_battery_huawei(dict(_RECONF_INPUT))
+    assert flow._migrated == []
+
+
+@pytest.mark.asyncio
+async def test_a_cascade_asks_instead_of_reporting_a_dead_connection(monkeypatch):
+    """Several inverters answering is a question, not a failure."""
+    flow, _ = _reconfigure_flow(
+        monkeypatch, probe=_PROBE_OK,
+        scan=[(4, "SUN2000-8K-MAP0", True), (5, "SUN2000-10K", True)],
+    )
+    form = await flow.async_step_reconfigure_battery_huawei(
+        dict(_RECONF_INPUT, slave_id="", huawei_direct_write=True, huawei_battery_device="")
+    )
+    assert form["step_id"] == "reconfigure_battery_huawei_slave"
+    options = next(iter(form["data_schema"].schema.values())).config["options"]
+    assert {option["value"] for option in options} == {"4", "5"}
+
+
+@pytest.mark.asyncio
+async def test_an_endpoint_without_an_emma_drops_the_remembered_one(monkeypatch):
+    """Carried over, it would have the driver read a meter that is not there."""
+    flow, _ = _reconfigure_flow(
+        monkeypatch, probe=_PROBE_OK, emma=None,
+        battery={
+            "name": "Huawei LUNA2000", "host": "192.168.1.5", "port": 502,
+            "slave_id": 4, "brand": "huawei", "huawei_direct_write": True,
+            "huawei_emma_slave_id": 0,
+        },
+    )
+    result = await flow.async_step_reconfigure_battery_huawei(
+        dict(_RECONF_INPUT, huawei_direct_write=True, huawei_battery_device="")
+    )
+    assert "huawei_emma_slave_id" not in result["data"]["batteries"][0]
+
+
+@pytest.mark.asyncio
+async def test_an_endpoint_with_an_emma_records_it(monkeypatch):
+    flow, _ = _reconfigure_flow(
+        monkeypatch, probe=_PROBE_OK, emma=0,
+        devices={"dev-batt": _huawei_device(identifier="BT24B1457565")},
+    )
+    result = await flow.async_step_reconfigure_battery_huawei(dict(_RECONF_INPUT))
+    assert result["data"]["batteries"][0]["huawei_emma_slave_id"] == 0
+
+
+def test_the_module_documentation_matches_what_the_driver_does():
+    """It described the first design: services only, and a held zero at 0 W."""
+    from custom_components.omnibattery.drivers import huawei
+
+    doc = huawei.__doc__
+    assert "either of two paths" in doc
+    assert "after dark only" in doc
+    assert "``apply_setpoint(0)``\ntherefore *releases*" in doc.replace("\n", "\n")

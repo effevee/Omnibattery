@@ -57,10 +57,10 @@ class DriverCapabilities:
     max_charge_power_w: int
     max_discharge_power_w: int
 
-    # True if the hardware has DC-coupled PV / MPPT inputs (Marstek Venus D/A).
-    # The control layer uses this to decide whether the unit contributes solar
-    # production and needs DC-plane efficiency integration. AC-only models report
-    # False.
+    # True if the driver exposes individual DC-coupled MPPT channels. The control
+    # layer uses this to decide whether the unit contributes per-channel solar
+    # production and needs the MPPT-aware calculations. Drivers that expose only
+    # an aggregate PV value keep this False and set has_solar_telemetry instead.
     has_mppt_pv: bool
 
     # True if the hardware exposes alarm/fault status registers (Marstek v2 only).
@@ -90,6 +90,11 @@ class DriverCapabilities:
     # entity layer derives daily values from the cumulative counter deltas.
     # Defaults True for backward compatibility with the Marstek register maps.
     has_daily_energy_counters: bool = True
+
+    # True when the driver exposes aggregate DC/PV production as ``solar_power``.
+    # This is separate from has_mppt_pv because some devices (Anker Solarbank 4)
+    # report the combined PV input but do not expose one telemetry key per MPPT.
+    has_solar_telemetry: bool = False
 
     # True if a setpoint readback reliably reflects the just-written command on the
     # confirmation cycle. Register batteries (Marstek) echo the written value at

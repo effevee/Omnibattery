@@ -7,28 +7,42 @@ This driver is deliberately *split-transport*, unlike every other brand here:
   through the ``huawei_solar`` integration's entities instead would cap the
   feedback at its hardcoded 30 s coordinator interval — far too slow for the PD
   loop, which polls every 2 s.
-* **Set-points are written through the ``huawei_solar`` integration's services**
-  rather than by writing registers here. A forcible charge is a four-register
-  sequence (power, duration, target mode, mode) whose ordering and safety
-  semantics that integration already owns and maintains; duplicating it would
-  mean re-implementing a control path against undocumented registers.
+* **Set-points take either of two paths**, chosen per battery. By default they
+  go through the ``huawei_solar`` integration's services, which own the ordering
+  and safety semantics of the four-register forcible sequence. Optionally this
+  driver writes that same sequence itself (FC16, same registers, same order),
+  which removes the dependency for control as well as for reading.
 
-The practical consequence: ``huawei_solar`` must stay installed and hold the
-battery device, while this driver needs its own read path to the same inverter.
-Both connections coexist behind a Modbus proxy (the add-on exists precisely to
-fan one Modbus slave out to several clients).
+The practical consequence differs by path. On the service path ``huawei_solar``
+must stay installed and hold the battery device, and both connections coexist
+behind a Modbus proxy — the add-on exists precisely to fan one Modbus slave out
+to several clients. On the direct path this driver needs only its own
+connection, and ``standby()`` must release over that same path: a release sent
+as a service call has no device to address there, and fails silently.
 
 Sign conventions:
   Omnibattery net power: +charge / −discharge
   Huawei 37001 charge/discharge power: +charge / −discharge  → identical, no flip.
 
-Idle semantics deserve a note. ``stop_forcible_charge`` does not idle the
-battery: it hands control back to the inverter's own working mode, which
-immediately resumes self-consumption. A *held* zero is instead expressed as a
-forcible charge at 0 W, which the hardware accepts and sustains. That is what
-``apply_setpoint(0)`` does, so Omnibattery keeps ownership of the grid balance;
-``standby()`` uses the real stop, because releasing the battery back to the
-inverter is the correct state to leave behind on shutdown.
+**A forcible command is a ceiling, not a request.** The inverter produces
+exactly what it was told and curtails the rest of the array: measured with a
+315 W charge standing, 288 W harvested from strings that made 5054 W six seconds
+after the command ended. A forcible discharge is worse — it serves the house
+from the battery and leaves the MPPT tracker down entirely, and the missing
+production then reads as the deficit that asks for more discharge. So while the
+strings carry voltage this driver commands nothing at all and leaves the
+inverter to its own regulation, which is the better controller in daylight
+anyway. **A Huawei battery is under Omnibattery's control after dark only.**
+
+Idle semantics deserve a note, and they are the opposite of what a register
+battery does. ``stop_forcible_charge`` hands control back to the inverter's own
+working mode, which resumes self-consumption; a *held* zero would instead be a
+forcible charge at 0 W, which the hardware does accept and sustain. That held
+zero was the first implementation here and it was wrong twice over: a pinned
+battery cannot absorb its own PV, so the inverter derated the array, and the
+control layer means something else by idle — manual mode idles once and then
+leaves the device alone, which left the battery frozen. ``apply_setpoint(0)``
+therefore *releases*, and so does ``standby()``.
 
 Register map and control behaviour verified on a SUN2000-8K-MAP0
 (V200R024C00SPC110) with a LUNA2000 13.8 kWh behind an EMMA-A02.
