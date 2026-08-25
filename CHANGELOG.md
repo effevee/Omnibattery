@@ -4,6 +4,8 @@
 
 ### Added
 
+- **Huawei SUN2000 + LUNA2000 driver**: adds native Modbus telemetry and optional service/direct-write control for Huawei hybrid inverters with LUNA2000 storage. Thanks to @sphings79 for the contribution.
+
 - **Daily operation timeline in the dashboard**: the Summary tab now shows a 24-hour, 15-minute resolution chart with observed and projected battery actions, solar and household energy curves, and total SOC.
 - **Vacation Mode dashboard switch**: a new control in the common system card pauses household-consumption learning and the legacy daily average while physical metering and battery control continue normally. Predictive features use a constant baseline learned from 01:00–05:00, taking the median of up to the last three nights with at least three hours of coverage; vacation intervals remain excluded from Recorder backfill after the mode is disabled.
 
@@ -13,6 +15,8 @@
 - **Daily Operation projection is now isolated from predictive control state**: the chart uses immutable simulation requests and a read-only cross-midnight adapter, while the executable planner is structurally limited to the current local day and canonical diagnostics are restored by the predictive startup lifecycle instead of a dashboard refresh.
 
 ### Fixed
+
+- **Huawei cascade reconfiguration could pair telemetry and commands with different inverters**: validates the selected Huawei device against the probed inverter serial before applying the reconfiguration.
 
 - **Daily Operation solar-window cells could lose their yellow background when a small battery discharge overlapped them**: the solar window remains the base fill and the overlapping discharge is rendered as a blue hatch.
 - **Daily Operation could alternate solar and grid-charge colours while the PD controller held the meter near zero**: observed AC charge origin now uses net grid energy accumulated during charging in each quarter-hour, with a 50 Wh tolerance, so brief import/export oscillations cancel instead of being classified from a single 10 W power sample.
