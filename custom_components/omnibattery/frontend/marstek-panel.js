@@ -3455,7 +3455,13 @@ class MarstekVenusPanel extends HTMLElement {
     const ref = this._r.dailyOperation;
     const cell = ref.cells[index];
     const item = this._dailyOperationItem(snapshot, index);
-    const baseAction = item.actions[0] || (item.solarWindow ? "solar-window" : item.decision === "not_needed" ? "not-needed" : "neutral");
+    // A solar window is the background opportunity. If another action (for
+    // example a small discharge) overlaps it, keep the yellow window visible
+    // and render the action as a hatch instead of replacing the window with
+    // the action's solid colour.
+    const baseAction = item.solarWindow
+      ? "solar-window"
+      : item.actions[0] || (item.decision === "not_needed" ? "not-needed" : "neutral");
     cell.className = `daily-op-cell daily-op-base-${baseAction}`;
     cell.classList.toggle("daily-op-real", item.status === "real");
     cell.classList.toggle("daily-op-current", item.status === "current");
@@ -3474,7 +3480,8 @@ class MarstekVenusPanel extends HTMLElement {
     // SVG paint servers cannot be used as CSS backgrounds on HTML buttons.
     // Layer native CSS gradients instead: the base action keeps its fill and
     // each simultaneous action is always visible as an alternating hatch.
-    const patterns = item.actions.slice(1, 3).map((action, patternIndex) =>
+    const patternActions = item.solarWindow ? item.actions : item.actions.slice(1, 3);
+    const patterns = patternActions.map((action, patternIndex) =>
       `repeating-linear-gradient(${patternIndex ? "45deg" : "135deg"}, transparent 0 4px, color-mix(in oklab, ${actionColor[action]} var(--daily-op-shade-opacity), transparent) 4px 6px)`
     );
     cell.style.backgroundImage = patterns.join(", ") || "none";
