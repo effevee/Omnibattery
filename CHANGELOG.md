@@ -14,6 +14,7 @@
 
 ### Fixed
 
+- **Daily Operation could alternate solar and grid-charge colours while the PD controller held the meter near zero**: observed AC charge origin now uses net grid energy accumulated during charging in each quarter-hour, with a 10 Wh tolerance, so brief import/export oscillations cancel instead of being classified from a single 10 W power sample.
 - **Daily Operation could show an alternative-estimate warning while predictive timeline attributes remained `unknown` after an integration reload**: the cross-midnight chart now reports the sources calculated by its own projection, and restores a separate end-of-day diagnostic snapshot without leaking tomorrow's solar or consumption budget into predictive-charging attributes.
 - **The 12-hour Daily Operation extension could distort tomorrow's demand and omit known Time Slot activity**: cross-midnight simulations now retain each date's own consumption shape, dashboard previews materialize configured windows through tomorrow noon without extending the controller's operating horizon, and legacy fallback demand keeps its daily total across DST changes.
 - **The Daily Operation extension could compress the original 24-hour chart and miss tomorrow's DST markers**: the added horizon now preserves the previous time density, rescales energy curves to the visible range while scrolling, and exposes skipped or repeated quarter-hours for the following morning.

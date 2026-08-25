@@ -401,10 +401,97 @@ def test_external_solar_does_not_hide_grid_charge_during_net_import():
     )
 
     decision = ChargeDischargeController._daily_operation_runtime_decision(
-        controller, datetime(2026, 8, 24, 10, 0, tzinfo=MADRID)
+        controller,
+        datetime(2026, 8, 24, 10, 0, tzinfo=MADRID),
+        sample_duration_s=60.0,
     )
 
     assert decision["action_mask"] == ACTION_GRID_CHARGE
+
+
+def test_external_solar_charge_uses_net_interval_energy_not_power_samples():
+    coordinator = SimpleNamespace(
+        capabilities=SimpleNamespace(has_mppt_pv=False, has_solar_telemetry=False),
+        data={"ac_power": -600},
+    )
+    tracker = SimpleNamespace(_read_total_solar_power_kw=lambda: 1.4)
+    controller = SimpleNamespace(
+        coordinators=[coordinator],
+        _consumption_tracker=tracker,
+        grid_charging_active=False,
+        previous_sensor=0.0,
+        predictive_charging_enabled=False,
+        charge_delay_enabled=False,
+        previous_power=0.0,
+        _daily_operation_mode=lambda: "normal",
+        _daily_operation_float=ChargeDischargeController._daily_operation_float,
+        _coordinator_delivered_power=(
+            ChargeDischargeController._coordinator_delivered_power
+        ),
+        _is_battery_manual_owned=lambda _coordinator: False,
+        _daily_operation_delay_active=lambda: False,
+        _charge_delay_unlocked=False,
+        _charge_delay_status={"state": "Disabled"},
+    )
+    now = datetime(2026, 8, 24, 10, 0, tzinfo=MADRID)
+
+    # Every positive sample would have crossed the old 10 W threshold. Their
+    # import/export energy cancels within the displayed quarter-hour instead.
+    for grid_power_w in (200.0, -200.0, 200.0, -200.0):
+        controller.previous_sensor = grid_power_w
+        decision = ChargeDischargeController._daily_operation_runtime_decision(
+            controller, now, sample_duration_s=60.0
+        )
+        assert decision["action_mask"] == ACTION_SOLAR_CHARGE
+
+
+def test_external_solar_charge_becomes_grid_after_material_import_energy():
+    coordinator = SimpleNamespace(
+        capabilities=SimpleNamespace(has_mppt_pv=False, has_solar_telemetry=False),
+        data={"ac_power": -600},
+    )
+    controller = SimpleNamespace(
+        coordinators=[coordinator],
+        _consumption_tracker=SimpleNamespace(
+            _read_total_solar_power_kw=lambda: 1.4
+        ),
+        grid_charging_active=False,
+        previous_sensor=300.0,
+        predictive_charging_enabled=False,
+        charge_delay_enabled=False,
+        previous_power=0.0,
+        _daily_operation_mode=lambda: "normal",
+        _daily_operation_float=ChargeDischargeController._daily_operation_float,
+        _coordinator_delivered_power=(
+            ChargeDischargeController._coordinator_delivered_power
+        ),
+        _is_battery_manual_owned=lambda _coordinator: False,
+        _daily_operation_delay_active=lambda: False,
+        _charge_delay_unlocked=False,
+        _charge_delay_status={"state": "Disabled"},
+    )
+    now = datetime(2026, 8, 24, 10, 0, tzinfo=MADRID)
+
+    first = ChargeDischargeController._daily_operation_runtime_decision(
+        controller, now, sample_duration_s=60.0
+    )
+    second = ChargeDischargeController._daily_operation_runtime_decision(
+        controller, now, sample_duration_s=60.0
+    )
+    third = ChargeDischargeController._daily_operation_runtime_decision(
+        controller, now, sample_duration_s=60.0
+    )
+
+    assert first["action_mask"] == ACTION_SOLAR_CHARGE
+    assert second["action_mask"] == ACTION_SOLAR_CHARGE
+    assert third["action_mask"] == ACTION_GRID_CHARGE
+
+    next_interval = ChargeDischargeController._daily_operation_runtime_decision(
+        controller,
+        now.replace(minute=15),
+        sample_duration_s=60.0,
+    )
+    assert next_interval["action_mask"] == ACTION_SOLAR_CHARGE
 
 
 def test_direct_solar_and_ac_draw_are_both_reported_during_net_import():
@@ -432,7 +519,9 @@ def test_direct_solar_and_ac_draw_are_both_reported_during_net_import():
     )
 
     decision = ChargeDischargeController._daily_operation_runtime_decision(
-        controller, datetime(2026, 8, 24, 10, 0, tzinfo=MADRID)
+        controller,
+        datetime(2026, 8, 24, 10, 0, tzinfo=MADRID),
+        sample_duration_s=60.0,
     )
 
     assert decision["action_mask"] == ACTION_SOLAR_CHARGE | ACTION_GRID_CHARGE

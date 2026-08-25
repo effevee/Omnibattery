@@ -589,7 +589,7 @@ def test_midnight_refresh_normalizes_utc_and_publishes_one_complete_snapshot():
             consumption_profile=None, solar_profile=None
         ),
         _daily_operation_capture=ChargeDischargeController._daily_operation_capture,
-        _daily_operation_runtime_decision=lambda _current: {
+        _daily_operation_runtime_decision=lambda _current, **_kwargs: {
             "action_mask": 0,
             "context_mask": 0,
             "simultaneous": False,

@@ -243,6 +243,12 @@ from .pricing.engine import DynamicPricingEvaluationHorizon, PricingManager
 # forced through the idle/protection state machine.
 _PREDICTIVE_HARD_LIMIT_CONFIRMATIONS = 3
 _PREDICTIVE_HARD_LIMIT_MIN_MARGIN_W = 200.0
+
+# Daily Operation classifies an otherwise solar-looking AC charge as grid-fed
+# only after the net energy imported while charging exceeds this amount.  A
+# quarter-hour energy threshold avoids repainting the source whenever the PD
+# controller makes the meter oscillate by a few watts around zero.
+_DAILY_OPERATION_GRID_CHARGE_ENERGY_KWH = 0.01  # 10 Wh
 from .solar_forecast import (
     SolarForecastInput,
     get_configured_solar_forecast_sensor,
@@ -1018,6 +1024,9 @@ class ChargeDischargeController:
         self._daily_operation_timeline = None
         self.daily_operation_timeline = None
         self._daily_operation_last_runtime_at: datetime | None = None
+        self._daily_operation_grid_energy_date = None
+        self._daily_operation_grid_energy_kwh = [0.0] * 96
+        self._daily_operation_grid_energy_observed = [False] * 96
         self._daily_operation_last_decision_signature = None
         self._daily_operation_last_projection_signature = None
         self._daily_operation_last_projection_monotonic = 0.0
@@ -1076,6 +1085,49 @@ class ChargeDischargeController:
         if normalized in {PREDICTIVE_MODE_TIME_SLOT, "timeslot"}:
             return "time_slot"
         return normalized or "normal"
+
+    def _daily_operation_accumulate_grid_charge_energy(
+        self,
+        now: datetime,
+        grid_power_w: float,
+        duration_s: float,
+        *,
+        charging: bool,
+    ) -> float | None:
+        """Return net grid energy observed while charging in this quarter-hour.
+
+        Import is positive and export is negative, so short PD oscillations
+        cancel as energy instead of changing the charge source sample by
+        sample.  The 96 wall-clock bins deliberately mirror the timeline; both
+        occurrences of a repeated DST hour therefore contribute to the same
+        displayed cell.
+        """
+        local_date = now.date()
+        if getattr(self, "_daily_operation_grid_energy_date", None) != local_date:
+            self._daily_operation_grid_energy_date = local_date
+            self._daily_operation_grid_energy_kwh = [0.0] * 96
+            self._daily_operation_grid_energy_observed = [False] * 96
+
+        index = now.hour * 4 + now.minute // 15
+        energy = getattr(self, "_daily_operation_grid_energy_kwh", None)
+        observed = getattr(self, "_daily_operation_grid_energy_observed", None)
+        if not isinstance(energy, list) or len(energy) != 96:
+            energy = [0.0] * 96
+            self._daily_operation_grid_energy_kwh = energy
+        if not isinstance(observed, list) or len(observed) != 96:
+            observed = [False] * 96
+            self._daily_operation_grid_energy_observed = observed
+
+        if (
+            charging
+            and math.isfinite(grid_power_w)
+            and math.isfinite(duration_s)
+            and duration_s > 0.0
+        ):
+            energy[index] += grid_power_w * min(duration_s, 60.0) / 3_600_000.0
+            observed[index] = True
+
+        return energy[index] if observed[index] else None
 
     def _daily_operation_delay_unlock(self, now: datetime) -> datetime | None:
         """Return today's runtime delay boundary as a local datetime."""
@@ -1197,7 +1249,9 @@ class ChargeDischargeController:
             return result
         return capture
 
-    def _daily_operation_runtime_decision(self, now: datetime) -> dict[str, Any]:
+    def _daily_operation_runtime_decision(
+        self, now: datetime, *, sample_duration_s: float = 0.0
+    ) -> dict[str, Any]:
         """Build one measured controller decision for the open quarter-hour."""
         mode = self._daily_operation_mode()
         predictive_enabled = bool(getattr(self, "predictive_charging_enabled", False))
@@ -1225,14 +1279,19 @@ class ChargeDischargeController:
             except Exception:  # noqa: BLE001 - classification is diagnostic only
                 solar_power_w = None
         solar_measured = solar_power_w is not None and solar_power_w > 10.0
-        # ``previous_sensor`` is the latest net grid meter sample in the
-        # controller's import-positive convention.  External PV production on
-        # its own does not prove that an AC battery charge is solar-powered
-        # when the site is still importing from the grid.
-        grid_power_w = self._daily_operation_float(
-            getattr(self, "previous_sensor", None), math.nan
+        # Prefer the raw transformed grid sample integrated immediately before
+        # this timeline refresh. ``previous_sensor`` is the fallback used by
+        # lightweight tests and installations without the accumulator.
+        raw_grid_power_kw = self._daily_operation_float(
+            getattr(tracker, "_daily_grid_last_power_kw", None), math.nan
         )
-        grid_importing = math.isfinite(grid_power_w) and grid_power_w > 10.0
+        grid_power_w = (
+            raw_grid_power_kw * 1000.0
+            if math.isfinite(raw_grid_power_kw)
+            else self._daily_operation_float(
+                getattr(self, "previous_sensor", None), math.nan
+            )
+        )
         total_capacity = 0.0
         total_stored = 0.0
         for coordinator in getattr(self, "coordinators", ()):
@@ -1254,6 +1313,10 @@ class ChargeDischargeController:
         positive_batteries = 0
         negative_batteries = 0
         action_mask = 0
+        direct_solar_charge = False
+        external_ac_charge = False
+        explicit_grid_charge = False
+        ac_grid_draw_with_direct_pv = False
         for coordinator in getattr(self, "coordinators", ()):
             if self._is_battery_manual_owned(coordinator):
                 continue
@@ -1309,35 +1372,58 @@ class ChargeDischargeController:
             if cell_power > 10.0:
                 charge_power += cell_power
                 positive_batteries += 1
-                # A positive battery flow is not, by itself, proof of solar
-                # charging.  In particular, an inverter can keep drawing AC for
-                # a few samples after the scheduled grid window is released.
-                # Require live PV evidence before painting the interval green.
-                solar_charge = direct_pv_w > 10.0 or (
-                    solar_measured and not grid_active and not grid_importing
-                )
-                if solar_charge:
-                    action_mask |= ACTION_SOLAR_CHARGE
-                # A global grid-charge mode can overlap a battery that is
-                # exporting AC while its MPPT still charges the cells. AC draw
-                # plus current grid import is also direct evidence of a mixed
-                # solar/grid charge even if the schedule flag has just fallen.
+                if direct_pv_w > 10.0:
+                    direct_solar_charge = True
+                else:
+                    external_ac_charge = True
                 ac_draws_from_grid = math.isfinite(ac_power) and ac_power < -10.0
-                if (
-                    grid_active
-                    and (not math.isfinite(ac_power) or ac_draws_from_grid)
-                ) or (direct_pv_w > 10.0 and grid_importing and ac_draws_from_grid):
-                    action_mask |= ACTION_GRID_CHARGE
-                elif not solar_charge:
-                    # Charging is still a real historical action when its
-                    # source cannot be split.  With no live PV evidence the
-                    # conservative physical classification is AC/grid, never
-                    # an invisible or invented solar interval.
-                    action_mask |= ACTION_GRID_CHARGE
+                if grid_active and (
+                    not math.isfinite(ac_power) or ac_draws_from_grid
+                ):
+                    explicit_grid_charge = True
+                if direct_pv_w > 10.0 and ac_draws_from_grid:
+                    ac_grid_draw_with_direct_pv = True
             elif cell_power < -10.0:
                 discharge_power += -cell_power
                 negative_batteries += 1
                 action_mask |= ACTION_DISCHARGE
+
+        if measured and charge_power > 10.0:
+            net_grid_energy_kwh = (
+                ChargeDischargeController._daily_operation_accumulate_grid_charge_energy(
+                    self,
+                    now,
+                    grid_power_w,
+                    sample_duration_s,
+                    charging=True,
+                )
+            )
+            material_grid_energy = (
+                net_grid_energy_kwh is not None
+                and net_grid_energy_kwh > _DAILY_OPERATION_GRID_CHARGE_ENERGY_KWH
+            )
+            if direct_solar_charge:
+                action_mask |= ACTION_SOLAR_CHARGE
+            if external_ac_charge:
+                if solar_measured and not grid_active and not material_grid_energy:
+                    action_mask |= ACTION_SOLAR_CHARGE
+                else:
+                    action_mask |= ACTION_GRID_CHARGE
+            # Direct DC PV and an AC draw can coexist. Only report the AC side
+            # as grid-fed once its accumulated net import is material; an
+            # instantaneous positive meter sample is no longer sufficient.
+            if explicit_grid_charge or (
+                ac_grid_draw_with_direct_pv and material_grid_energy
+            ):
+                action_mask |= ACTION_GRID_CHARGE
+        elif measured:
+            ChargeDischargeController._daily_operation_accumulate_grid_charge_energy(
+                self,
+                now,
+                grid_power_w,
+                sample_duration_s,
+                charging=False,
+            )
 
         runtime_source = "runtime_measured" if measured else "runtime_command"
         if not measured:
@@ -1346,7 +1432,20 @@ class ChargeDischargeController:
             )
             if total_power > 10.0:
                 charge_power = total_power
-                if solar_measured and not grid_active and not grid_importing:
+                net_grid_energy_kwh = (
+                    ChargeDischargeController._daily_operation_accumulate_grid_charge_energy(
+                        self,
+                        now,
+                        grid_power_w,
+                        sample_duration_s,
+                        charging=True,
+                    )
+                )
+                material_grid_energy = (
+                    net_grid_energy_kwh is not None
+                    and net_grid_energy_kwh > _DAILY_OPERATION_GRID_CHARGE_ENERGY_KWH
+                )
+                if solar_measured and not grid_active and not material_grid_energy:
                     action_mask |= ACTION_SOLAR_CHARGE
                 else:
                     action_mask |= ACTION_GRID_CHARGE
@@ -1721,12 +1820,15 @@ class ChargeDischargeController:
                 now=current,
             )
 
-            decision = self._daily_operation_runtime_decision(current)
             last_at = self._daily_operation_last_runtime_at
             elapsed = (
                 max(0.0, (current - last_at).total_seconds())
                 if isinstance(last_at, datetime)
                 else 0.0
+            )
+            sample_duration_s = min(elapsed, 60.0)
+            decision = self._daily_operation_runtime_decision(
+                current, sample_duration_s=sample_duration_s
             )
             if (
                 decision["action_mask"]
@@ -1736,7 +1838,7 @@ class ChargeDischargeController:
                 manager.record_runtime_decision(
                     decision,
                     at=current,
-                    duration_s=min(elapsed, 60.0),
+                    duration_s=sample_duration_s,
                     simultaneous=decision.get("simultaneous", False),
                 )
             self._daily_operation_last_runtime_at = current
