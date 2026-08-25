@@ -8,8 +8,9 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, time, timedelta
 from typing import Any, Literal
+from zoneinfo import ZoneInfo
 
 from .const import (
     CONF_SOLAR_FORECAST_REMAINING_SENSOR,
@@ -19,6 +20,7 @@ from .const import (
 
 
 ForecastSource = Literal["remaining", "today"]
+_FORECAST_EPSILON_KWH = 1e-9
 
 
 @dataclass(frozen=True)
@@ -333,6 +335,108 @@ def _controller_local_date(controller: Any) -> date:
     return datetime.now().date()
 
 
+def solar_forecast_local_timezone(
+    hass: Any,
+    controller: Any,
+    now: datetime | None = None,
+):
+    """Return the timezone used to interpret local forecast horizons."""
+    profile = getattr(
+        getattr(controller, "_consumption_tracker", None),
+        "solar_profile",
+        None,
+    )
+    timezone = getattr(profile, "_timezone", None)
+    if callable(timezone):
+        try:
+            value = timezone()
+            if value is not None:
+                return value
+        except Exception:  # noqa: BLE001 - timezone fallback must remain safe
+            pass
+
+    configured = getattr(getattr(hass, "config", None), "time_zone", None)
+    if configured:
+        try:
+            return ZoneInfo(str(configured))
+        except (KeyError, ValueError):
+            pass
+    if isinstance(now, datetime) and now.tzinfo is not None:
+        return now.tzinfo
+    return datetime.now().astimezone().tzinfo
+
+
+def solar_forecast_period_energy_between(
+    periods: tuple[SolarForecastPeriod, ...] | list[SolarForecastPeriod] | None,
+    start: datetime,
+    end: datetime,
+    *,
+    timezone: Any = None,
+) -> float:
+    """Return period energy overlapping one explicit horizon.
+
+    Period energy is prorated by absolute-time overlap. Naive boundaries are
+    local wall-clock values and therefore require the caller's local timezone.
+    """
+    if timezone is None:
+        timezone = start.tzinfo or end.tzinfo or datetime.now().astimezone().tzinfo
+    if start.tzinfo is None:
+        start = start.replace(tzinfo=timezone)
+    if end.tzinfo is None:
+        end = end.replace(tzinfo=timezone)
+    start_ts = start.timestamp()
+    end_ts = end.timestamp()
+    if end_ts <= start_ts:
+        return 0.0
+
+    energy = 0.0
+    for period in periods or ():
+        period_start = period.start.timestamp()
+        period_end = period.end.timestamp()
+        overlap = max(0.0, min(end_ts, period_end) - max(start_ts, period_start))
+        if overlap > 0.0:
+            energy += period.energy_kwh * overlap / (period_end - period_start)
+    return max(0.0, energy)
+
+
+def _remaining_period_energy_today(
+    hass: Any,
+    controller: Any,
+    periods: tuple[SolarForecastPeriod, ...],
+    now: datetime | float | None,
+) -> float:
+    """Return dated provider energy still expected before local midnight."""
+    timezone = solar_forecast_local_timezone(
+        hass,
+        controller,
+        now if isinstance(now, datetime) else None,
+    )
+    if isinstance(now, datetime):
+        local_now = (
+            now.replace(tzinfo=timezone)
+            if now.tzinfo is None
+            else now.astimezone(timezone)
+        )
+    else:
+        midnight = datetime.combine(
+            _controller_local_date(controller),
+            time.min,
+            tzinfo=timezone,
+        )
+        local_now = midnight + timedelta(hours=_current_hour(controller, now))
+    day_end = datetime.combine(
+        local_now.date() + timedelta(days=1),
+        time.min,
+        tzinfo=timezone,
+    )
+    return solar_forecast_period_energy_between(
+        periods,
+        local_now,
+        day_end,
+        timezone=timezone,
+    )
+
+
 def _current_hour(controller: Any, now: datetime | float | None) -> float:
     if isinstance(now, datetime):
         return now.hour + now.minute / 60.0 + now.second / 3600.0
@@ -376,6 +480,29 @@ def read_remaining_solar_kwh(
             periods=None,
             original_source=None,
             conversion="unsafe_zero",
+        )
+
+    # Some providers roll the scalar ``remaining today`` state a few minutes
+    # after midnight while their explicitly dated periods already contain the
+    # new day's production. A numeric zero is normally valid, but it must not
+    # erase positive, timestamped evidence inside today's remaining horizon.
+    period_remaining = _remaining_period_energy_today(
+        hass,
+        controller,
+        forecast.periods,
+        now,
+    )
+    if forecast.kwh <= _FORECAST_EPSILON_KWH and period_remaining > _FORECAST_EPSILON_KWH:
+        controller.solar_forecast_conversion = "dated_periods_zero_scalar"
+        controller.solar_forecast_diagnostic_source = forecast.diagnostic_source
+        return SolarForecastInput(
+            period_remaining,
+            forecast.diagnostic_source,
+            periods=forecast.periods,
+            original_source=(
+                "remaining" if forecast.source == "remaining" else "today_legacy"
+            ),
+            conversion="dated_periods_zero_scalar",
         )
 
     if forecast.source == "remaining":

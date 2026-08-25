@@ -110,6 +110,9 @@ def _snapshot() -> dict:
             "end": "2026-08-23T12:00:00+02:00",
             "interval_minutes": 15,
             "interval_count": 48,
+            "duration_s": [900] * 48,
+            "dst_skipped": [False] * 8 + [True] * 4 + [False] * 36,
+            "dst_repeated": [False] * 48,
         },
         "extended_projection": [
             {
@@ -166,6 +169,8 @@ def test_timeline_entity_publishes_fixed_96_element_json_safe_dto():
     assert attrs["operations"]["actual_discharge_from_battery_kwh"][0] == 0.03
     assert attrs["operations"]["discharge_from_battery_kwh"][0] == 0.04
     assert attrs["extended_horizon"]["interval_count"] == 48
+    assert len(attrs["extended_horizon"]["duration_s"]) == 48
+    assert attrs["extended_horizon"]["dst_skipped"][8:12] == [True] * 4
     assert attrs["extended_projection"][0]["extension_index"] == 0
     assert attrs["extended_projection"][0]["solar_kwh"] == pytest.approx(0.03)
     assert attrs["extended_projection"][0]["soc_end_pct"] == pytest.approx(47.25)

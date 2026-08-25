@@ -88,6 +88,60 @@ def test_provider_periods_have_priority_and_are_resampled_to_horizon():
     assert result.energy_error_kwh == pytest.approx(0.0)
 
 
+def test_provider_does_not_report_rejected_learned_candidate_as_fallback():
+    solar_start, solar_end = _solar_window()
+    boundaries = _horizon()
+
+    result = build_solar_timeline(
+        boundaries,
+        6.0,
+        temporal_shape=[1.0] * len(boundaries),
+        learned_shape=[0.0] * 96,
+        learned_mature=True,
+        solar_start=solar_start,
+        solar_end=solar_end,
+        mode="active",
+    )
+
+    assert result.source == "provider"
+    assert result.fallback_reason is None
+    assert "learned_shape_no_future_energy" in result.candidate_reasons
+
+
+def test_selected_sinusoidal_fallback_keeps_rejected_learned_reason():
+    solar_start, solar_end = _solar_window()
+
+    result = build_solar_timeline(
+        _horizon(),
+        3.0,
+        learned_shape=[0.0] * 96,
+        learned_mature=True,
+        solar_start=solar_start,
+        solar_end=solar_end,
+        mode="active",
+    )
+
+    assert result.source == "sinusoidal"
+    assert result.fallback_reason == "learned_shape_no_future_energy"
+    assert result.candidate_reasons == ("learned_shape_no_future_energy",)
+
+
+def test_zero_fallback_keeps_concrete_candidate_rejections():
+    result = build_solar_timeline(
+        [],
+        3.0,
+        temporal_shape=[1.0],
+        learned_shape=[1.0] * 96,
+        learned_mature=True,
+        mode="active",
+    )
+
+    assert result.source == "zero_fallback"
+    assert result.fallback_reason != "unsafe_temporal_shape"
+    assert "legacy_shape_length" in (result.fallback_reason or "")
+    assert result.candidate_reasons
+
+
 def test_mature_profile_is_used_when_provider_is_absent():
     solar_start, solar_end = _solar_window()
     shape = [0.0] * 96

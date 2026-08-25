@@ -141,6 +141,11 @@ class ConsumptionForecast:
     day_type_samples: int = 0
     profile_age_days: int | None = None
     newest_profile_date: date | None = None
+    # ``intervals_kwh`` remains the established, wall-clock aggregate contract
+    # for arbitrary ranges.  Keep the nominal daily shapes as well when a
+    # range crosses midnight so consumers that simulate each dated interval do
+    # not apply one hour's aggregate to every matching date.
+    intervals_by_date: dict[date, list[float]] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         """Keep data safe for Home Assistant state attributes and arithmetic."""
@@ -152,6 +157,21 @@ class ConsumptionForecast:
                 parsed = 0.0
             safe_intervals.append(parsed if math.isfinite(parsed) and parsed >= 0.0 else 0.0)
         self.intervals_kwh = safe_intervals
+        safe_by_date: dict[date, list[float]] = {}
+        for local_date, values in self.intervals_by_date.items():
+            if not isinstance(local_date, date):
+                continue
+            safe_values: list[float] = []
+            for value in values:
+                try:
+                    parsed = float(value)
+                except (TypeError, ValueError):
+                    parsed = 0.0
+                safe_values.append(
+                    parsed if math.isfinite(parsed) and parsed >= 0.0 else 0.0
+                )
+            safe_by_date[local_date] = safe_values
+        self.intervals_by_date = safe_by_date
         try:
             parsed_energy = float(self.energy_kwh)
         except (TypeError, ValueError):
@@ -1424,6 +1444,13 @@ class ConsumptionProfileTracker:
             fallback_reason=";".join(dict.fromkeys(reasons)) or None,
             profile_age_days=(self._today() - newest).days if newest else None,
             newest_profile_date=newest,
+            intervals_by_date={
+                local_date: [
+                    value * fallback_scales.get(local_date, 1.0)
+                    for value in forecast.intervals_kwh
+                ]
+                for local_date, forecast in forecasts.items()
+            },
         )
 
     # ------------------------------------------------------------------

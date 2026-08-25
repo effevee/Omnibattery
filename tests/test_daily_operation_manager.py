@@ -446,7 +446,9 @@ def test_projection_starts_from_measured_soc_now_instead_of_replaying_the_day():
         ],
         _consumption_tracker=object(),
         _pricing_mgr=SimpleNamespace(
-            _build_chronological_plan=lambda **_kwargs: plan
+            build_extended_chronological_projection=lambda **_kwargs: SimpleNamespace(
+                plan=plan, diagnostics={}
+            )
         ),
         _last_decision_data={},
         _last_chronological_diagnostics={},
@@ -512,7 +514,9 @@ def test_projection_limits_charge_delay_clock_to_unlock_boundary():
         ],
         _consumption_tracker=object(),
         _pricing_mgr=SimpleNamespace(
-            _build_chronological_plan=lambda **_kwargs: plan,
+            build_extended_chronological_projection=lambda **_kwargs: SimpleNamespace(
+                plan=plan, diagnostics={}
+            ),
             _time_slot_price_slots=lambda _now: [],
         ),
         _last_decision_data={},
@@ -585,7 +589,7 @@ def test_midnight_refresh_normalizes_utc_and_publishes_one_complete_snapshot():
             consumption_profile=None, solar_profile=None
         ),
         _daily_operation_capture=ChargeDischargeController._daily_operation_capture,
-        _daily_operation_runtime_decision=lambda _current: {
+        _daily_operation_runtime_decision=lambda _current, **_kwargs: {
             "action_mask": 0,
             "context_mask": 0,
             "simultaneous": False,
@@ -836,6 +840,37 @@ def test_extended_projection_keeps_the_next_twelve_hours_separate_from_daily_arr
     assert snapshot["extended_projection"][0]["extension_index"] == 0
     assert snapshot["extended_projection"][0]["consumption_kwh"] == pytest.approx(0.2)
     assert snapshot["extended_projection"][0]["soc_end_pct"] == pytest.approx(48.5)
+
+
+@pytest.mark.parametrize(
+    ("current", "flag", "expected_duration"),
+    [
+        (
+            datetime(2026, 3, 28, 10, 7, tzinfo=MADRID),
+            "dst_skipped",
+            0.0,
+        ),
+        (
+            datetime(2026, 10, 24, 10, 7, tzinfo=MADRID),
+            "dst_repeated",
+            1800.0,
+        ),
+    ],
+)
+def test_extended_horizon_exposes_next_day_dst_cells(
+    current: datetime,
+    flag: str,
+    expected_duration: float,
+):
+    manager = _manager(MutableClock(current))
+
+    horizon = manager.build_public_snapshot()["extended_horizon"]
+
+    assert len(horizon["duration_s"]) == 48
+    assert len(horizon["dst_skipped"]) == 48
+    assert len(horizon["dst_repeated"]) == 48
+    assert horizon[flag][8:12] == [True] * 4
+    assert horizon["duration_s"][8:12] == [expected_duration] * 4
 
 
 @pytest.mark.asyncio

@@ -1,5 +1,7 @@
 """Regression coverage for the dual solar-forecast migration."""
+from datetime import datetime, timedelta
 from types import SimpleNamespace
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -14,8 +16,14 @@ from custom_components.omnibattery.solar_forecast import (
 )
 
 
-def _state(value, unit="kWh"):
-    return SimpleNamespace(state=str(value), attributes={"unit_of_measurement": unit})
+MADRID = ZoneInfo("Europe/Madrid")
+
+
+def _state(value, unit="kWh", **attributes):
+    return SimpleNamespace(
+        state=str(value),
+        attributes={"unit_of_measurement": unit, **attributes},
+    )
 
 
 def test_remaining_forecast_wins_and_is_normalized_from_wh():
@@ -53,6 +61,60 @@ def test_remaining_forecast_is_not_reduced_by_production():
     hass = SimpleNamespace(states=SimpleNamespace(get=states.get))
 
     assert PricingManager(hass, controller)._remaining_solar_today_kwh(14.0) == pytest.approx(1.81)
+
+
+def test_midnight_zero_scalar_uses_positive_dated_periods_for_new_day():
+    now = datetime(2026, 8, 25, 0, 0, tzinfo=MADRID)
+    periods = [
+        {
+            "start": (now + timedelta(hours=8)).isoformat(),
+            "end": (now + timedelta(hours=20)).isoformat(),
+            "energy_kwh": 12.0,
+        }
+    ]
+    state = _state(0.0, solar_forecast_periods=periods)
+    hass = SimpleNamespace(
+        config=SimpleNamespace(time_zone="Europe/Madrid"),
+        states=SimpleNamespace(get=lambda _entity_id: state),
+    )
+    controller = SimpleNamespace(
+        solar_forecast_remaining_sensor="sensor.remaining",
+        solar_forecast_sensor=None,
+    )
+
+    result = read_remaining_solar_kwh(hass, controller, now=now)
+
+    assert result.remaining_kwh == pytest.approx(12.0)
+    assert result.conversion == "dated_periods_zero_scalar"
+    assert sum(period.energy_kwh for period in result.periods or ()) == pytest.approx(12.0)
+
+
+def test_late_night_periods_for_tomorrow_do_not_leak_into_today_control():
+    now = datetime(2026, 8, 24, 23, 45, tzinfo=MADRID)
+    tomorrow = now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(
+        days=1
+    )
+    periods = [
+        {
+            "start": (tomorrow + timedelta(hours=8)).isoformat(),
+            "end": (tomorrow + timedelta(hours=20)).isoformat(),
+            "energy_kwh": 12.0,
+        }
+    ]
+    state = _state(0.0, solar_forecast_periods=periods)
+    hass = SimpleNamespace(
+        config=SimpleNamespace(time_zone="Europe/Madrid"),
+        states=SimpleNamespace(get=lambda _entity_id: state),
+    )
+    controller = SimpleNamespace(
+        solar_forecast_remaining_sensor="sensor.remaining",
+        solar_forecast_sensor=None,
+    )
+
+    result = read_remaining_solar_kwh(hass, controller, now=now)
+
+    assert result.remaining_kwh == 0.0
+    assert result.conversion == "none"
 
 
 def test_forecast_reader_uses_persisted_remaining_sensor_when_runtime_cache_is_empty():

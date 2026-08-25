@@ -12,9 +12,11 @@ from custom_components.omnibattery.tracking.consumption_profile import (
     INTERVAL_COUNT,
     INTERVAL_SECONDS,
     MIN_INTERVAL_COVERAGE_S,
+    ConsumptionForecast,
     ConsumptionProfileTracker,
     ProfileDay,
     _apply_external_load_to_day,
+    _local_segments,
     _series_to_bins,
     adjust_remaining_fallback_energy,
     fallback_daily_intervals,
@@ -497,6 +499,67 @@ def test_legacy_fallback_preserves_daily_total_across_dst(local_date):
     )
 
     assert result.energy_kwh == pytest.approx(30.0)
+
+
+@pytest.mark.parametrize(
+    "local_date",
+    [date(2026, 3, 29), date(2026, 10, 25)],
+)
+def test_range_forecast_keeps_dst_scaled_shape_by_date(local_date):
+    profile = _profile(fallback_daily=30.0)
+    start = datetime.combine(local_date, datetime.min.time()).replace(tzinfo=MADRID)
+    end = datetime.combine(
+        local_date + timedelta(days=1),
+        datetime.min.time(),
+    ).replace(tzinfo=MADRID)
+
+    result = profile.forecast_energy_between(
+        start,
+        end,
+        exclude_charging_windows=False,
+        fallback="legacy_daily",
+    )
+    dated_shape = result.intervals_by_date[local_date]
+    dated_energy = 0.0
+    for segment_start, segment_end, midpoint in _local_segments(start, end):
+        index = midpoint.hour * 4 + midpoint.minute // 15
+        dated_energy += (
+            dated_shape[index]
+            * (segment_end - segment_start)
+            / INTERVAL_SECONDS
+        )
+
+    assert dated_energy == pytest.approx(30.0)
+
+
+def test_range_forecast_keeps_the_nominal_shape_for_each_date():
+    today = date(2026, 8, 24)
+    tomorrow = today + timedelta(days=1)
+    profile = _profile()
+
+    def forecast_for_date(target_date, **_kwargs):
+        values = [0.0] * INTERVAL_COUNT
+        values[40] = 1.0 if target_date == today else 9.0
+        return ConsumptionForecast(
+            sum(values), values, "profile", True,
+        )
+
+    profile.forecast_for_date = forecast_for_date
+    start = datetime(2026, 8, 24, 10, 0, tzinfo=MADRID)
+    end = datetime(2026, 8, 25, 10, 15, tzinfo=MADRID)
+
+    result = profile.forecast_energy_between(
+        start,
+        end,
+        exclude_charging_windows=False,
+        fallback="legacy_daily",
+    )
+
+    # The legacy interval vector remains an aggregate for range callers, but
+    # a chronological consumer can retain the distinct date-specific shape.
+    assert result.intervals_kwh[40] == pytest.approx(10.0)
+    assert result.intervals_by_date[today][40] == pytest.approx(1.0)
+    assert result.intervals_by_date[tomorrow][40] == pytest.approx(9.0)
 
 
 def test_range_query_prorates_partial_interval_and_masks_slot_days():

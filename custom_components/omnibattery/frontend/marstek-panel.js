@@ -2502,6 +2502,7 @@ class MarstekVenusPanel extends HTMLElement {
         this._hideDailyOperationTooltip();
       }
       this._updateDailyOperationNav();
+      this._scheduleDailyOperationPathRefresh();
     }, { passive: true });
     const markManualScroll = () => {
       if (Date.now() > scrollState.programmaticUntil) scrollState.manual = true;
@@ -2709,6 +2710,16 @@ class MarstekVenusPanel extends HTMLElement {
     const repeatedBase = this._dailyOperationArray(this._dailyOperationPick(data, ["dst_repeated"]));
     const skipped = this._dailyOperationExtendedArray(skippedBase, [], []);
     const repeated = this._dailyOperationExtendedArray(repeatedBase, [], []);
+    const extensionHorizon = data.extended_horizon && typeof data.extended_horizon === "object"
+      ? data.extended_horizon : {};
+    const extensionSkipped = Array.isArray(extensionHorizon.dst_skipped)
+      ? extensionHorizon.dst_skipped : [];
+    const extensionRepeated = Array.isArray(extensionHorizon.dst_repeated)
+      ? extensionHorizon.dst_repeated : [];
+    for (let index = 0; index < DAILY_OPERATION_EXTENSION_INTERVALS; index++) {
+      skipped[DAILY_OPERATION_BASE_INTERVALS + index] = extensionSkipped[index] ?? null;
+      repeated[DAILY_OPERATION_BASE_INTERVALS + index] = extensionRepeated[index] ?? null;
+    }
     const isSkipped = Array.from({ length: DAILY_OPERATION_TOTAL_INTERVALS }, (_, index) =>
       this._dailyOperationBool(skipped && skipped[index]) || String(flagArray[index] || "").toLowerCase() === "dst_skipped"
     );
@@ -3350,6 +3361,33 @@ class MarstekVenusPanel extends HTMLElement {
     return plotted;
   }
 
+  _dailyOperationVisibleRange() {
+    const ref = this._r.dailyOperation;
+    if (!ref || !ref.stage.scrollWidth || !ref.viewport.clientWidth) {
+      return [0, DAILY_OPERATION_BASE_INTERVALS - 1];
+    }
+    const scale = DAILY_OPERATION_TOTAL_INTERVALS / ref.stage.scrollWidth;
+    const start = Math.max(0, Math.floor(ref.viewport.scrollLeft * scale) - 1);
+    const end = Math.min(
+      DAILY_OPERATION_TOTAL_INTERVALS - 1,
+      Math.ceil((ref.viewport.scrollLeft + ref.viewport.clientWidth) * scale) + 1,
+    );
+    return [start, end];
+  }
+
+  _scheduleDailyOperationPathRefresh() {
+    if (this._dailyOperationPathRefreshPending) return;
+    const refresh = () => {
+      this._dailyOperationPathRefreshPending = false;
+      if (this._dailyOperationSnapshot) {
+        this._dailyOperationUpdatePaths(this._dailyOperationSnapshot);
+      }
+    };
+    this._dailyOperationPathRefreshPending = true;
+    if (typeof requestAnimationFrame === "function") requestAnimationFrame(refresh);
+    else refresh();
+  }
+
   _dailyOperationPath(values, snapshot, yMax, future) {
     if (!Array.isArray(values)) return "";
     const top = 32, bottom = 164;
@@ -3385,8 +3423,11 @@ class MarstekVenusPanel extends HTMLElement {
     const currentSoc = this._dailyOperationValueAt(snapshot.actualSoc, snapshot.currentIndex);
     if (Array.isArray(projectedSoc) && currentSoc != null) projectedSoc[snapshot.currentIndex] = currentSoc;
     const values = [actualSolar, forecastSolar, actualConsumption, forecastConsumption];
+    const [visibleStart, visibleEnd] = this._dailyOperationVisibleRange();
     const yMax = Math.max(0.1, ...values.flatMap((array) => Array.isArray(array)
-      ? array.map((value) => this._dailyOperationNumber(value)).filter((value) => value != null)
+      ? array.slice(visibleStart, visibleEnd + 1)
+        .map((value) => this._dailyOperationNumber(value))
+        .filter((value) => value != null)
       : []
     )) * 1.12;
     ref.yAxis.innerHTML =
@@ -3424,7 +3465,13 @@ class MarstekVenusPanel extends HTMLElement {
     const ref = this._r.dailyOperation;
     const cell = ref.cells[index];
     const item = this._dailyOperationItem(snapshot, index);
-    const baseAction = item.actions[0] || (item.solarWindow ? "solar-window" : item.decision === "not_needed" ? "not-needed" : "neutral");
+    // A solar window is the background opportunity. If another action (for
+    // example a small discharge) overlaps it, keep the yellow window visible
+    // and render the action as a hatch instead of replacing the window with
+    // the action's solid colour.
+    const baseAction = item.solarWindow
+      ? "solar-window"
+      : item.actions[0] || (item.decision === "not_needed" ? "not-needed" : "neutral");
     cell.className = `daily-op-cell daily-op-base-${baseAction}`;
     cell.classList.toggle("daily-op-real", item.status === "real");
     cell.classList.toggle("daily-op-current", item.status === "current");
@@ -3443,7 +3490,8 @@ class MarstekVenusPanel extends HTMLElement {
     // SVG paint servers cannot be used as CSS backgrounds on HTML buttons.
     // Layer native CSS gradients instead: the base action keeps its fill and
     // each simultaneous action is always visible as an alternating hatch.
-    const patterns = item.actions.slice(1, 3).map((action, patternIndex) =>
+    const patternActions = item.solarWindow ? item.actions : item.actions.slice(1, 3);
+    const patterns = patternActions.map((action, patternIndex) =>
       `repeating-linear-gradient(${patternIndex ? "45deg" : "135deg"}, transparent 0 4px, color-mix(in oklab, ${actionColor[action]} var(--daily-op-shade-opacity), transparent) 4px 6px)`
     );
     cell.style.backgroundImage = patterns.join(", ") || "none";
@@ -6834,7 +6882,7 @@ class MarstekVenusPanel extends HTMLElement {
       .daily-op-soc-axis-ticks { position: absolute; top: 32px; left: 8px; bottom: 26px; display: flex; flex-direction: column; align-items: flex-start; justify-content: space-between; }
       .daily-op-viewport { position: relative; min-width: 0; overflow-x: auto; overflow-y: hidden; scroll-snap-type: x proximity; scrollbar-width: thin; overscroll-behavior-x: contain; outline: none; }
       .daily-op-viewport:focus-visible { box-shadow: inset 0 0 0 2px var(--accent-line); border-radius: 8px; }
-      .daily-op-stage { position: relative; width: 200%; min-width: 1920px; height: 190px; }
+      .daily-op-stage { position: relative; width: 150%; min-width: 1440px; height: 190px; }
       .daily-op-svg { position: absolute; inset: 0; z-index: 1; display: block; width: 100%; height: 190px; overflow: visible; pointer-events: none; }
       .daily-op-grid-lines line { stroke: var(--line); stroke-width: 1; vector-effect: non-scaling-stroke; }
       .daily-op-grid-lines .daily-op-hour-line { stroke: var(--line-strong); }

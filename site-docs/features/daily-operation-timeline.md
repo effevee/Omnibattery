@@ -48,7 +48,9 @@ metadata. The daily series and operation arrays remain 96 values to preserve
 the existing contract. The extension is published separately as
 `extended_horizon` and `extended_projection`, bounded to 48 intervals and
 excluded from Recorder; the entity is safe to use from a dashboard without
-causing control reevaluations.
+causing control reevaluations. Its forecast is produced from detached,
+immutable inputs by a side-effect-free simulator. Predictive diagnostics are
+owned and restored by the pricing lifecycle, never by rendering this entity.
 
 The backend keeps completed quarter-hours immutable. A plan reevaluation may
 replace only the open current interval and the future. Store restoration is

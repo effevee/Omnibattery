@@ -18,9 +18,12 @@ from __future__ import annotations
 import asyncio
 import logging
 import math
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from enum import Enum
 from time import monotonic
+from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, Optional
 
 from homeassistant.helpers import issue_registry as ir
@@ -54,6 +57,8 @@ from ..solar_forecast import (
     get_configured_solar_forecast_sensor,
     read_remaining_solar_kwh,
     read_solar_forecast_kwh,
+    solar_forecast_local_timezone,
+    solar_forecast_period_energy_between,
 )
 from ..tracking.consumption_profile import adjust_remaining_fallback_energy
 from . import (
@@ -66,10 +71,12 @@ from . import (
     notifications,
 )
 from .chronological import (
+    ChronologicalEvaluationRequest,
+    ChronologicalEvaluationResult,
     ChronologicalPlan,
     EnergyInterval,
-    allocate_price_slots,
     build_energy_deadlines,
+    evaluate_chronological_request,
     normalize_energy_shape,
 )
 from .solar_timeline import build_boundaries, build_solar_timeline
@@ -152,6 +159,20 @@ _CHRONOLOGICAL_DIAGNOSTIC_KEYS = (
 )
 
 
+@dataclass(frozen=True)
+class ChronologicalProjectionResult:
+    """Read-only dashboard projection adapted from current runtime inputs.
+
+    Unlike :class:`ChronologicalEvaluationResult`, this contains the source and
+    solar diagnostics gathered by ``PricingManager``.  It never aliases or
+    mutates the caller's base decision mapping and never persists controller
+    diagnostics.
+    """
+
+    plan: ChronologicalPlan | None
+    diagnostics: Mapping[str, Any]
+
+
 class DynamicPricingEvaluationHorizon(Enum):
     """Energy horizon used to construct a dynamic-pricing calendar.
 
@@ -176,6 +197,129 @@ class PricingManager:
     def _now(self) -> datetime:
         """Return local wall-clock time, isolated for deterministic slot tests."""
         return datetime.now()
+
+    @staticmethod
+    def evaluate_chronological_projection(
+        request: ChronologicalEvaluationRequest,
+    ) -> ChronologicalEvaluationResult:
+        """Run the side-effect-free chronological evaluator.
+
+        This small forwarding API is intentionally safe for dashboard callers:
+        it receives an immutable request and cannot inspect or alter the
+        controller.  Runtime-control code is responsible for adapting live
+        state and explicitly persisting any diagnostics it wants to retain.
+        """
+        return evaluate_chronological_request(request)
+
+    def build_extended_chronological_projection(
+        self,
+        *,
+        now: datetime,
+        slots: Sequence[PriceSlot],
+        base_decision_data: Mapping[str, Any] | None,
+        price_ceiling: float | None,
+        horizon_end: datetime,
+    ) -> ChronologicalProjectionResult:
+        """Build a cross-midnight dashboard projection without runtime writes.
+
+        This is the only controller-aware adapter intended for Daily
+        Operation.  It reads the current forecast/profile collaborators, but
+        works on a private copy of ``base_decision_data`` and explicitly
+        disables diagnostic persistence.  The required extended horizon keeps
+        it distinct from the control planner's end-of-local-day contract.
+        """
+        daily_horizon_end = now.replace(
+            hour=0, minute=0, second=0, microsecond=0
+        ) + timedelta(days=1)
+        comparable_horizon_end = horizon_end
+        if comparable_horizon_end.tzinfo is None and now.tzinfo is not None:
+            comparable_horizon_end = comparable_horizon_end.replace(tzinfo=now.tzinfo)
+        elif comparable_horizon_end.tzinfo is not None and now.tzinfo is None:
+            comparable_horizon_end = comparable_horizon_end.replace(tzinfo=None)
+        elif comparable_horizon_end.tzinfo is not None:
+            comparable_horizon_end = comparable_horizon_end.astimezone(now.tzinfo)
+        if comparable_horizon_end <= daily_horizon_end:
+            raise ValueError(
+                "dashboard projection horizon must extend beyond the local day"
+            )
+
+        diagnostics_data = dict(base_decision_data or {})
+        plan = self._build_chronological_plan_for_horizon(
+            now=now,
+            slots=list(slots),
+            decision_data=diagnostics_data,
+            price_ceiling=price_ceiling,
+            diagnostic_only=True,
+            horizon_end=comparable_horizon_end,
+            persist_diagnostics=False,
+        )
+        return ChronologicalProjectionResult(
+            plan=plan,
+            diagnostics=self._freeze_chronological_projection_diagnostics(
+                diagnostics_data
+            ),
+        )
+
+    async def async_refresh_chronological_diagnostics(
+        self, *, now: datetime | None = None
+    ) -> bool:
+        """Refresh only the canonical end-of-day diagnostic snapshot.
+
+        This is deliberately separate from both executable pricing plans and
+        the Daily Operation view.  It builds a private current-horizon balance
+        and persists only the chronological fields consumed by diagnostic
+        entities.  In particular it must not replace the live decision,
+        schedule, charge-delay state, or issue a battery command.
+        """
+        current = now if isinstance(now, datetime) else self._now()
+        horizon_end = current.replace(
+            hour=0, minute=0, second=0, microsecond=0
+        ) + timedelta(days=1)
+        if horizon_end <= current:
+            return False
+
+        try:
+            # The balance calculation is intentionally local.  It supplies
+            # the remaining-day scalar inputs needed by the canonical planner,
+            # but is never assigned to ``_last_decision_data`` here.
+            decision_data = dict(
+                await self._current_horizon_grid_charging_decision(now=current)
+            )
+            plan = self._build_chronological_plan(
+                now=current,
+                slots=[],
+                decision_data=decision_data,
+                price_ceiling=None,
+                diagnostic_only=True,
+            )
+        except Exception as exc:  # noqa: BLE001 - diagnostics must not gate setup
+            _LOGGER.debug(
+                "Chronological diagnostics refresh failed: %s",
+                exc,
+                exc_info=True,
+            )
+            return False
+        return plan is not None
+
+    @staticmethod
+    def _freeze_chronological_projection_diagnostics(
+        diagnostics: Mapping[str, Any],
+    ) -> Mapping[str, Any]:
+        """Return the projection fields as a mapping no caller can mutate."""
+        result: dict[str, Any] = {
+            key: diagnostics[key]
+            for key in _CHRONOLOGICAL_DIAGNOSTIC_KEYS
+            if key in diagnostics
+        }
+        result["chronological_planning_active"] = bool(
+            diagnostics.get("chronological_planning_active", False)
+        )
+        if isinstance(result.get("energy_deadlines"), list):
+            result["energy_deadlines"] = tuple(
+                MappingProxyType(dict(item)) if isinstance(item, dict) else item
+                for item in result["energy_deadlines"]
+            )
+        return MappingProxyType(result)
 
     def _time_slot_forecast_grace_s(self) -> float:
         """Return the configured forecast retry grace for Time Slot mode."""
@@ -2066,41 +2210,136 @@ class PricingManager:
         self,
         now: datetime,
         decision_data: dict[str, Any],
+        *,
+        horizon_end: datetime | None = None,
     ) -> SolarForecastInput:
         """Read one normalized forecast input while preserving dated periods."""
         provided = decision_data.get("solar_forecast_input")
         if isinstance(provided, SolarForecastInput):
-            return provided
-        raw = decision_data.get("solar_remaining_raw_kwh")
-        if raw is None:
-            raw = decision_data.get("remaining_solar_kwh", decision_data.get("solar_forecast_kwh"))
-        periods = decision_data.get("solar_forecast_periods")
-        if raw is None:
+            solar_input = provided
+        else:
+            existing_conversion = str(
+                decision_data.get("solar_forecast_conversion", "none") or "none"
+            )
+            raw = (
+                None
+                if "extended_dated_periods" in existing_conversion
+                else decision_data.get("solar_remaining_raw_kwh")
+            )
+            if raw is None:
+                raw = decision_data.get(
+                    "remaining_solar_kwh",
+                    decision_data.get("solar_forecast_kwh"),
+                )
+            periods = decision_data.get("solar_forecast_periods")
+            temporal_shape = decision_data.get("solar_temporal_shape")
+            if temporal_shape is not None:
+                try:
+                    temporal_shape = tuple(temporal_shape)
+                except TypeError:
+                    temporal_shape = None
+            solar_input = (
+                None
+                if raw is None
+                else SolarForecastInput(
+                    raw,
+                    decision_data.get("solar_forecast_diagnostic_source")
+                    or decision_data.get("solar_forecast_source")
+                    or "remaining",
+                    temporal_shape=temporal_shape,
+                    periods=tuple(periods) if periods else None,
+                    original_source=decision_data.get(
+                        "solar_forecast_original_source"
+                    ),
+                    conversion=decision_data.get(
+                        "solar_forecast_conversion", "none"
+                    ),
+                )
+            )
+
+        if solar_input is None:
             try:
-                return read_remaining_solar_kwh(self._hass, self._controller, now=now)
+                solar_input = read_remaining_solar_kwh(
+                    self._hass,
+                    self._controller,
+                    now=now,
+                )
             except Exception as exc:  # noqa: BLE001
                 _LOGGER.debug("Solar timeline: forecast adapter failed: %s", exc)
-                return SolarForecastInput(
+                solar_input = SolarForecastInput(
                     0.0,
                     "fallback",
                     original_source=None,
                     conversion="unsafe_zero",
                 )
-        temporal_shape = decision_data.get("solar_temporal_shape")
-        if temporal_shape is not None:
-            try:
-                temporal_shape = tuple(temporal_shape)
-            except TypeError:
-                temporal_shape = None
+
+        periods = solar_input.periods
+        if not periods:
+            return solar_input
+
+        timezone = solar_forecast_local_timezone(
+            self._hass,
+            self._controller,
+            now,
+        )
+        local_now = (
+            now.replace(tzinfo=timezone)
+            if now.tzinfo is None
+            else now.astimezone(timezone)
+        )
+        day_end = local_now.replace(
+            hour=0,
+            minute=0,
+            second=0,
+            microsecond=0,
+        ) + timedelta(days=1)
+        local_horizon_end = day_end
+        if horizon_end is not None:
+            local_horizon_end = (
+                horizon_end.replace(tzinfo=timezone)
+                if horizon_end.tzinfo is None
+                else horizon_end.astimezone(timezone)
+            )
+
+        remaining = solar_input.remaining_kwh
+        conversions = []
+        if solar_input.conversion and solar_input.conversion != "none":
+            conversions.append(solar_input.conversion)
+        current_day_periods = solar_forecast_period_energy_between(
+            periods,
+            local_now,
+            min(day_end, local_horizon_end),
+            timezone=timezone,
+        )
+        if remaining <= 1e-9 and current_day_periods > 1e-9:
+            remaining = current_day_periods
+            conversions.append("dated_periods_zero_scalar")
+
+        if local_horizon_end > day_end:
+            extension = solar_forecast_period_energy_between(
+                periods,
+                day_end,
+                local_horizon_end,
+                timezone=timezone,
+            )
+            if extension > 1e-9:
+                remaining += extension
+                conversions.append("extended_dated_periods")
+
+        conversion = "+".join(dict.fromkeys(conversions)) or "none"
+        if (
+            abs(remaining - solar_input.remaining_kwh) <= 1e-9
+            and conversion == solar_input.conversion
+        ):
+            return solar_input
         return SolarForecastInput(
-            raw,
-            decision_data.get("solar_forecast_diagnostic_source")
-            or decision_data.get("solar_forecast_source")
-            or "remaining",
-            temporal_shape=temporal_shape,
-            periods=tuple(periods) if periods else None,
-            original_source=decision_data.get("solar_forecast_original_source"),
-            conversion=decision_data.get("solar_forecast_conversion", "none"),
+            remaining,
+            solar_input.source,
+            temporal_shape=solar_input.temporal_shape,
+            periods=periods,
+            original_source=solar_input.original_source,
+            conversion=conversion,
+            horizon=("extended" if local_horizon_end > day_end else solar_input.horizon),
         )
 
     def _store_chronological_diagnostics(
@@ -2136,17 +2375,39 @@ class PricingManager:
         decision_data: dict[str, Any],
         price_ceiling: float | None,
         diagnostic_only: bool = False,
-        horizon_end: datetime | None = None,
     ) -> ChronologicalPlan | None:
-        """Adapt live controller forecasts to the pure chronological planner.
+        """Build the controller-owned plan, strictly through local midnight."""
+        horizon_end = now.replace(
+            hour=0, minute=0, second=0, microsecond=0
+        ) + timedelta(days=1)
+        return self._build_chronological_plan_for_horizon(
+            now=now,
+            slots=slots,
+            decision_data=decision_data,
+            price_ceiling=price_ceiling,
+            diagnostic_only=diagnostic_only,
+            horizon_end=horizon_end,
+            persist_diagnostics=True,
+        )
+
+    def _build_chronological_plan_for_horizon(
+        self,
+        *,
+        now: datetime,
+        slots: list[PriceSlot],
+        decision_data: dict[str, Any],
+        price_ceiling: float | None,
+        diagnostic_only: bool,
+        horizon_end: datetime,
+        persist_diagnostics: bool,
+    ) -> ChronologicalPlan | None:
+        """Adapt live forecasts for a bounded control or display horizon.
 
         A diagnostic-only build simulates the same horizon without claiming
         that an executable chronological charge calendar is active.  This is
         useful when the balance is already sufficient: the projection is still
-        valuable even though no grid charge will be scheduled.  ``horizon_end``
-        is intentionally opt-in: the control planner keeps its established
-        end-of-local-day contract, while dashboard-only callers can request a
-        bounded cross-midnight preview.
+        valuable even though no grid charge will be scheduled. Only the
+        read-only projection adapter may request a cross-midnight horizon.
         """
         tracker = getattr(self._controller, "_consumption_tracker", None)
         profile = getattr(tracker, "consumption_profile", None)
@@ -2156,14 +2417,13 @@ class PricingManager:
         daily_horizon_end = now.replace(
             hour=0, minute=0, second=0, microsecond=0
         ) + timedelta(days=1)
-        if horizon_end is None:
-            horizon_end = daily_horizon_end
-        elif horizon_end.tzinfo is None:
+        if horizon_end.tzinfo is None:
             horizon_end = horizon_end.replace(tzinfo=now.tzinfo)
         elif now.tzinfo is None:
             horizon_end = horizon_end.replace(tzinfo=None)
         else:
             horizon_end = horizon_end.astimezone(now.tzinfo)
+        is_extended_horizon = horizon_end > daily_horizon_end
         if horizon_end <= now:
             return None
         try:
@@ -2175,11 +2435,21 @@ class PricingManager:
             )
             boundaries = build_boundaries(now, horizon_end)
             consumption_raw: list[float] = []
+            intervals_by_date = getattr(forecast, "intervals_by_date", None) or {}
             for start, end in boundaries:
                 index = start.hour * 4 + start.minute // 15
+                # The range API preserves its original one-day contract by
+                # aggregating matching wall-clock bins.  A cross-midnight
+                # dashboard horizon may contain the same bin on two dates,
+                # though, so use the retained date-specific shape whenever it
+                # is available.  This also leaves repeated DST bins as two
+                # physical intervals of their nominal daily value.
+                date_intervals = intervals_by_date.get(
+                    start.date(), forecast.intervals_kwh
+                )
                 bucket = (
-                    float(forecast.intervals_kwh[index])
-                    if index < len(forecast.intervals_kwh)
+                    float(date_intervals[index])
+                    if index < len(date_intervals)
                     else 0.0
                 )
                 fraction = max(
@@ -2201,7 +2471,11 @@ class PricingManager:
             consumption_total = max(0.0, float(forecast_total or 0.0))
             consumption = normalize_energy_shape(consumption_raw, consumption_total)
 
-            solar_input = self._solar_timeline_input(now, decision_data)
+            solar_input = self._solar_timeline_input(
+                now,
+                decision_data,
+                horizon_end=horizon_end,
+            )
             safety = max(
                 0.0,
                 float(
@@ -2250,12 +2524,35 @@ class PricingManager:
                         )
                 except Exception as exc:  # noqa: BLE001
                     _LOGGER.debug("Solar timeline: learned profile unavailable: %s", exc)
+            provider_periods = solar_input.periods
+            temporal_shape = solar_input.temporal_shape
+            if is_extended_horizon and provider_periods:
+                # A cross-midnight provider curve may contain a normal overnight
+                # gap. Map its dated periods directly onto the exact boundaries;
+                # the single-day daylight coverage validator cannot represent
+                # two separate solar windows safely.
+                timezone = solar_forecast_local_timezone(
+                    self._hass,
+                    self._controller,
+                    now,
+                )
+                temporal_shape = tuple(
+                    solar_forecast_period_energy_between(
+                        provider_periods,
+                        start,
+                        end,
+                        timezone=timezone,
+                    )
+                    for start, end in boundaries
+                )
+                provider_periods = None
+
             timeline = build_solar_timeline(
                 boundaries,
                 solar_input.remaining_kwh,
                 safety_margin_kwh=safety,
-                provider_periods=solar_input.periods,
-                temporal_shape=solar_input.temporal_shape,
+                provider_periods=provider_periods,
+                temporal_shape=temporal_shape,
                 learned_shape=(learned_snapshot.shape if learned_snapshot else None),
                 learned_mature=bool(learned_snapshot and learned_snapshot.mature),
                 solar_start=solar_start_dt,
@@ -2370,18 +2667,22 @@ class PricingManager:
                 max(0.0, float(self._controller.max_contracted_power)),
                 max(0.0, float(self._controller.max_charge_capacity)),
             ) / 1000.0
-            plan = allocate_price_slots(
-                intervals,
-                deadlines,
-                slots,
-                total_required_kwh=required,
-                effective_power_kw=power_kw,
-                now=now,
-                horizon_end=horizon_end,
-                headroom_kwh=headroom,
-                usable_initial_kwh=usable,
-                max_price_threshold=price_ceiling,
+            evaluation = self.evaluate_chronological_projection(
+                ChronologicalEvaluationRequest(
+                    now=now,
+                    horizon_end=horizon_end,
+                    intervals=tuple(intervals),
+                    price_slots=tuple(slots),
+                    total_required_kwh=required,
+                    effective_power_kw=power_kw,
+                    headroom_kwh=headroom,
+                    usable_initial_kwh=usable,
+                    max_price_threshold=price_ceiling,
+                    deadlines=tuple(deadlines),
+                )
             )
+            plan = evaluation.plan
+            diagnostics = evaluation.diagnostics
             decision_data.update({
                 "chronological_planning_active": not diagnostic_only,
                 "chronological_source": forecast.source,
@@ -2404,35 +2705,42 @@ class PricingManager:
                     and solar_source != "sinusoidal"
                 ),
                 "earliest_projected_depletion": (
-                    plan.earliest_depletion_at.isoformat()
-                    if plan.earliest_depletion_at
+                    diagnostics.earliest_projected_depletion.isoformat()
+                    if diagnostics.earliest_projected_depletion
                     else None
                 ),
-                "minimum_projected_energy_kwh": round(plan.minimum_projected_energy_kwh, 3),
+                "minimum_projected_energy_kwh": round(
+                    diagnostics.minimum_projected_energy_kwh, 3
+                ),
                 "minimum_projected_soc": round(
                     weighted_min_soc
-                    + plan.minimum_projected_energy_kwh
+                    + diagnostics.minimum_projected_energy_kwh
                     / total_capacity
                     * 100.0,
                     2,
                 )
                 if total_capacity > 0
                 else None,
-                "deadline_required_kwh": round(plan.deadline_required_kwh, 3),
-                "flexible_required_kwh": round(plan.flexible_required_kwh, 3),
-                "deadline_shortfall_kwh": round(plan.deadline_shortfall_kwh, 3),
-                "total_shortfall_kwh": round(plan.total_shortfall_kwh, 3),
-                "chronological_plan_reason": plan.reason,
+                "deadline_required_kwh": round(diagnostics.deadline_required_kwh, 3),
+                "flexible_required_kwh": round(diagnostics.flexible_required_kwh, 3),
+                "deadline_shortfall_kwh": round(diagnostics.deadline_shortfall_kwh, 3),
+                "total_shortfall_kwh": round(diagnostics.total_shortfall_kwh, 3),
+                "chronological_plan_reason": diagnostics.reason,
                 "energy_deadlines": [
                     {
                         "deadline": item.deadline.isoformat(),
                         "required_kwh": round(item.required_cumulative_kwh, 3),
                         "kind": item.kind,
                     }
-                    for item in plan.deadlines
+                    for item in diagnostics.energy_deadlines
                 ],
             })
-            self._store_chronological_diagnostics(decision_data)
+            # The dashboard's explicit cross-midnight simulation is a view,
+            # not a new control decision. Retaining its expanded solar budget
+            # would make the next refresh add tomorrow's periods a second time
+            # and would leak a multi-day total into predictive diagnostics.
+            if persist_diagnostics and not is_extended_horizon:
+                self._store_chronological_diagnostics(decision_data)
             return plan
         except (AttributeError, IndexError, TypeError, ValueError) as exc:
             _LOGGER.warning("Dynamic pricing: chronological planning fallback: %s", exc)
@@ -2449,43 +2757,76 @@ class PricingManager:
         synthetic price. Splitting overnight windows at midnight keeps the
         energy horizon strict while retaining the currently active portion.
         """
-        day_name = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"][
-            now.weekday()
-        ]
         midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
         horizon_end = midnight + timedelta(days=1)
+        return self._time_slot_price_slots_for_horizon(now, horizon_end)
+
+    def _time_slot_price_slots_for_horizon(
+        self,
+        now: datetime,
+        horizon_end: datetime,
+    ) -> list[PriceSlot]:
+        """Materialize configured Time Slot windows within a preview horizon.
+
+        This is for diagnostic/dashboard projections only.  Runtime control
+        must continue to call :meth:`_time_slot_price_slots`, whose horizon is
+        strictly the current local day.  Each calendar date is evaluated with
+        the same ``days`` semantics as the existing helper, so an overnight
+        window is represented by its two local-day portions.
+        """
+        if horizon_end.tzinfo is None and now.tzinfo is not None:
+            horizon_end = horizon_end.replace(tzinfo=now.tzinfo)
+        elif now.tzinfo is None and horizon_end.tzinfo is not None:
+            horizon_end = horizon_end.replace(tzinfo=None)
+        elif now.tzinfo is not None:
+            horizon_end = horizon_end.astimezone(now.tzinfo)
+        if horizon_end <= now:
+            return []
+
+        midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
         result: list[PriceSlot] = []
-        for configured in getattr(self._controller, "charging_time_slots", []):
-            if not isinstance(configured, dict):
-                continue
-            if configured.get("enabled", True) is False:
-                continue
-            days = configured.get("days", []) or []
-            if days and day_name not in days:
-                continue
-            try:
-                start_time = datetime.strptime(
-                    str(configured["start_time"]), "%H:%M"
-                ).time()
-                end_time = datetime.strptime(
-                    str(configured["end_time"]), "%H:%M"
-                ).time()
-            except (KeyError, TypeError, ValueError):
-                continue
-            start = datetime.combine(now.date(), start_time)
-            end = datetime.combine(now.date(), end_time)
-            pieces = (
-                [(start, end)]
-                if start_time <= end_time
-                else [(midnight, end), (start, horizon_end)]
-            )
-            result.extend(
-                PriceSlot(piece_start, piece_end, 0.0)
-                for piece_start, piece_end in pieces
-                if piece_end > now
-                and piece_start < horizon_end
-                and piece_end > piece_start
-            )
+        current_day = midnight
+        while current_day < horizon_end:
+            day_name = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"][
+                current_day.weekday()
+            ]
+            next_midnight = current_day + timedelta(days=1)
+            for configured in getattr(self._controller, "charging_time_slots", []):
+                if not isinstance(configured, dict):
+                    continue
+                if configured.get("enabled", True) is False:
+                    continue
+                days = configured.get("days", []) or []
+                if days and day_name not in days:
+                    continue
+                try:
+                    start_time = datetime.strptime(
+                        str(configured["start_time"]), "%H:%M"
+                    ).time()
+                    end_time = datetime.strptime(
+                        str(configured["end_time"]), "%H:%M"
+                    ).time()
+                except (KeyError, TypeError, ValueError):
+                    continue
+                start = datetime.combine(
+                    current_day.date(), start_time, tzinfo=now.tzinfo
+                )
+                end = datetime.combine(
+                    current_day.date(), end_time, tzinfo=now.tzinfo
+                )
+                pieces = (
+                    [(start, end)]
+                    if start_time <= end_time
+                    else [(current_day, end), (start, next_midnight)]
+                )
+                result.extend(
+                    PriceSlot(piece_start, min(piece_end, horizon_end), 0.0)
+                    for piece_start, piece_end in pieces
+                    if piece_end > now
+                    and piece_start < horizon_end
+                    and piece_end > piece_start
+                )
+            current_day = next_midnight
         return sorted(set(result), key=lambda slot: (slot.start, slot.end))
 
     def _apply_time_slot_chronological_plan(
@@ -3421,7 +3762,7 @@ class PricingManager:
             consumption_scope = "remaining"
         # Keep the scalar helper as the compatibility seam used by existing
         # callers/tests; read the richer contract separately for dated periods.
-        remaining_solar_kwh = self._remaining_solar_today_kwh(now_h)
+        remaining_solar_kwh = self._remaining_solar_today_kwh(now)
         solar_forecast_input = self._read_remaining_solar_input(now=now)
 
         decision = await controller._should_activate_grid_charging(
@@ -3463,7 +3804,9 @@ class PricingManager:
         )
         return decision
 
-    async def _current_horizon_grid_charging_decision(self) -> dict:
+    async def _current_horizon_grid_charging_decision(
+        self, *, now: datetime | None = None
+    ) -> dict:
         """Evaluate direct Time Slot/Real-Time Price gates coherently.
 
         These paths run during the day rather than solely at 00:05. When a
@@ -3479,7 +3822,7 @@ class PricingManager:
                 None,
             ) is not None
         ):
-            return await self._evaluate_remaining_grid_charging()
+            return await self._evaluate_remaining_grid_charging(now=now)
         return await self._controller._should_activate_grid_charging()
 
     @staticmethod
@@ -3569,7 +3912,7 @@ class PricingManager:
         except (AttributeError, TypeError, ValueError):
             return None
 
-    def _remaining_solar_today_kwh(self, now_h: float) -> float:
+    def _remaining_solar_today_kwh(self, now_h: datetime | float) -> float:
         """Solar generation still expected today (kWh), from the forecast sensor.
 
         Three progressively weaker sources: actual accumulator (forecast −
@@ -3646,7 +3989,7 @@ class PricingManager:
 
         # --- Remaining solar expected today (raw generation, before consumption) ---
         now_h = now.hour + now.minute / 60.0
-        remaining_solar_kwh = self._remaining_solar_today_kwh(now_h)
+        remaining_solar_kwh = self._remaining_solar_today_kwh(now)
 
         # --- Remaining house consumption until midnight (handoff to the 00:05
         # evaluation, which re-plans the next day). Keep this identical to other
