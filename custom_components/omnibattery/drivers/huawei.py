@@ -1100,10 +1100,21 @@ class HuaweiSolarDriver(BatteryDriver):
         """Release the battery back to the inverter before shutting down.
 
         Unlike ``apply_setpoint(0)``, this is a real stop: leaving a forcible
-        command latched when Omnibattery goes away would freeze the battery at
-        whatever it was last told until the command's duration expires.
+        command latched when Omnibattery goes away freezes the battery at
+        whatever it was last told — and on this hybrid a latched discharge also
+        keeps the strings dark, so the installation loses its solar harvest
+        until someone clears the registers by hand.
+
+        Must take the same path the set-points took. Releasing through the
+        service while writing directly leaves the command exactly where it was:
+        the direct path needs no huawei_solar device, so there is none to
+        address, and the failure is silent because shutdown suppresses it.
         """
-        ok = await self._call_service("stop_forcible_charge", {})
+        if self._direct_write:
+            result = await self._write_setpoint_registers(0, read_back=False)
+            ok = result.ok
+        else:
+            ok = await self._call_service("stop_forcible_charge", {})
         if ok:
             self._last_written_w = None
             self._last_write_monotonic = 0.0

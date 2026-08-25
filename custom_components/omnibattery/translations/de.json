@@ -582,6 +582,26 @@
           "slave_id": "Modbus slave/unit id (default 1)"
         }
       },
+        "reconfigure_battery_huawei": {
+          "title": "Batterie {battery_num} neu konfigurieren — Verbindung (Huawei)",
+          "description": "Modbus-Zugang und Huawei-Solar-Batteriegerät für Batterie {battery_num} ändern. Alle übrigen Einstellungen bleiben erhalten.",
+          "data": {
+            "name": "Name",
+            "host": "IP-Adresse",
+            "port": "Modbus-Port",
+            "slave_id": "Modbus-Slave-ID (leer lassen zum Suchen)",
+            "huawei_battery_device": "Huawei-Solar-Batteriegerät",
+            "huawei_direct_write": "Direkte Modbus-Schreibzugriffe"
+          },
+          "data_description": {
+            "name": "Sprechender Name für diese Batterie",
+            "host": "Adresse des Modbus-Proxys oder Wechselrichters, von dem Omnibattery liest",
+            "port": "Modbus-TCP-Port (Standard 502)",
+            "slave_id": "Unit-ID des Wechselrichters — nicht die der EMMA oder einer Wallbox. Leer lassen, dann sucht die Einrichtung sie selbst: sie fragt die üblichen IDs ab, erkennt jeden Wechselrichter an seinem Modellregister und übernimmt den, an dem eine Batterie hängt. Melden sich mehrere — Huawei-Wechselrichter lassen sich kaskadieren — kommt ein Auswahlschritt. Die Suche dauert etwa 15 Sekunden.",
+            "huawei_battery_device": "Nur nötig, wenn direkte Modbus-Schreibzugriffe ausgeschaltet sind — dann laufen die Sollwerte über die Dienste der Huawei-Solar-Integration. Mit direkten Schreibzugriffen bleibt das Feld leer.",
+            "huawei_direct_write": "Sollwerte direkt als Modbus-Register schreiben statt über die Dienste der Huawei-Solar-Integration. Dieselbe Registerfolge, aber ohne Umweg über die Dienstschicht und ohne Wartezeit an deren Kommunikationssperre. Standardmäßig aus — erst einschalten, wenn der bewährte Weg läuft."
+          }
+        },
       "reconfigure_battery_hoymiles": {
         "title": "Batterie {battery_num} neu konfigurieren — Hoymiles MQTT",
         "description": "Geben Sie die Hoymiles MQTT-Geräte-ID ein; Home Assistant verwaltet den Broker und Omnibattery erkennt das Modell.",

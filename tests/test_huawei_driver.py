@@ -1959,3 +1959,153 @@ def test_the_grid_sensor_is_named_in_every_language():
     ):
         entity = json.load(open(path, encoding="utf-8"))["entity"]["sensor"]
         assert entity["grid_power"]["name"], path
+
+
+# ----------------------------------------------------------------------
+# releasing on shutdown
+#
+# A forcible command left standing does not expire in any useful sense: one
+# written at 04:32 was still in force at 09:22 on the reference installation,
+# and on this hybrid a latched discharge keeps the strings dark, so the roof
+# produces nothing until the registers are cleared by hand.
+# ----------------------------------------------------------------------
+@pytest.mark.asyncio
+async def test_shutdown_releases_over_the_path_the_commands_took():
+    """Releasing through the service while writing registers reaches nothing.
+
+    The direct path needs no huawei_solar device, so there is none to address,
+    and the failure is silent because shutdown suppresses the warning. That is
+    why switching the integration off did not end the fault.
+    """
+    driver, client = _direct(device_id="")
+    assert await driver.standby() is True
+    written = _written(client)
+    assert written[0] == (47100, [0]), "the mode register must be cleared first"
+    assert 47249 in {address for address, _values in written}
+
+
+@pytest.mark.asyncio
+async def test_the_service_path_still_releases_through_the_service():
+    hass = _hass_with_services()
+    driver = _driver(_fake_client(), hass=hass)
+    assert await driver.standby() is True
+    assert hass.services.async_call.await_args.args[1] == "stop_forcible_charge"
+
+
+# ----------------------------------------------------------------------
+# backup mode
+#
+# A hybrid has no backup switch to read: it reports a state, and this driver
+# names the three a SUN2000 distinguishes. The control layer compared against
+# the register convention alone (0 = on), which reads every one of those
+# strings as "off" — so a Huawei would keep taking commands through a power cut.
+# ----------------------------------------------------------------------
+@pytest.mark.parametrize(
+    "value, armed",
+    [
+        ("Off-grid", True),    # feeding the backup circuit right now
+        ("Ready", True),       # switch armed, still on grid
+        ("Disabled", False),
+        (0, True),             # the register convention: 0 is on
+        (1, False),
+        (None, False),
+    ],
+)
+def test_both_shapes_of_backup_state_are_understood(value, armed):
+    from custom_components.omnibattery import _backup_switch_enabled
+
+    assert _backup_switch_enabled(value) is armed
+
+
+def test_the_driver_only_ever_reports_states_the_guard_knows():
+    """A fourth spelling would silently disable the guard again."""
+    import inspect
+
+    from custom_components.omnibattery import _backup_switch_enabled
+    from custom_components.omnibattery.drivers import huawei
+
+    source = inspect.getsource(huawei.HuaweiSolarDriver.read_telemetry)
+    published = {
+        line.split('"')[1]
+        for line in source.split("\n")
+        if line.strip().startswith(('"Off-grid" if', 'else "Ready" if', 'else "Disabled"'))
+    }
+    assert published == {"Off-grid", "Ready", "Disabled"}
+    # Every one of them decides the guard one way or the other, none by accident.
+    assert _backup_switch_enabled("Off-grid") and _backup_switch_enabled("Ready")
+    assert not _backup_switch_enabled("Disabled")
+
+
+# ----------------------------------------------------------------------
+# the flows that come after setup
+#
+# Setup had a Huawei branch from the start; the two flows a user reaches later
+# did not, and both fell through to Marstek. Reported in review of the upstream
+# pull request.
+# ----------------------------------------------------------------------
+def test_the_options_limits_use_the_probed_hardware_not_a_marstek_default():
+    """Saving options would otherwise cut a 7 kW battery down to 2500 W."""
+    import inspect
+
+    from custom_components.omnibattery.config_flow import (
+        MarstekVenusConfigFlow,
+        OptionsFlowHandler,
+    )
+
+    for flow in (MarstekVenusConfigFlow, OptionsFlowHandler):
+        source = inspect.getsource(flow.async_step_battery_limits)
+        assert '_huawei_power_ceilings' in source, flow.__name__
+        assert 'brand == "huawei"' in source, flow.__name__
+
+
+def test_reconfiguring_a_huawei_battery_offers_the_huawei_form():
+    """It used to receive the Marstek form: a battery version, a slave id
+    meaning something else, and none of the fields this brand needs."""
+    import inspect
+
+    from custom_components.omnibattery.config_flow import MarstekVenusConfigFlow
+
+    routing = inspect.getsource(MarstekVenusConfigFlow.async_step_reconfigure_battery)
+    assert 'brand", "marstek") == "huawei"' in routing
+    assert "async_step_reconfigure_battery_huawei" in routing
+    assert hasattr(MarstekVenusConfigFlow, "async_step_reconfigure_battery_huawei")
+
+
+@pytest.mark.asyncio
+async def test_the_reconfigure_form_carries_the_battery_over(monkeypatch):
+    from types import SimpleNamespace
+
+    from custom_components.omnibattery import config_flow as mod
+
+    battery = {
+        "name": "Huawei LUNA2000", "host": "192.168.1.5", "port": 502, "slave_id": 4,
+        "brand": "huawei", "huawei_direct_write": True,
+    }
+    flow = mod.MarstekVenusConfigFlow()
+    flow.battery_index = 0
+    flow.hass = SimpleNamespace(
+        config_entries=SimpleNamespace(async_entries=lambda _domain: [object()])
+    )
+    entry = SimpleNamespace(data={"batteries": [battery]})
+    monkeypatch.setattr(mod.MarstekVenusConfigFlow, "_get_reconfigure_entry", lambda self: entry)
+
+    form = await flow.async_step_reconfigure_battery_huawei()
+    assert form["step_id"] == "reconfigure_battery_huawei"
+    fields = {marker.schema: marker for marker in form["data_schema"].schema}
+    assert "huawei_direct_write" in fields
+    # The current address is offered again rather than asked for afresh.
+    assert fields["host"].default() == "192.168.1.5"
+    assert fields["slave_id"].description["suggested_value"] == 4
+
+
+def test_the_reconfigure_step_is_named_in_every_language():
+    import glob
+    import json
+
+    for path in ["custom_components/omnibattery/strings.json"] + sorted(
+        glob.glob("custom_components/omnibattery/translations/*.json")
+    ):
+        step = json.load(open(path, encoding="utf-8"))["config"]["step"]
+        entry = step["reconfigure_battery_huawei"]
+        assert entry["title"] and entry["description"], path
+        assert entry["data"]["huawei_direct_write"], path
