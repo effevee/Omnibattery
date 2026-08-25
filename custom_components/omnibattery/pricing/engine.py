@@ -54,6 +54,8 @@ from ..solar_forecast import (
     get_configured_solar_forecast_sensor,
     read_remaining_solar_kwh,
     read_solar_forecast_kwh,
+    solar_forecast_local_timezone,
+    solar_forecast_period_energy_between,
 )
 from ..tracking.consumption_profile import adjust_remaining_fallback_energy
 from . import (
@@ -2066,41 +2068,136 @@ class PricingManager:
         self,
         now: datetime,
         decision_data: dict[str, Any],
+        *,
+        horizon_end: datetime | None = None,
     ) -> SolarForecastInput:
         """Read one normalized forecast input while preserving dated periods."""
         provided = decision_data.get("solar_forecast_input")
         if isinstance(provided, SolarForecastInput):
-            return provided
-        raw = decision_data.get("solar_remaining_raw_kwh")
-        if raw is None:
-            raw = decision_data.get("remaining_solar_kwh", decision_data.get("solar_forecast_kwh"))
-        periods = decision_data.get("solar_forecast_periods")
-        if raw is None:
+            solar_input = provided
+        else:
+            existing_conversion = str(
+                decision_data.get("solar_forecast_conversion", "none") or "none"
+            )
+            raw = (
+                None
+                if "extended_dated_periods" in existing_conversion
+                else decision_data.get("solar_remaining_raw_kwh")
+            )
+            if raw is None:
+                raw = decision_data.get(
+                    "remaining_solar_kwh",
+                    decision_data.get("solar_forecast_kwh"),
+                )
+            periods = decision_data.get("solar_forecast_periods")
+            temporal_shape = decision_data.get("solar_temporal_shape")
+            if temporal_shape is not None:
+                try:
+                    temporal_shape = tuple(temporal_shape)
+                except TypeError:
+                    temporal_shape = None
+            solar_input = (
+                None
+                if raw is None
+                else SolarForecastInput(
+                    raw,
+                    decision_data.get("solar_forecast_diagnostic_source")
+                    or decision_data.get("solar_forecast_source")
+                    or "remaining",
+                    temporal_shape=temporal_shape,
+                    periods=tuple(periods) if periods else None,
+                    original_source=decision_data.get(
+                        "solar_forecast_original_source"
+                    ),
+                    conversion=decision_data.get(
+                        "solar_forecast_conversion", "none"
+                    ),
+                )
+            )
+
+        if solar_input is None:
             try:
-                return read_remaining_solar_kwh(self._hass, self._controller, now=now)
+                solar_input = read_remaining_solar_kwh(
+                    self._hass,
+                    self._controller,
+                    now=now,
+                )
             except Exception as exc:  # noqa: BLE001
                 _LOGGER.debug("Solar timeline: forecast adapter failed: %s", exc)
-                return SolarForecastInput(
+                solar_input = SolarForecastInput(
                     0.0,
                     "fallback",
                     original_source=None,
                     conversion="unsafe_zero",
                 )
-        temporal_shape = decision_data.get("solar_temporal_shape")
-        if temporal_shape is not None:
-            try:
-                temporal_shape = tuple(temporal_shape)
-            except TypeError:
-                temporal_shape = None
+
+        periods = solar_input.periods
+        if not periods:
+            return solar_input
+
+        timezone = solar_forecast_local_timezone(
+            self._hass,
+            self._controller,
+            now,
+        )
+        local_now = (
+            now.replace(tzinfo=timezone)
+            if now.tzinfo is None
+            else now.astimezone(timezone)
+        )
+        day_end = local_now.replace(
+            hour=0,
+            minute=0,
+            second=0,
+            microsecond=0,
+        ) + timedelta(days=1)
+        local_horizon_end = day_end
+        if horizon_end is not None:
+            local_horizon_end = (
+                horizon_end.replace(tzinfo=timezone)
+                if horizon_end.tzinfo is None
+                else horizon_end.astimezone(timezone)
+            )
+
+        remaining = solar_input.remaining_kwh
+        conversions = []
+        if solar_input.conversion and solar_input.conversion != "none":
+            conversions.append(solar_input.conversion)
+        current_day_periods = solar_forecast_period_energy_between(
+            periods,
+            local_now,
+            min(day_end, local_horizon_end),
+            timezone=timezone,
+        )
+        if remaining <= 1e-9 and current_day_periods > 1e-9:
+            remaining = current_day_periods
+            conversions.append("dated_periods_zero_scalar")
+
+        if local_horizon_end > day_end:
+            extension = solar_forecast_period_energy_between(
+                periods,
+                day_end,
+                local_horizon_end,
+                timezone=timezone,
+            )
+            if extension > 1e-9:
+                remaining += extension
+                conversions.append("extended_dated_periods")
+
+        conversion = "+".join(dict.fromkeys(conversions)) or "none"
+        if (
+            abs(remaining - solar_input.remaining_kwh) <= 1e-9
+            and conversion == solar_input.conversion
+        ):
+            return solar_input
         return SolarForecastInput(
-            raw,
-            decision_data.get("solar_forecast_diagnostic_source")
-            or decision_data.get("solar_forecast_source")
-            or "remaining",
-            temporal_shape=temporal_shape,
-            periods=tuple(periods) if periods else None,
-            original_source=decision_data.get("solar_forecast_original_source"),
-            conversion=decision_data.get("solar_forecast_conversion", "none"),
+            remaining,
+            solar_input.source,
+            temporal_shape=solar_input.temporal_shape,
+            periods=periods,
+            original_source=solar_input.original_source,
+            conversion=conversion,
+            horizon=("extended" if local_horizon_end > day_end else solar_input.horizon),
         )
 
     def _store_chronological_diagnostics(
@@ -2164,6 +2261,7 @@ class PricingManager:
             horizon_end = horizon_end.replace(tzinfo=None)
         else:
             horizon_end = horizon_end.astimezone(now.tzinfo)
+        is_extended_horizon = horizon_end > daily_horizon_end
         if horizon_end <= now:
             return None
         try:
@@ -2201,7 +2299,11 @@ class PricingManager:
             consumption_total = max(0.0, float(forecast_total or 0.0))
             consumption = normalize_energy_shape(consumption_raw, consumption_total)
 
-            solar_input = self._solar_timeline_input(now, decision_data)
+            solar_input = self._solar_timeline_input(
+                now,
+                decision_data,
+                horizon_end=horizon_end,
+            )
             safety = max(
                 0.0,
                 float(
@@ -2250,12 +2352,35 @@ class PricingManager:
                         )
                 except Exception as exc:  # noqa: BLE001
                     _LOGGER.debug("Solar timeline: learned profile unavailable: %s", exc)
+            provider_periods = solar_input.periods
+            temporal_shape = solar_input.temporal_shape
+            if is_extended_horizon and provider_periods:
+                # A cross-midnight provider curve may contain a normal overnight
+                # gap. Map its dated periods directly onto the exact boundaries;
+                # the single-day daylight coverage validator cannot represent
+                # two separate solar windows safely.
+                timezone = solar_forecast_local_timezone(
+                    self._hass,
+                    self._controller,
+                    now,
+                )
+                temporal_shape = tuple(
+                    solar_forecast_period_energy_between(
+                        provider_periods,
+                        start,
+                        end,
+                        timezone=timezone,
+                    )
+                    for start, end in boundaries
+                )
+                provider_periods = None
+
             timeline = build_solar_timeline(
                 boundaries,
                 solar_input.remaining_kwh,
                 safety_margin_kwh=safety,
-                provider_periods=solar_input.periods,
-                temporal_shape=solar_input.temporal_shape,
+                provider_periods=provider_periods,
+                temporal_shape=temporal_shape,
                 learned_shape=(learned_snapshot.shape if learned_snapshot else None),
                 learned_mature=bool(learned_snapshot and learned_snapshot.mature),
                 solar_start=solar_start_dt,
@@ -2432,7 +2557,12 @@ class PricingManager:
                     for item in plan.deadlines
                 ],
             })
-            self._store_chronological_diagnostics(decision_data)
+            # The dashboard's explicit cross-midnight simulation is a view,
+            # not a new control decision. Retaining its expanded solar budget
+            # would make the next refresh add tomorrow's periods a second time
+            # and would leak a multi-day total into predictive diagnostics.
+            if not is_extended_horizon:
+                self._store_chronological_diagnostics(decision_data)
             return plan
         except (AttributeError, IndexError, TypeError, ValueError) as exc:
             _LOGGER.warning("Dynamic pricing: chronological planning fallback: %s", exc)
@@ -3421,7 +3551,7 @@ class PricingManager:
             consumption_scope = "remaining"
         # Keep the scalar helper as the compatibility seam used by existing
         # callers/tests; read the richer contract separately for dated periods.
-        remaining_solar_kwh = self._remaining_solar_today_kwh(now_h)
+        remaining_solar_kwh = self._remaining_solar_today_kwh(now)
         solar_forecast_input = self._read_remaining_solar_input(now=now)
 
         decision = await controller._should_activate_grid_charging(
@@ -3569,7 +3699,7 @@ class PricingManager:
         except (AttributeError, TypeError, ValueError):
             return None
 
-    def _remaining_solar_today_kwh(self, now_h: float) -> float:
+    def _remaining_solar_today_kwh(self, now_h: datetime | float) -> float:
         """Solar generation still expected today (kWh), from the forecast sensor.
 
         Three progressively weaker sources: actual accumulator (forecast −
@@ -3646,7 +3776,7 @@ class PricingManager:
 
         # --- Remaining solar expected today (raw generation, before consumption) ---
         now_h = now.hour + now.minute / 60.0
-        remaining_solar_kwh = self._remaining_solar_today_kwh(now_h)
+        remaining_solar_kwh = self._remaining_solar_today_kwh(now)
 
         # --- Remaining house consumption until midnight (handoff to the 00:05
         # evaluation, which re-plans the next day). Keep this identical to other

@@ -673,8 +673,7 @@ class PredictiveChargingStatusSensor(BinarySensorEntity):
                 forecast = read_solar_forecast_kwh(self.hass, self.controller)
                 if forecast is not None:
                     now = datetime.now()
-                    now_h = now.hour + now.minute / 60.0 + now.second / 3600.0
-                    remaining = self.controller._pricing_mgr._remaining_solar_today_kwh(now_h)
+                    remaining = self.controller._pricing_mgr._remaining_solar_today_kwh(now)
                     attrs["remaining_solar_kwh"] = round(max(0.0, float(remaining)), 2)
             except (AttributeError, TypeError, ValueError):
                 _LOGGER.debug("Predictive status: live solar remainder unavailable", exc_info=True)

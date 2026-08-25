@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timedelta
 from types import SimpleNamespace
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -41,6 +42,10 @@ from custom_components.omnibattery.pricing import engine as pricing_engine
 from custom_components.omnibattery.pricing.engine import (
     DynamicPricingEvaluationHorizon,
     PricingManager,
+)
+from custom_components.omnibattery.solar_forecast import (
+    SolarForecastInput,
+    SolarForecastPeriod,
 )
 from custom_components.omnibattery.pricing.nordpool import OfficialNordPoolSource
 from custom_components.omnibattery.pricing.curtailment import (
@@ -559,6 +564,7 @@ def test_remaining_fallback_is_conditioned_on_today_consumption():
         _consumption_tracker=SimpleNamespace(
             consumption_profile=profile,
             get_dynamic_base_consumption=get_average_consumption,
+            forecast_consumption_between=lambda *_args, **_kwargs: forecast,
         ),
         _should_activate_grid_charging=should_activate,
     )
@@ -573,6 +579,57 @@ def test_remaining_fallback_is_conditioned_on_today_consumption():
     }]
     assert decision["consumption_scope"] == "remaining_fallback"
     assert decision["consumption_fallback_correction_kwh"] == pytest.approx(-3.0)
+
+
+def test_midnight_remaining_balance_uses_periods_when_scalar_is_zero():
+    madrid = ZoneInfo("Europe/Madrid")
+    now = datetime(2026, 8, 25, 0, 0, tzinfo=madrid)
+    periods = [
+        {
+            "start": (now + timedelta(hours=8)).isoformat(),
+            "end": (now + timedelta(hours=20)).isoformat(),
+            "energy_kwh": 12.0,
+        }
+    ]
+    state = SimpleNamespace(
+        state="0",
+        attributes={
+            "unit_of_measurement": "kWh",
+            "solar_forecast_periods": periods,
+        },
+    )
+    hass = SimpleNamespace(
+        config=SimpleNamespace(time_zone="Europe/Madrid"),
+        states=SimpleNamespace(get=lambda _entity_id: state),
+    )
+    calls = []
+
+    async def get_average_consumption():
+        return 6.0
+
+    async def should_activate(**overrides):
+        calls.append(overrides)
+        return {
+            "should_charge": False,
+            "solar_forecast_kwh": overrides["solar_forecast_override_kwh"],
+        }
+
+    controller = _controller(
+        solar_forecast_remaining_sensor="sensor.remaining",
+        solar_forecast_sensor=None,
+        _consumption_tracker=SimpleNamespace(
+            consumption_profile=None,
+            get_dynamic_base_consumption=get_average_consumption,
+        ),
+        _should_activate_grid_charging=should_activate,
+    )
+    manager = PricingManager(hass, controller)
+
+    decision = asyncio.run(manager._evaluate_remaining_grid_charging(now=now))
+
+    assert calls[0]["solar_forecast_override_kwh"] == pytest.approx(12.0)
+    assert decision["remaining_solar_kwh"] == pytest.approx(12.0)
+    assert decision["solar_forecast_conversion"] == "dated_periods_zero_scalar"
 
 
 def test_manual_button_uses_remaining_horizon_at_midday():
@@ -779,6 +836,62 @@ def test_remaining_solar_zero_when_forecast_unavailable():
 def test_remaining_solar_zero_when_no_sensor_configured():
     ctrl = _controller(solar_forecast_sensor=None)
     assert PricingManager(SimpleNamespace(), ctrl)._remaining_solar_today_kwh(6.0) == 0.0
+
+
+def test_extended_timeline_adds_tomorrow_periods_without_leaking_into_today():
+    madrid = ZoneInfo("Europe/Madrid")
+    now = datetime(2026, 8, 24, 23, 45, tzinfo=madrid)
+    midnight = now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(
+        days=1
+    )
+    periods = (
+        SolarForecastPeriod(
+            midnight + timedelta(hours=8),
+            midnight + timedelta(hours=12),
+            4.0,
+        ),
+    )
+    manager = PricingManager(
+        SimpleNamespace(config=SimpleNamespace(time_zone="Europe/Madrid")),
+        _controller(),
+    )
+    current_day = manager._solar_timeline_input(
+        now,
+        {
+            "solar_forecast_input": SolarForecastInput(
+                0.0,
+                "remaining_sensor",
+                periods=periods,
+            )
+        },
+        horizon_end=midnight,
+    )
+    extended = manager._solar_timeline_input(
+        now,
+        {
+            "solar_forecast_input": SolarForecastInput(
+                0.0,
+                "remaining_sensor",
+                periods=periods,
+            )
+        },
+        horizon_end=midnight + timedelta(hours=12),
+    )
+    repeated = manager._solar_timeline_input(
+        now,
+        {
+            "remaining_solar_kwh": 0.0,
+            "solar_remaining_raw_kwh": 4.0,
+            "solar_forecast_periods": periods,
+            "solar_forecast_conversion": "extended_dated_periods",
+        },
+        horizon_end=midnight + timedelta(hours=12),
+    )
+
+    assert current_day.remaining_kwh == 0.0
+    assert extended.remaining_kwh == pytest.approx(4.0)
+    assert extended.conversion == "extended_dated_periods"
+    assert repeated.remaining_kwh == pytest.approx(4.0)
 
 
 # ----------------------------------------------------------------------

@@ -219,6 +219,7 @@ async def test_load_vacation_state_keeps_partial_night_but_not_baseline():
 
 def _make_history_tracker(history, charging_time_slots):
     tracker = ConsumptionTracker.__new__(ConsumptionTracker)
+    tracker._vacation_periods = []
     tracker._controller = SimpleNamespace(
         _daily_consumption_history=history,
         charging_time_slots=charging_time_slots,
