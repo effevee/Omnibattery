@@ -248,7 +248,7 @@ _PREDICTIVE_HARD_LIMIT_MIN_MARGIN_W = 200.0
 # only after the net energy imported while charging exceeds this amount.  A
 # quarter-hour energy threshold avoids repainting the source whenever the PD
 # controller makes the meter oscillate by a few watts around zero.
-_DAILY_OPERATION_GRID_CHARGE_ENERGY_KWH = 0.01  # 10 Wh
+_DAILY_OPERATION_GRID_CHARGE_ENERGY_KWH = 0.05  # 50 Wh
 from .solar_forecast import (
     SolarForecastInput,
     get_configured_solar_forecast_sensor,

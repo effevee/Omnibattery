@@ -400,11 +400,11 @@ def test_external_solar_does_not_hide_grid_charge_during_net_import():
         _charge_delay_status={"state": "Disabled"},
     )
 
-    decision = ChargeDischargeController._daily_operation_runtime_decision(
-        controller,
-        datetime(2026, 8, 24, 10, 0, tzinfo=MADRID),
-        sample_duration_s=60.0,
-    )
+    now = datetime(2026, 8, 24, 10, 0, tzinfo=MADRID)
+    for _ in range(5):
+        decision = ChargeDischargeController._daily_operation_runtime_decision(
+            controller, now, sample_duration_s=60.0
+        )
 
     assert decision["action_mask"] == ACTION_GRID_CHARGE
 
@@ -472,19 +472,18 @@ def test_external_solar_charge_becomes_grid_after_material_import_energy():
     )
     now = datetime(2026, 8, 24, 10, 0, tzinfo=MADRID)
 
-    first = ChargeDischargeController._daily_operation_runtime_decision(
-        controller, now, sample_duration_s=60.0
-    )
-    second = ChargeDischargeController._daily_operation_runtime_decision(
-        controller, now, sample_duration_s=60.0
-    )
-    third = ChargeDischargeController._daily_operation_runtime_decision(
-        controller, now, sample_duration_s=60.0
-    )
+    decisions = [
+        ChargeDischargeController._daily_operation_runtime_decision(
+            controller, now, sample_duration_s=60.0
+        )
+        for _ in range(11)
+    ]
 
-    assert first["action_mask"] == ACTION_SOLAR_CHARGE
-    assert second["action_mask"] == ACTION_SOLAR_CHARGE
-    assert third["action_mask"] == ACTION_GRID_CHARGE
+    assert all(
+        decision["action_mask"] == ACTION_SOLAR_CHARGE
+        for decision in decisions[:10]
+    )
+    assert decisions[10]["action_mask"] == ACTION_GRID_CHARGE
 
     next_interval = ChargeDischargeController._daily_operation_runtime_decision(
         controller,
@@ -518,11 +517,11 @@ def test_direct_solar_and_ac_draw_are_both_reported_during_net_import():
         _charge_delay_status={"state": "Disabled"},
     )
 
-    decision = ChargeDischargeController._daily_operation_runtime_decision(
-        controller,
-        datetime(2026, 8, 24, 10, 0, tzinfo=MADRID),
-        sample_duration_s=60.0,
-    )
+    now = datetime(2026, 8, 24, 10, 0, tzinfo=MADRID)
+    for _ in range(5):
+        decision = ChargeDischargeController._daily_operation_runtime_decision(
+            controller, now, sample_duration_s=60.0
+        )
 
     assert decision["action_mask"] == ACTION_SOLAR_CHARGE | ACTION_GRID_CHARGE
 
