@@ -612,6 +612,11 @@ _LOGGER = logging.getLogger(__name__)
 # identifies its devices under.
 HUAWEI_SOLAR_DOMAIN = "huawei_solar"
 
+# A Huawei inverter accepts one Modbus connection, so a second client needs a
+# proxy in front. Supplied as a placeholder rather than written into the strings:
+# hassfest rejects a literal URL in a translation.
+_MODBUS_PROXY_URL = "https://github.com/Akulatraxas/ha-modbusproxy"
+
 _ALL_WEEKDAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
 # How many predictive-charging windows the user may configure.
 MAX_CHARGING_WINDOWS = 3
@@ -1608,7 +1613,10 @@ class MarstekVenusConfigFlow(LegacyDomainMigrationMixin, ConfigFlow, domain=DOMA
             step_id="battery_connection_huawei",
             data_schema=self._huawei_schema(current_battery, battery_num),
             errors=errors,
-            description_placeholders={"battery_num": str(battery_num)},
+            description_placeholders={
+                "battery_num": str(battery_num),
+                "proxy_url": _MODBUS_PROXY_URL,
+            },
         )
 
     async def _huawei_search(self, host: str, port: int, errors: dict) -> FlowResult | None:
@@ -4121,7 +4129,10 @@ class OptionsFlowHandler(OptionsFlow):
             step_id="battery_connection_huawei",
             data_schema=self._huawei_schema(current_battery, battery_num),
             errors=errors,
-            description_placeholders={"battery_num": str(battery_num)},
+            description_placeholders={
+                "battery_num": str(battery_num),
+                "proxy_url": _MODBUS_PROXY_URL,
+            },
         )
 
     async def _huawei_search(self, host: str, port: int, errors: dict) -> FlowResult | None:

@@ -2242,3 +2242,40 @@ def test_the_module_documentation_matches_what_the_driver_does():
     assert "either of two paths" in doc
     assert "after dark only" in doc
     assert "``apply_setpoint(0)``\ntherefore *releases*" in doc.replace("\n", "\n")
+
+
+def test_no_translation_string_carries_a_url():
+    """Hassfest rejects them, and a red check is found late and by someone else.
+
+    The Modbus-proxy hint needed a link, and writing it into the string failed
+    the integration validation on every language file at once. It is passed as
+    a description placeholder instead.
+    """
+    import glob
+    import json
+
+    def walk(node, path):
+        if isinstance(node, dict):
+            for key, value in node.items():
+                yield from walk(value, f"{path}/{key}")
+        elif isinstance(node, str) and ("http://" in node or "https://" in node):
+            yield path
+
+    for path in ["custom_components/omnibattery/strings.json"] + sorted(
+        glob.glob("custom_components/omnibattery/translations/*.json")
+    ):
+        offenders = list(walk(json.load(open(path, encoding="utf-8")), ""))
+        assert not offenders, f"{path}: {offenders}"
+
+
+def test_the_proxy_hint_still_reaches_the_user():
+    """Removing the URL from the string must not remove it from the screen."""
+    import json
+
+    from custom_components.omnibattery.config_flow import _MODBUS_PROXY_URL
+
+    strings = json.load(open("custom_components/omnibattery/strings.json", encoding="utf-8"))
+    for section in ("config", "options"):
+        description = strings[section]["step"]["battery_connection_huawei"]["description"]
+        assert "{proxy_url}" in description, section
+    assert _MODBUS_PROXY_URL.startswith("https://")
