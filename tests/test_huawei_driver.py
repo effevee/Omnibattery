@@ -2208,6 +2208,27 @@ async def test_a_cascade_asks_instead_of_reporting_a_dead_connection(monkeypatch
 
 
 @pytest.mark.asyncio
+async def test_a_cascade_reconfiguration_refuses_a_device_from_another_inverter(monkeypatch):
+    """The serial/device guard also applies after choosing a cascade member."""
+    flow, _ = _reconfigure_flow(
+        monkeypatch,
+        probe=_PROBE_OK,
+        devices={"dev-batt": _huawei_device(identifier="BT24B9999999")},
+        scan=[(4, "SUN2000-8K-MAP0", True), (5, "SUN2000-10K", True)],
+    )
+    cascade_form = await flow.async_step_reconfigure_battery_huawei(
+        dict(_RECONF_INPUT, slave_id="", huawei_direct_write=False)
+    )
+    assert cascade_form["step_id"] == "reconfigure_battery_huawei_slave"
+
+    form = await flow.async_step_reconfigure_battery_huawei_slave({"slave_id": "4"})
+
+    assert form["step_id"] == "reconfigure_battery_huawei"
+    assert form["errors"] == {"huawei_battery_device": "huawei_device_mismatch"}
+    assert flow._migrated == []
+
+
+@pytest.mark.asyncio
 async def test_an_endpoint_without_an_emma_drops_the_remembered_one(monkeypatch):
     """Carried over, it would have the driver read a meter that is not there."""
     flow, _ = _reconfigure_flow(

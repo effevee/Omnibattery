@@ -546,6 +546,31 @@ def _huawei_inverter_serial(hass, device_id: str) -> str | None:
     return None
 
 
+def _huawei_device_matches_inverter(
+    hass: Any,
+    device_id: str | None,
+    serial: str | None,
+    slave_id: int | None,
+) -> bool:
+    """Whether the selected huawei_solar device belongs to the probed inverter.
+
+    Missing serials are treated as unknown rather than contradictory: older
+    huawei_solar versions and some firmware do not expose one. A known
+    disagreement, however, must stop both setup and reconfiguration before the
+    telemetry/command paths can be paired with different inverters.
+    """
+    if not device_id or not serial:
+        return True
+    device_serial = _huawei_inverter_serial(hass, device_id)
+    if not device_serial or serial.upper() in device_serial.upper():
+        return True
+    _LOGGER.warning(
+        "Huawei device %s belongs to inverter %s, but slave %s is %s",
+        device_id, device_serial, slave_id, serial,
+    )
+    return False
+
+
 def _anker_power_ceilings(battery_data: dict) -> tuple[int, int]:
     """Hardware max charge/discharge from probe, falling back to the static envelope."""
     charge = int(battery_data.get("device_max_charge_power") or _ANKER_MAX_POWER_W)
@@ -1694,18 +1719,11 @@ class MarstekVenusConfigFlow(LegacyDomainMigrationMixin, ConfigFlow, domain=DOMA
         None with ``errors`` filled when it does not hold.
         """
         device_id = self._huawei_pending.get("huawei_battery_device_id")
-        if device_id and serial:
-            device_serial = _huawei_inverter_serial(self.hass, device_id)
-            # Devices derived from an inverter carry its serial with a suffix,
-            # so containment is the honest test — only a serial that is nowhere
-            # to be found means a different inverter.
-            if device_serial and serial.upper() not in device_serial.upper():
-                _LOGGER.warning(
-                    "Huawei device %s belongs to inverter %s, but slave %s is %s",
-                    device_id, device_serial, slave_id, serial,
-                )
-                errors[error_key] = "huawei_device_mismatch"
-                return None
+        if not _huawei_device_matches_inverter(
+            self.hass, device_id, serial, slave_id
+        ):
+            errors[error_key] = "huawei_device_mismatch"
+            return None
         self._current_battery_data.update({
             **self._huawei_pending,
             CONF_SLAVE_ID: slave_id,
@@ -3152,11 +3170,8 @@ class MarstekVenusConfigFlow(LegacyDomainMigrationMixin, ConfigFlow, domain=DOMA
                     return await self.async_step_reconfigure_battery_huawei_slave()
                 if not ok:
                     errors["base"] = "cannot_connect"
-                elif (
-                    device_id
-                    and serial
-                    and (device_serial := _huawei_inverter_serial(self.hass, device_id))
-                    and serial.upper() not in device_serial.upper()
+                elif not _huawei_device_matches_inverter(
+                    self.hass, device_id, serial, found
                 ):
                     # Same check the setup flow makes: telemetry and commands
                     # must reach the same inverter, which a cascade can break.
@@ -3189,6 +3204,25 @@ class MarstekVenusConfigFlow(LegacyDomainMigrationMixin, ConfigFlow, domain=DOMA
                 )
             )
             if ok:
+                if not _huawei_device_matches_inverter(
+                    self.hass,
+                    pending.get("huawei_battery_device_id"),
+                    serial,
+                    slave_id,
+                ):
+                    # The selected device is not editable on the cascade form;
+                    # return to the Huawei form so the user can choose the
+                    # matching device or switch to direct writes.
+                    return self.async_show_form(
+                        step_id="reconfigure_battery_huawei",
+                        data_schema=self._huawei_schema(
+                            current, self.battery_index + 1
+                        ),
+                        errors={"huawei_battery_device": "huawei_device_mismatch"},
+                        description_placeholders={
+                            "battery_num": str(self.battery_index + 1)
+                        },
+                    )
                 return await self._huawei_reconfigure_store(
                     entry, current, pending, pending[CONF_HOST], pending[CONF_PORT],
                     slave_id, model, max_charge, max_discharge, inverter_max,
@@ -4210,18 +4244,11 @@ class OptionsFlowHandler(OptionsFlow):
         None with ``errors`` filled when it does not hold.
         """
         device_id = self._huawei_pending.get("huawei_battery_device_id")
-        if device_id and serial:
-            device_serial = _huawei_inverter_serial(self.hass, device_id)
-            # Devices derived from an inverter carry its serial with a suffix,
-            # so containment is the honest test — only a serial that is nowhere
-            # to be found means a different inverter.
-            if device_serial and serial.upper() not in device_serial.upper():
-                _LOGGER.warning(
-                    "Huawei device %s belongs to inverter %s, but slave %s is %s",
-                    device_id, device_serial, slave_id, serial,
-                )
-                errors[error_key] = "huawei_device_mismatch"
-                return None
+        if not _huawei_device_matches_inverter(
+            self.hass, device_id, serial, slave_id
+        ):
+            errors[error_key] = "huawei_device_mismatch"
+            return None
         self._current_battery_data.update({
             **self._huawei_pending,
             CONF_SLAVE_ID: slave_id,
