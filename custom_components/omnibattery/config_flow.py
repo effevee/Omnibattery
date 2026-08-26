@@ -64,6 +64,9 @@ from .const import (
     CONF_SOLAR_FORECAST_REMAINING_SENSOR,
     CONF_SOLAR_PRODUCTION_SENSOR,
     CONF_MAX_CONTRACTED_POWER,
+    CONF_OFFGRID_POWER_SENSOR,
+    CONF_OFFGRID_METER_INVERTED,
+    CONF_OFFGRID_MODE_ENABLED,
     CONF_THREE_PHASE_ENABLED,
     CONF_PHASE_1_CURRENT_SENSOR,
     CONF_PHASE_2_CURRENT_SENSOR,
@@ -200,6 +203,23 @@ def _parse_optional_float(value: Any) -> float | None:
     if value is None or value == "":
         return None
     return float(str(value).replace(",", "."))
+
+
+def _validate_offgrid_power_sensor(
+    hass: HomeAssistant, user_input: dict[str, Any]
+) -> dict[str, str]:
+    """Validate the optional alternate meter used by off-grid mode."""
+    sensor = user_input.get(CONF_OFFGRID_POWER_SENSOR)
+    if not sensor:
+        return {}
+    if sensor == user_input.get("consumption_sensor"):
+        return {CONF_OFFGRID_POWER_SENSOR: "offgrid_sensor_must_differ"}
+    state = hass.states.get(sensor)
+    if state is None:
+        return {CONF_OFFGRID_POWER_SENSOR: "offgrid_sensor_not_found"}
+    if state.attributes.get("unit_of_measurement", "") not in ("W", "kW"):
+        return {CONF_OFFGRID_POWER_SENSOR: "offgrid_sensor_invalid_unit"}
+    return {}
 
 
 def _predischarge_export_defaults(
@@ -1223,8 +1243,17 @@ class MarstekVenusConfigFlow(LegacyDomainMigrationMixin, ConfigFlow, domain=DOMA
                     if unit not in ["W", "kW"]:
                         errors[CONF_SOLAR_PRODUCTION_SENSOR] = "solar_production_invalid_unit"
 
+            errors.update(_validate_offgrid_power_sensor(self.hass, user_input))
+
             if not errors:
                 self.config_data["consumption_sensor"] = user_input["consumption_sensor"]
+                offgrid_sensor = user_input.get(CONF_OFFGRID_POWER_SENSOR) or None
+                if offgrid_sensor:
+                    self.config_data[CONF_OFFGRID_POWER_SENSOR] = offgrid_sensor
+                    self.config_data[CONF_OFFGRID_METER_INVERTED] = user_input.get(
+                        CONF_OFFGRID_METER_INVERTED, False
+                    )
+                    self.config_data[CONF_OFFGRID_MODE_ENABLED] = False
                 if remaining_sensor:
                     self.config_data.pop(CONF_SOLAR_FORECAST_SENSOR, None)
                     self.config_data[CONF_SOLAR_FORECAST_REMAINING_SENSOR] = remaining_sensor
@@ -1261,6 +1290,10 @@ class MarstekVenusConfigFlow(LegacyDomainMigrationMixin, ConfigFlow, domain=DOMA
                         EntitySelector(EntitySelectorConfig(domain="sensor")),
                     vol.Optional(CONF_SOLAR_PRODUCTION_SENSOR):
                         EntitySelector(EntitySelectorConfig(domain="sensor")),
+                    vol.Optional(CONF_OFFGRID_POWER_SENSOR):
+                        EntitySelector(EntitySelectorConfig(domain="sensor")),
+                    vol.Optional(CONF_OFFGRID_METER_INVERTED, default=False):
+                        BooleanSelector(),
                     vol.Optional(
                         CONF_THREE_PHASE_ENABLED,
                         default=DEFAULT_THREE_PHASE_ENABLED,
@@ -3555,6 +3588,10 @@ class OptionsFlowHandler(OptionsFlow):
         """Merge config_data into existing entry data, save, and reload."""
         new_data = dict(self.config_entry.data)
         new_data.update(self.config_data)
+        if not new_data.get(CONF_OFFGRID_POWER_SENSOR):
+            new_data.pop(CONF_OFFGRID_POWER_SENSOR, None)
+            new_data.pop(CONF_OFFGRID_METER_INVERTED, None)
+            new_data.pop(CONF_OFFGRID_MODE_ENABLED, None)
         new_data = normalize_solar_forecast_config(new_data)
         new_data[CONF_ENABLE_BALANCE_MONITOR] = True
         self.hass.config_entries.async_update_entry(
@@ -3615,8 +3652,16 @@ class OptionsFlowHandler(OptionsFlow):
                         if unit not in ["W", "kW"]:
                             errors[CONF_SOLAR_PRODUCTION_SENSOR] = "solar_production_invalid_unit"
 
+                errors.update(_validate_offgrid_power_sensor(self.hass, user_input))
+
                 if not errors:
                     self.config_data["consumption_sensor"] = user_input["consumption_sensor"]
+                    self.config_data[CONF_OFFGRID_POWER_SENSOR] = (
+                        user_input.get(CONF_OFFGRID_POWER_SENSOR) or None
+                    )
+                    self.config_data[CONF_OFFGRID_METER_INVERTED] = user_input.get(
+                        CONF_OFFGRID_METER_INVERTED, False
+                    )
                     if remaining_sensor:
                         self.config_data.pop(CONF_SOLAR_FORECAST_SENSOR, None)
                         self.config_data[CONF_SOLAR_FORECAST_REMAINING_SENSOR] = remaining_sensor
@@ -3644,6 +3689,10 @@ class OptionsFlowHandler(OptionsFlow):
             current_forecast = self.config_entry.data.get(CONF_SOLAR_FORECAST_SENSOR, "")
             current_remaining_forecast = self.config_entry.data.get(CONF_SOLAR_FORECAST_REMAINING_SENSOR, "")
             current_solar = self.config_entry.data.get(CONF_SOLAR_PRODUCTION_SENSOR, "")
+            current_offgrid = self.config_entry.data.get(CONF_OFFGRID_POWER_SENSOR, "")
+            current_offgrid_inverted = self.config_entry.data.get(
+                CONF_OFFGRID_METER_INVERTED, False
+            )
             current_inverted = self.config_entry.data.get(CONF_METER_INVERTED, False)
             current_max_power = self.config_entry.data.get("max_contracted_power", 7000)
         except Exception as e:
@@ -3670,6 +3719,12 @@ class OptionsFlowHandler(OptionsFlow):
                         EntitySelector(EntitySelectorConfig(domain="sensor")),
                     vol.Optional(CONF_SOLAR_PRODUCTION_SENSOR, description={"suggested_value": current_solar} if current_solar else {}):
                         EntitySelector(EntitySelectorConfig(domain="sensor")),
+                    vol.Optional(CONF_OFFGRID_POWER_SENSOR, description={"suggested_value": current_offgrid} if current_offgrid else {}):
+                        EntitySelector(EntitySelectorConfig(domain="sensor")),
+                    vol.Optional(
+                        CONF_OFFGRID_METER_INVERTED,
+                        default=current_offgrid_inverted,
+                    ): BooleanSelector(),
                     vol.Required(
                         CONF_THREE_PHASE_ENABLED,
                         default=current_three_phase_enabled,

@@ -35,6 +35,28 @@ Activa **"Signo del medidor invertido"** si tu sensor usa la convención opuesta
 
 Déjalo desactivado si no estás seguro.
 
+## Sensor de potencia off-grid *(opcional)*
+
+Puedes configurar un segundo sensor W/kW para el circuito respaldado. Debe ser
+una entidad distinta del sensor de consumo de red normal. Al guardarlo aparece
+el switch de sistema **Modo de medidor off-grid**, tanto como entidad de Home
+Assistant como en la pestaña **Controles** del dashboard.
+
+El ajuste **Signo del medidor off-grid invertido** es independiente del signo
+del medidor principal. Actívalo si el sensor off-grid publica el consumo con
+signo negativo; solo se aplica mientras este modo está activo.
+
+Mientras el switch está activado, Omnibattery usa ese segundo sensor como fuente
+del PD y de las estadísticas derivadas de consumo e importación/exportación. Al
+desactivarlo vuelve al sensor principal. La conmutación corta el intervalo de
+integración en curso para no contabilizar un salto artificial entre ambos
+medidores. Las baterías que estén suministrando por su propio puerto off-grid
+siguen excluidas del PD; el resto de baterías disponibles usa el sensor alternativo.
+
+Este switch solo cambia la fuente de datos. No habilita el puerto off-grid/EPS,
+no cambia el modo de la batería y no escribe ningún registro relacionado con la
+salida de respaldo; el usuario debe habilitar ese puerto por separado.
+
 ---
 
 ## Potencia máxima contratada

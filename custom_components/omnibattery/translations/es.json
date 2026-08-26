@@ -32,6 +32,8 @@
         "description": "Selecciona el sensor que mide la importación/exportación de la red eléctrica. Opcionalmente, configura el sensor de predicción solar para funciones avanzadas.",
         "data": {
           "consumption_sensor": "Sensor de consumo de la red",
+          "offgrid_power_sensor": "Sensor de potencia off-grid (opcional)",
+          "offgrid_meter_inverted": "Signo del medidor off-grid invertido",
           "solar_forecast_sensor": "Sensor de previsión solar del día completo (legado)",
           "solar_forecast_remaining_sensor": "Sensor de previsión solar restante de hoy (recomendado)",
           "solar_production_sensor": "Sensor de producción solar (opcional)",
@@ -41,6 +43,8 @@
         },
         "data_description": {
           "consumption_sensor": "Sensor en tiempo real de potencia importada (+) o exportada (-) a la red. Se recomiendan actualizaciones cada 1-2 segundos. Se aceptan sensores más lentos, pero las lecturas retrasadas reducen la calidad de la regulación; la última lectura se sigue durante un máximo de 65 segundos.",
+          "offgrid_power_sensor": "Medidor W/kW independiente para el circuito respaldado. Debe ser distinto del sensor de red normal. Al configurarlo se expone un switch de software que selecciona esta fuente para el control y las estadísticas; no habilita el puerto off-grid/EPS físico de la batería.",
+          "offgrid_meter_inverted": "Actívalo cuando el sensor off-grid use el convenio opuesto: positivo = exportación y negativo = consumo. Solo se aplica mientras el modo de medidor off-grid está activo.",
           "solar_forecast_sensor": "Sensor legado con la previsión solar del día completo. Las instalaciones existentes pueden mantenerlo durante la transición; para configuraciones nuevas se recomienda Restante de hoy.",
           "solar_forecast_remaining_sensor": "Sensor con la producción solar que todavía se espera hoy en kWh. Al guardarlo sustituye el forecast legado y nunca se reduce con la producción ya medida.",
           "solar_production_sensor": "Sensor de potencia de producción fotovoltaica en tiempo real (W/kW) de un inversor externo que no pasa por las entradas MPPT de la batería. Se usa para mostrar el nodo Solar en el diagrama de flujo del panel. Déjalo vacío si tus paneles alimentan directamente el MPPT de la batería.",
@@ -701,6 +705,9 @@
       "invalid_unit": "El sensor de predicción solar debe tener como unidad 'kWh' o 'Wh'.",
       "solar_production_sensor_not_found": "El sensor de producción solar no existe. Verifica que el sensor esté disponible.",
       "solar_production_invalid_unit": "El sensor de producción solar debe tener como unidad 'W' o 'kW'.",
+      "offgrid_sensor_must_differ": "El sensor de potencia off-grid debe ser distinto del sensor de red normal.",
+      "offgrid_sensor_not_found": "El sensor de potencia off-grid no existe o no está disponible.",
+      "offgrid_sensor_invalid_unit": "El sensor de potencia off-grid debe tener como unidad 'W' o 'kW'.",
       "phase_sensors_must_differ": "Cada fase debe usar un sensor de corriente diferente.",
       "phase_sensor_not_found": "El sensor de corriente de fase no existe o no está disponible.",
       "phase_sensor_invalid_domain": "La fuente de corriente de fase debe ser una entidad sensor.",
@@ -777,6 +784,8 @@
         "description": "Configura los sensores utilizados por la integración.",
         "data": {
           "consumption_sensor": "Sensor de consumo de la red",
+          "offgrid_power_sensor": "Sensor de potencia off-grid (opcional)",
+          "offgrid_meter_inverted": "Signo del medidor off-grid invertido",
           "solar_forecast_sensor": "Sensor de previsión solar del día completo (legado)",
           "solar_forecast_remaining_sensor": "Sensor de previsión solar restante de hoy (recomendado)",
           "solar_production_sensor": "Sensor de producción solar (opcional)",
@@ -786,6 +795,8 @@
         },
         "data_description": {
           "consumption_sensor": "Sensor en tiempo real de potencia importada (+) o exportada (-) a la red. Se recomiendan actualizaciones cada 1-2 segundos. Se aceptan sensores más lentos, pero las lecturas retrasadas reducen la calidad de la regulación; la última lectura se sigue durante un máximo de 65 segundos.",
+          "offgrid_power_sensor": "Medidor W/kW independiente para el circuito respaldado. Debe ser distinto del sensor de red normal. Al configurarlo se expone un switch de software que selecciona esta fuente para el control y las estadísticas; no habilita el puerto off-grid/EPS físico de la batería.",
+          "offgrid_meter_inverted": "Actívalo cuando el sensor off-grid use el convenio opuesto: positivo = exportación y negativo = consumo. Solo se aplica mientras el modo de medidor off-grid está activo.",
           "solar_forecast_sensor": "Sensor legado con la previsión solar del día completo. Las instalaciones existentes pueden mantenerlo durante la transición; para configuraciones nuevas se recomienda Restante de hoy.",
           "solar_forecast_remaining_sensor": "Sensor con la producción solar que todavía se espera hoy en kWh. Al guardarlo sustituye el forecast legado y nunca se reduce con la producción ya medida.",
           "solar_production_sensor": "Sensor de potencia de producción fotovoltaica en tiempo real (W/kW) de un inversor externo que no pasa por las entradas MPPT de la batería. Se usa para mostrar el nodo Solar en el diagrama de flujo del panel. Déjalo vacío si tus paneles alimentan directamente el MPPT de la batería.",
@@ -1307,6 +1318,9 @@
       "invalid_unit": "El sensor de predicción solar debe tener como unidad 'kWh' o 'Wh'.",
       "solar_production_sensor_not_found": "El sensor de producción solar no existe. Verifica que el sensor esté disponible.",
       "solar_production_invalid_unit": "El sensor de producción solar debe tener como unidad 'W' o 'kW'.",
+      "offgrid_sensor_must_differ": "El sensor de potencia off-grid debe ser distinto del sensor de red normal.",
+      "offgrid_sensor_not_found": "El sensor de potencia off-grid no existe o no está disponible.",
+      "offgrid_sensor_invalid_unit": "El sensor de potencia off-grid debe tener como unidad 'W' o 'kW'.",
       "phase_sensors_must_differ": "Cada fase debe usar un sensor de corriente diferente.",
       "phase_sensor_not_found": "El sensor de corriente de fase no existe o no está disponible.",
       "phase_sensor_invalid_domain": "La fuente de corriente de fase debe ser una entidad sensor.",
@@ -1415,6 +1429,9 @@
       },
       "no_pd_mode": {
         "name": "Seguimiento Directo sin PD"
+      },
+      "offgrid_mode": {
+        "name": "Modo de Medidor Off-grid"
       },
       "min_soc_floor_enabled": {
         "name": "SOC Mínimo Garantizado"

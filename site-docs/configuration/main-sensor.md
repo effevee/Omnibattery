@@ -35,6 +35,28 @@ Enable **"Inverted meter sign"** if your sensor uses the opposite convention:
 
 Leave it disabled if you are unsure.
 
+## Off-grid power sensor *(optional)*
+
+You can configure a second W/kW sensor for the backed-up circuit. It must be a
+different entity from the normal grid consumption sensor. Saving it exposes the
+system **Off-grid Meter Mode** switch both as a Home Assistant entity and on the
+dashboard **Controls** tab.
+
+The **Off-grid meter sign inverted** setting is independent from the primary
+meter sign. Enable it when the off-grid sensor reports consumption as negative;
+it applies only while this mode is active.
+
+While the switch is on, Omnibattery uses the second sensor as the source for PD
+and for derived consumption and grid import/export statistics. Turning it off
+returns to the primary sensor. Switching sources breaks the current integration
+interval so a jump between the two meters is not counted as energy.
+Batteries supplying power through their own off-grid port remain excluded from
+PD; the other available batteries use the alternate sensor.
+
+This switch only changes the data source. It does not enable the physical
+off-grid/EPS port, change the battery mode, or write any backup-output setting;
+the user must enable that port separately.
+
 ---
 
 ## Maximum contracted power

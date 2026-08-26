@@ -48,6 +48,9 @@ from .const import (
     DEFAULT_SOLAR_PROFILE_MODE,
     normalize_solar_profile_mode,
     CONF_MAX_CONTRACTED_POWER,
+    CONF_OFFGRID_POWER_SENSOR,
+    CONF_OFFGRID_METER_INVERTED,
+    CONF_OFFGRID_MODE_ENABLED,
     CONF_THREE_PHASE_ENABLED,
     CONF_PHASE_1_CURRENT_SENSOR,
     CONF_PHASE_2_CURRENT_SENSOR,
@@ -521,8 +524,16 @@ class ChargeDischargeController:
         """Initialize the controller."""
         self.hass = hass
         self.coordinators = coordinators
-        self.consumption_sensor = consumption_sensor
         self.config_entry = config_entry
+        self.primary_consumption_sensor = consumption_sensor
+        self.offgrid_power_sensor = config_entry.data.get(CONF_OFFGRID_POWER_SENSOR)
+        self.offgrid_meter_inverted = config_entry.data.get(
+            CONF_OFFGRID_METER_INVERTED, False
+        )
+        self.offgrid_mode_enabled = bool(
+            self.offgrid_power_sensor
+            and config_entry.data.get(CONF_OFFGRID_MODE_ENABLED, False)
+        )
 
         # State tracking
         self.previous_sensor = None
@@ -1112,6 +1123,57 @@ class ChargeDischargeController:
 
         _LOGGER.info("Hourly Net Balance: %s",
                      "ENABLED" if self.hourly_balance_enabled else "DISABLED")
+
+    @property
+    def consumption_sensor(self) -> str:
+        """Return the meter currently feeding control and derived statistics."""
+        if self.offgrid_mode_enabled and self.offgrid_power_sensor:
+            return self.offgrid_power_sensor
+        return self.primary_consumption_sensor
+
+    @property
+    def consumption_sensor_ids(self) -> list[str]:
+        """Return every meter that may become active without an entry reload."""
+        return list(
+            dict.fromkeys(
+                sensor
+                for sensor in (
+                    self.primary_consumption_sensor,
+                    self.offgrid_power_sensor,
+                )
+                if sensor
+            )
+        )
+
+    def _reset_consumption_source_tracking(self) -> None:
+        """Start a clean sample series after selecting a different meter."""
+        self._grid_filter_ema = None
+        self._last_sensor_report_time = None
+        self._last_sensor_cadence_time = None
+        self._last_control_sample_value = None
+        self._control_sample_is_new = True
+        self._stale_cycles = 0
+        self._consumption_sensor_issue = None
+
+        tracker = getattr(self, "_consumption_tracker", None)
+        if tracker is not None:
+            tracker._daily_home_last_time = None
+            tracker._daily_home_last_power_kw = None
+            tracker._daily_grid_last_time = None
+            tracker._daily_grid_last_power_kw = None
+
+        hourly = getattr(self, "_hourly_balance_mgr", None)
+        if hourly is not None:
+            hourly._last_sample_monotonic = None
+            hourly._last_grid_w = None
+
+    def set_offgrid_mode(self, enabled: bool) -> None:
+        """Select the alternate meter without changing any battery setting."""
+        enabled = bool(enabled and self.offgrid_power_sensor)
+        if enabled == self.offgrid_mode_enabled:
+            return
+        self.offgrid_mode_enabled = enabled
+        self._reset_consumption_source_tracking()
 
     def _schedule_charge_delay_state_save(self) -> None:
         """Persist charge delay latch state (delegates to ChargeDelayManager)."""
@@ -2414,6 +2476,17 @@ class ChargeDischargeController:
 
     def update_pd_parameters(self):
         """Re-read PD controller parameters from config_entry.data (hot-reload)."""
+        old_consumption_sensor = self.consumption_sensor
+        self.offgrid_power_sensor = self.config_entry.data.get(CONF_OFFGRID_POWER_SENSOR)
+        self.offgrid_meter_inverted = self.config_entry.data.get(
+            CONF_OFFGRID_METER_INVERTED, False
+        )
+        self.offgrid_mode_enabled = bool(
+            self.offgrid_power_sensor
+            and self.config_entry.data.get(CONF_OFFGRID_MODE_ENABLED, False)
+        )
+        if self.consumption_sensor != old_consumption_sensor:
+            self._reset_consumption_source_tracking()
         self.meter_inverted = self.config_entry.data.get(CONF_METER_INVERTED, False)
         self.vacation_mode_enabled = self.config_entry.data.get(
             CONF_VACATION_MODE_ENABLED, False
@@ -3842,7 +3915,7 @@ class ChargeDischargeController:
 
         Handles:
         - Auto kW detection: if unit_of_measurement is 'kW', multiplies by 1000.
-        - Inverted sign: if meter_inverted is True, negates the value.
+        - Inverted sign: applies the setting belonging to the active meter.
 
         Returns the value in Watts with correct sign convention, or None on error.
         """
@@ -3855,7 +3928,16 @@ class ChargeDischargeController:
         unit = state.attributes.get("unit_of_measurement", "W")
         if unit == "kW":
             value *= 1000.0
-        if self.meter_inverted:
+        offgrid_active = bool(
+            getattr(self, "offgrid_mode_enabled", False)
+            and getattr(self, "offgrid_power_sensor", None)
+        )
+        meter_inverted = (
+            getattr(self, "offgrid_meter_inverted", False)
+            if offgrid_active
+            else getattr(self, "meter_inverted", False)
+        )
+        if meter_inverted:
             value = -value
         return value
 
@@ -7624,6 +7706,9 @@ class ChargeDischargeController:
         still schedules through its separate callback; repeated P1 publications
         are consumed here and by the watchdog without re-running incremental P/D.
         """
+        entity_id = event.data.get("entity_id")
+        if entity_id and entity_id != self.consumption_sensor:
+            return None
         new_state = event.data.get("new_state")
         report_time = ChargeDischargeController._sensor_report_time(new_state)
         if report_time is None:
@@ -9524,6 +9609,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Overlapping triggers are serialized by the controller's _control_lock.
     @callback
     def _on_consumption_changed(event):
+        if event.data.get("entity_id") != controller.consumption_sensor:
+            return
         # Record the publication before scheduling control.  A cycle can be busy
         # with battery I/O when the next meter update arrives; measuring cadence
         # only when that cycle eventually samples hass.states would turn a fast P1
@@ -9533,7 +9620,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         controller.schedule_control_cycle()
 
     unsub_consumption = _call_once(async_track_state_change_event(
-        hass, [controller.consumption_sensor], _on_consumption_changed
+        hass, controller.consumption_sensor_ids, _on_consumption_changed
     ))
     entry.async_on_unload(unsub_consumption)
 
@@ -9552,7 +9639,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             controller._observe_consumption_report(event)
 
         unsub_consumption_reported = _call_once(track_state_report_event(
-            hass, [controller.consumption_sensor], _on_consumption_reported
+            hass, controller.consumption_sensor_ids, _on_consumption_reported
         ))
         entry.async_on_unload(unsub_consumption_reported)
 

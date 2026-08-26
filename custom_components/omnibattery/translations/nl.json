@@ -32,6 +32,8 @@
         "description": "Selecteer de sensor die het netimport/-exportvermogen meet. Optioneel kunt u de zonne-voorspellingssensor configureren voor geavanceerde functies.",
         "data": {
           "consumption_sensor": "Netverbruikssensor",
+          "offgrid_power_sensor": "Off-grid vermogenssensor (optioneel)",
+          "offgrid_meter_inverted": "Teken van off-grid meter omgekeerd",
           "solar_forecast_sensor": "Zonneprognosesensor voor de hele dag (verouderd)",
           "solar_forecast_remaining_sensor": "Sensor resterende zonneprognose vandaag (aanbevolen)",
           "solar_production_sensor": "Zonneproductiesensor (optioneel)",
@@ -41,6 +43,8 @@
         },
         "data_description": {
           "consumption_sensor": "Realtime sensor voor geïmporteerd (+) of geëxporteerd (-) netvermogen. Updates elke 1-2 seconden worden aanbevolen. Tragere sensoren worden geaccepteerd, maar vertraagde metingen verminderen de regelkwaliteit; de laatste meting wordt maximaal 65 seconden gevolgd.",
+          "offgrid_power_sensor": "Afzonderlijke W/kW-meter voor het back-upcircuit. Deze moet verschillen van de normale netsensor. Configuratie toont een softwareschakelaar die deze bron voor regeling en statistieken selecteert; de fysieke off-grid/EPS-poort van de batterij wordt niet ingeschakeld.",
+          "offgrid_meter_inverted": "Schakel dit in wanneer de off-grid sensor de omgekeerde conventie gebruikt: positief = export en negatief = verbruik. Dit geldt alleen wanneer de off-grid metermodus actief is.",
           "solar_forecast_sensor": "Verouderde sensor met de zonneprognose voor de hele dag. Bestaande installaties kunnen deze tijdens de overgang blijven gebruiken; kies voor nieuwe configuraties bij voorkeur Resterend vandaag.",
           "solar_forecast_remaining_sensor": "Sensor met de vandaag nog verwachte zonneproductie in kWh. Bij opslaan vervangt deze de verouderde prognose voor de hele dag en wordt nooit verminderd met reeds gemeten productie.",
           "solar_production_sensor": "Realtime PV-productievermogenssensor (W/kW) van een externe omvormer die niet via de MPPT-ingangen van de batterij loopt. Wordt gebruikt om de Zon-node in het energiestroomdiagram van het dashboard te tonen. Laat leeg als je panelen rechtstreeks de MPPT van de batterij voeden.",
@@ -701,6 +705,9 @@
       "invalid_unit": "Zonnevoorspellingssensor moet 'kWh' of 'Wh' als eenheid hebben.",
       "solar_production_sensor_not_found": "Zonneproductiesensor bestaat niet. Controleer of de sensor beschikbaar is.",
       "solar_production_invalid_unit": "Zonneproductiesensor moet 'W' of 'kW' als eenheid hebben.",
+      "offgrid_sensor_must_differ": "De off-grid vermogenssensor moet verschillen van de normale netsensor.",
+      "offgrid_sensor_not_found": "De off-grid vermogenssensor bestaat niet of is niet beschikbaar.",
+      "offgrid_sensor_invalid_unit": "De off-grid vermogenssensor moet 'W' of 'kW' als eenheid hebben.",
       "phase_sensors_must_differ": "Elke fase moet een andere stroomsensor gebruiken.",
       "phase_sensor_not_found": "De fasestroomsensor bestaat niet of is niet beschikbaar.",
       "phase_sensor_invalid_domain": "De fasestroombron moet een sensorentiteit zijn.",
@@ -777,6 +784,8 @@
         "description": "Configureer de sensoren die door de integratie worden gebruikt.",
         "data": {
           "consumption_sensor": "Netverbruikssensor",
+          "offgrid_power_sensor": "Off-grid vermogenssensor (optioneel)",
+          "offgrid_meter_inverted": "Teken van off-grid meter omgekeerd",
           "solar_forecast_sensor": "Zonneprognosesensor voor de hele dag (verouderd)",
           "solar_forecast_remaining_sensor": "Sensor resterende zonneprognose vandaag (aanbevolen)",
           "solar_production_sensor": "Zonneproductiesensor (optioneel)",
@@ -786,6 +795,8 @@
         },
         "data_description": {
           "consumption_sensor": "Realtime sensor voor geïmporteerd (+) of geëxporteerd (-) netvermogen. Updates elke 1-2 seconden worden aanbevolen. Tragere sensoren worden geaccepteerd, maar vertraagde metingen verminderen de regelkwaliteit; de laatste meting wordt maximaal 65 seconden gevolgd.",
+          "offgrid_power_sensor": "Afzonderlijke W/kW-meter voor het back-upcircuit. Deze moet verschillen van de normale netsensor. Configuratie toont een softwareschakelaar die deze bron voor regeling en statistieken selecteert; de fysieke off-grid/EPS-poort van de batterij wordt niet ingeschakeld.",
+          "offgrid_meter_inverted": "Schakel dit in wanneer de off-grid sensor de omgekeerde conventie gebruikt: positief = export en negatief = verbruik. Dit geldt alleen wanneer de off-grid metermodus actief is.",
           "solar_forecast_sensor": "Verouderde sensor met de zonneprognose voor de hele dag. Bestaande installaties kunnen deze tijdens de overgang blijven gebruiken; kies voor nieuwe configuraties bij voorkeur Resterend vandaag.",
           "solar_forecast_remaining_sensor": "Sensor met de vandaag nog verwachte zonneproductie in kWh. Bij opslaan vervangt deze de verouderde prognose voor de hele dag en wordt nooit verminderd met reeds gemeten productie.",
           "solar_production_sensor": "Realtime PV-productievermogenssensor (W/kW) van een externe omvormer die niet via de MPPT-ingangen van de batterij loopt. Wordt gebruikt om de Zon-node in het energiestroomdiagram van het dashboard te tonen. Laat leeg als je panelen rechtstreeks de MPPT van de batterij voeden.",
@@ -1307,6 +1318,9 @@
       "invalid_unit": "Zonnevoorspellingssensor moet 'kWh' of 'Wh' als eenheid hebben.",
       "solar_production_sensor_not_found": "Zonneproductiesensor bestaat niet. Controleer of de sensor beschikbaar is.",
       "solar_production_invalid_unit": "Zonneproductiesensor moet 'W' of 'kW' als eenheid hebben.",
+      "offgrid_sensor_must_differ": "De off-grid vermogenssensor moet verschillen van de normale netsensor.",
+      "offgrid_sensor_not_found": "De off-grid vermogenssensor bestaat niet of is niet beschikbaar.",
+      "offgrid_sensor_invalid_unit": "De off-grid vermogenssensor moet 'W' of 'kW' als eenheid hebben.",
       "phase_sensors_must_differ": "Elke fase moet een andere stroomsensor gebruiken.",
       "phase_sensor_not_found": "De fasestroomsensor bestaat niet of is niet beschikbaar.",
       "phase_sensor_invalid_domain": "De fasestroombron moet een sensorentiteit zijn.",
@@ -1397,6 +1411,9 @@
       },
       "no_pd_mode": {
         "name": "Directe Tracking zonder PD"
+      },
+      "offgrid_mode": {
+        "name": "Off-grid Metermodus"
       },
       "min_soc_floor_enabled": {
         "name": "Gegarandeerd Minimum SOC"

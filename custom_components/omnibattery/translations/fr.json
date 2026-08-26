@@ -32,6 +32,8 @@
         "description": "Sélectionnez le capteur qui mesure l'importation/exportation du réseau électrique. Optionnellement, configurez le capteur de prévision solaire pour les fonctionnalités avancées.",
         "data": {
           "consumption_sensor": "Capteur de consommation réseau",
+          "offgrid_power_sensor": "Capteur de puissance hors réseau (facultatif)",
+          "offgrid_meter_inverted": "Signe du compteur hors réseau inversé",
           "solar_forecast_sensor": "Capteur de prévision solaire de la journée entière (ancien)",
           "solar_forecast_remaining_sensor": "Capteur de prévision solaire restante aujourd'hui (recommandé)",
           "solar_production_sensor": "Capteur de production solaire (optionnel)",
@@ -41,6 +43,8 @@
         },
         "data_description": {
           "consumption_sensor": "Capteur temps réel de puissance importée (+) ou exportée (-) vers le réseau. Des mises à jour toutes les 1-2 secondes sont recommandées. Les capteurs plus lents sont acceptés, mais les mesures retardées réduisent la qualité de régulation ; la dernière mesure est suivie pendant 65 secondes au maximum.",
+          "offgrid_power_sensor": "Compteur W/kW séparé pour le circuit secouru. Il doit être différent du capteur réseau normal. Sa configuration expose un interrupteur logiciel qui sélectionne cette source pour la régulation et les statistiques ; elle n'active pas le port physique hors réseau/EPS de la batterie.",
+          "offgrid_meter_inverted": "Activez cette option lorsque le capteur hors réseau utilise la convention opposée : positif = exportation et négatif = consommation. Elle ne s'applique que lorsque le mode compteur hors réseau est actif.",
           "solar_forecast_sensor": "Ancien capteur fournissant la prévision solaire de la journée entière. Les installations existantes peuvent continuer à l'utiliser pendant la transition ; pour les nouvelles configurations, préférez Restant aujourd'hui.",
           "solar_forecast_remaining_sensor": "Capteur fournissant la production solaire encore attendue aujourd'hui en kWh. Lors de l'enregistrement, il remplace l'ancienne prévision de la journée entière et n'est jamais diminué de la production déjà mesurée.",
           "solar_production_sensor": "Capteur de puissance de production photovoltaïque en temps réel (W/kW) d'un onduleur externe non raccordé aux entrées MPPT de la batterie. Utilisé pour afficher le nœud Solaire dans le diagramme de flux d'énergie du tableau de bord. Laissez vide si vos panneaux alimentent directement le MPPT de la batterie.",
@@ -706,6 +710,9 @@
       "invalid_unit": "Le capteur de prévision solaire doit avoir 'kWh' ou 'Wh' comme unité.",
       "solar_production_sensor_not_found": "Le capteur de production solaire n'existe pas. Vérifiez que le capteur est disponible.",
       "solar_production_invalid_unit": "Le capteur de production solaire doit avoir 'W' ou 'kW' comme unité.",
+      "offgrid_sensor_must_differ": "Le capteur de puissance hors réseau doit être différent du capteur réseau normal.",
+      "offgrid_sensor_not_found": "Le capteur de puissance hors réseau n'existe pas ou n'est pas disponible.",
+      "offgrid_sensor_invalid_unit": "Le capteur de puissance hors réseau doit avoir 'W' ou 'kW' comme unité.",
       "phase_sensors_must_differ": "Chaque phase doit utiliser un capteur de courant différent.",
       "phase_sensor_not_found": "Le capteur de courant de phase n'existe pas ou n'est pas disponible.",
       "phase_sensor_invalid_domain": "La source de courant de phase doit être une entité sensor.",
@@ -785,6 +792,8 @@
         "description": "Configurez les capteurs utilisés par l'intégration.",
         "data": {
           "consumption_sensor": "Capteur de consommation réseau",
+          "offgrid_power_sensor": "Capteur de puissance hors réseau (facultatif)",
+          "offgrid_meter_inverted": "Signe du compteur hors réseau inversé",
           "solar_forecast_sensor": "Capteur de prévision solaire de la journée entière (ancien)",
           "solar_forecast_remaining_sensor": "Capteur de prévision solaire restante aujourd'hui (recommandé)",
           "solar_production_sensor": "Capteur de production solaire (optionnel)",
@@ -794,6 +803,8 @@
         },
         "data_description": {
           "consumption_sensor": "Capteur temps réel de puissance importée (+) ou exportée (-) vers le réseau. Des mises à jour toutes les 1-2 secondes sont recommandées. Les capteurs plus lents sont acceptés, mais les mesures retardées réduisent la qualité de régulation ; la dernière mesure est suivie pendant 65 secondes au maximum.",
+          "offgrid_power_sensor": "Compteur W/kW séparé pour le circuit secouru. Il doit être différent du capteur réseau normal. Sa configuration expose un interrupteur logiciel qui sélectionne cette source pour la régulation et les statistiques ; elle n'active pas le port physique hors réseau/EPS de la batterie.",
+          "offgrid_meter_inverted": "Activez cette option lorsque le capteur hors réseau utilise la convention opposée : positif = exportation et négatif = consommation. Elle ne s'applique que lorsque le mode compteur hors réseau est actif.",
           "solar_forecast_sensor": "Ancien capteur fournissant la prévision solaire de la journée entière. Les installations existantes peuvent continuer à l'utiliser pendant la transition ; pour les nouvelles configurations, préférez Restant aujourd'hui.",
           "solar_forecast_remaining_sensor": "Capteur fournissant la production solaire encore attendue aujourd'hui en kWh. Lors de l'enregistrement, il remplace l'ancienne prévision de la journée entière et n'est jamais diminué de la production déjà mesurée.",
           "solar_production_sensor": "Capteur de puissance de production photovoltaïque en temps réel (W/kW) d'un onduleur externe non raccordé aux entrées MPPT de la batterie. Utilisé pour afficher le nœud Solaire dans le diagramme de flux d'énergie du tableau de bord. Laissez vide si vos panneaux alimentent directement le MPPT de la batterie.",
@@ -1320,6 +1331,9 @@
       "invalid_unit": "Le capteur de prévision solaire doit avoir 'kWh' ou 'Wh' comme unité.",
       "solar_production_sensor_not_found": "Le capteur de production solaire n'existe pas. Vérifiez que le capteur est disponible.",
       "solar_production_invalid_unit": "Le capteur de production solaire doit avoir 'W' ou 'kW' comme unité.",
+      "offgrid_sensor_must_differ": "Le capteur de puissance hors réseau doit être différent du capteur réseau normal.",
+      "offgrid_sensor_not_found": "Le capteur de puissance hors réseau n'existe pas ou n'est pas disponible.",
+      "offgrid_sensor_invalid_unit": "Le capteur de puissance hors réseau doit avoir 'W' ou 'kW' comme unité.",
       "phase_sensors_must_differ": "Chaque phase doit utiliser un capteur de courant différent.",
       "phase_sensor_not_found": "Le capteur de courant de phase n'existe pas ou n'est pas disponible.",
       "phase_sensor_invalid_domain": "La source de courant de phase doit être une entité sensor.",
@@ -1410,6 +1424,9 @@
       },
       "no_pd_mode": {
         "name": "Suivi Direct sans PD"
+      },
+      "offgrid_mode": {
+        "name": "Mode Compteur Hors Réseau"
       },
       "min_soc_floor_enabled": {
         "name": "SOC Minimum Garanti"

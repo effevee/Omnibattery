@@ -116,6 +116,14 @@ def normalize_solar_profile_mode(mode: str | None) -> str:
 CONF_HOUSEHOLD_CONSUMPTION_SENSOR = "household_consumption_sensor"  # legacy; migrated out in v6
 CONF_MAX_CONTRACTED_POWER = "max_contracted_power"
 
+# Optional alternate meter for installations whose backed-up/off-grid circuit is
+# measured separately. The software switch only selects this entity as the active
+# meter; enabling the battery's physical off-grid/EPS output remains the user's
+# responsibility.
+CONF_OFFGRID_POWER_SENSOR = "offgrid_power_sensor"
+CONF_OFFGRID_METER_INVERTED = "offgrid_meter_inverted"
+CONF_OFFGRID_MODE_ENABLED = "offgrid_mode_enabled"
+
 # Optional three-phase current protection.  The main consumption sensor remains
 # the only control input; these current sensors are safety limits for the phase
 # where a battery is physically installed.

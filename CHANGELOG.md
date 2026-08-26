@@ -5,6 +5,7 @@
 ### Added
 
 - **Huawei SUN2000 + LUNA2000 driver**: adds native Modbus telemetry and optional service/direct-write control for Huawei hybrid inverters with LUNA2000 storage. Thanks to @sphings79 for the contribution.
+- **Off-grid meter mode**: an optional second W/kW power sensor, with its own inverted-sign setting, now exposes a Home Assistant switch and dashboard control that change the active source used by PD control and derived consumption/grid statistics. The switch is software-only and never enables or changes a battery's physical off-grid/EPS port.
 
 - **Daily operation timeline in the dashboard**: the Summary tab now shows a 24-hour, 15-minute resolution chart with observed and projected battery actions, solar and household energy curves, and total SOC.
 - **Vacation Mode dashboard switch**: a new control in the common system card pauses household-consumption learning and the legacy daily average while physical metering and battery control continue normally. Predictive features use a constant baseline learned from 01:00–05:00, taking the median of up to the last three nights with at least three hours of coverage; vacation intervals remain excluded from Recorder backfill after the mode is disabled.

@@ -29,6 +29,8 @@ from .const import (
     CONF_MANUAL_MODE_ENABLED,
     CONF_BATTERY_MANUAL_MODE_ENABLED,
     CONF_NO_PD_MODE_ENABLED,
+    CONF_OFFGRID_POWER_SENSOR,
+    CONF_OFFGRID_MODE_ENABLED,
     CONF_PREDICTIVE_CHARGING_OVERRIDDEN,
     CONF_PREDICTIVE_CHARGING_MODE,
     CONF_DP_PRICE_DISCHARGE_CONTROL,
@@ -84,6 +86,8 @@ async def async_setup_entry(
     if controller:
         entities.append(ManualModeSwitch(hass, entry, controller))
         entities.append(NoPdModeSwitch(hass, entry, controller))
+        if entry.data.get(CONF_OFFGRID_POWER_SENSOR):
+            entities.append(OffgridModeSwitch(hass, entry, controller))
         # Keep the protection toggle present even when currently disabled so it
         # can be enabled live from the dashboard without reloading the entry.
         entities.append(ThreePhaseProtectionSwitch(hass, entry, controller))
@@ -1646,6 +1650,64 @@ class NoPdModeSwitch(SwitchEntity):
     @property
     def device_info(self):
         """Return device information for the system."""
+        return {
+            "identifiers": {(DOMAIN, "marstek_venus_system")},
+            "name": "Omnibattery System",
+            "manufacturer": "Omnibattery",
+            "model": "Multi-Battery System",
+        }
+
+
+class OffgridModeSwitch(SwitchEntity):
+    """Select the alternate off-grid meter as the integration data source."""
+
+    def __init__(self, hass: HomeAssistant, entry: ConfigEntry, controller) -> None:
+        """Initialize the software-only source selector."""
+        self.hass = hass
+        self.entry = entry
+        self.controller = controller
+
+        self._attr_has_entity_name = True
+        self._attr_translation_key = "offgrid_mode"
+        self._attr_unique_id = f"{SYSTEM_UNIQUE_ID_PREFIX}offgrid_mode"
+        self.entity_id = system_entity_id("switch", "offgrid_mode")
+        self._attr_icon = "mdi:transmission-tower-off"
+        self._attr_should_poll = False
+
+    @property
+    def is_on(self) -> bool:
+        """Return whether the alternate meter is active."""
+        return bool(self.controller.offgrid_mode_enabled)
+
+    async def _set_enabled(self, enabled: bool) -> None:
+        """Persist and apply only the active meter selection."""
+        enabled = bool(enabled and self.entry.data.get(CONF_OFFGRID_POWER_SENSOR))
+        new_data = dict(self.entry.data)
+        new_data[CONF_OFFGRID_MODE_ENABLED] = enabled
+        self.hass.config_entries.async_update_entry(self.entry, data=new_data)
+
+        async with self.controller._control_lock:
+            self.controller.set_offgrid_mode(enabled)
+
+        self.controller.schedule_control_cycle()
+        _LOGGER.info(
+            "Off-grid meter mode %s; active source is %s",
+            "ENABLED" if enabled else "DISABLED",
+            self.controller.consumption_sensor,
+        )
+        self.async_write_ha_state()
+
+    async def async_turn_on(self, **kwargs) -> None:
+        """Use the configured off-grid power sensor."""
+        await self._set_enabled(True)
+
+    async def async_turn_off(self, **kwargs) -> None:
+        """Return to the normal grid power sensor."""
+        await self._set_enabled(False)
+
+    @property
+    def device_info(self):
+        """Return information for the system device."""
         return {
             "identifiers": {(DOMAIN, "marstek_venus_system")},
             "name": "Omnibattery System",
