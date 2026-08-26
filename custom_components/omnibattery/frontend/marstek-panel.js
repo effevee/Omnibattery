@@ -5897,19 +5897,23 @@ class MarstekVenusPanel extends HTMLElement {
       wrap.className = "ctl-num";
       const range = document.createElement("input");
       range.type = "range";
+      this._wireRangeInteraction(range);
       const valEl = document.createElement("span");
       valEl.className = "ctl-val";
       const a = (state && state.attributes) || {};
       const unit = a.unit_of_measurement || "";
       range.addEventListener("input", () => {
+        range.__sliding = true;
         valEl.textContent = `${Math.round(this._clampToEntity(id, range.value))}${unit ? " " + unit : ""}`;
       });
-      range.addEventListener("change", () =>
+      range.addEventListener("change", () => {
+        const value = this._clampToEntity(id, range.value);
+        this._markRangePending(range, value);
         this._hass.callService("number", "set_value", {
           entity_id: id,
-          value: this._clampToEntity(id, range.value),
-        })
-      );
+          value,
+        });
+      });
       wrap.appendChild(range);
       wrap.appendChild(valEl);
       frag.appendChild(wrap);
@@ -5941,7 +5945,7 @@ class MarstekVenusPanel extends HTMLElement {
       if (a.min != null) w.el.min = this._sliderMin(a.min, a.step != null ? a.step : 1);
       if (a.max != null) w.el.max = a.max;
       const unit = a.unit_of_measurement || "";
-      if (!focused) {
+      if (!this._rangePatchLocked(w.el, state, a.step)) {
         const v = Number(state.state);
         if (!Number.isNaN(v)) w.el.value = v;
         // Show the real state value, not w.el.value: a native range input snaps
@@ -6439,6 +6443,45 @@ class MarstekVenusPanel extends HTMLElement {
     return v;
   }
 
+  /** Track range interaction explicitly: iOS Safari does not reliably focus a
+   *  range input on touch, so activeElement alone cannot protect a drag from
+   *  the frequent HA state patches. */
+  _wireRangeInteraction(range) {
+    const begin = () => { range.__sliding = true; };
+    const end = () => { range.__sliding = false; };
+    range.addEventListener("pointerdown", begin);
+    range.addEventListener("pointerup", end);
+    range.addEventListener("pointercancel", end);
+    // Older iOS versions may expose touch events without Pointer Events.
+    range.addEventListener("touchstart", begin, { passive: true });
+    range.addEventListener("touchend", end, { passive: true });
+    range.addEventListener("touchcancel", end, { passive: true });
+  }
+
+  /** Keep the thumb at the submitted value until HA echoes it back. Without
+   *  this short optimistic window, an update carrying the previous entity
+   *  state can snap the slider back immediately after the finger is lifted. */
+  _markRangePending(range, value) {
+    range.__sliding = false;
+    range.__pendingValue = Number(value);
+    range.__pendingUntil = Date.now() + 4000;
+  }
+
+  _rangePatchLocked(range, state, step = 1) {
+    const pending = Number(range.__pendingValue);
+    const actual = Number(state.state);
+    const tolerance = Math.max(1e-9, Math.abs(Number(step) || 1) * 1e-6);
+    if (Number.isFinite(pending) && Number.isFinite(actual) && Math.abs(actual - pending) <= tolerance) {
+      range.__pendingValue = undefined;
+      range.__pendingUntil = 0;
+    }
+    if (range.__sliding) return true;
+    if ((range.__pendingUntil || 0) > Date.now()) return true;
+    range.__pendingValue = undefined;
+    range.__pendingUntil = 0;
+    return false;
+  }
+
   /** Decimals implied by a number's step ("0.05" -> 2), capped at 3. */
   _stepDecimals(step) {
     const s = String(step);
@@ -6552,17 +6595,21 @@ class MarstekVenusPanel extends HTMLElement {
       wrap.className = "ctl-num";
       const range = document.createElement("input");
       range.type = "range";
+      this._wireRangeInteraction(range);
       const valEl = document.createElement("span");
       valEl.className = "ctl-val";
       const a = (state && state.attributes) || {};
       const unit = a.unit_of_measurement || "";
       const step = Number(a.step) || 1;
       range.addEventListener("input", () => {
+        range.__sliding = true;
         valEl.textContent = this._fmtCtlNum(this._clampToEntity(id, range.value), step, unit);
       });
-      range.addEventListener("change", () =>
-        hass.callService("number", "set_value", { entity_id: id, value: this._clampToEntity(id, range.value) })
-      );
+      range.addEventListener("change", () => {
+        const value = this._clampToEntity(id, range.value);
+        this._markRangePending(range, value);
+        hass.callService("number", "set_value", { entity_id: id, value });
+      });
       wrap.appendChild(range);
       wrap.appendChild(valEl);
       frag.appendChild(wrap);
@@ -6615,7 +6662,7 @@ class MarstekVenusPanel extends HTMLElement {
       if (a.min != null) w.el.min = this._sliderMin(a.min, step);
       if (a.max != null) w.el.max = a.max;
       const unit = a.unit_of_measurement || w.unit || "";
-      if (!focused) {
+      if (!this._rangePatchLocked(w.el, state, step)) {
         const v = Number(state.state);
         if (!Number.isNaN(v)) w.el.value = v;
         // Format the real state value, not w.el.value: a native range input snaps
