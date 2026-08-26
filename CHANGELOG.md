@@ -17,10 +17,8 @@
 
 ### Fixed
 
-- **An optimistic whole-day solar forecast could become an impossible late-day PV spike**: legacy `today` sensors now use explicit future periods where available, otherwise only the remaining solar curve; actual production from an overestimated morning is no longer moved into the evening. Daily Operation also refreshes its live solar budget without changing predictive-control state.
-
+- **Dashboard chart clocks could ignore Home Assistant's 12/24-hour preference** (#266): hover times and zoomed clock labels now follow the user's Home Assistant time-format setting instead of falling back to the UI language's AM/PM convention.
 - **Huawei cascade reconfiguration could pair telemetry and commands with different inverters**: validates the selected Huawei device against the probed inverter serial before applying the reconfiguration.
-
 - **A valid provider solar timeline could be labelled as an alternative estimate because an unused learned profile was rejected**: fallback notices now describe only higher-priority sources that actually failed before the selected source, while full fallback still retains its concrete diagnostic reasons.
 - **Predictive Time Slot diagnostics could remain `unknown` after reloading the integration once the day's final charging window had ended**: Time Slot now performs its daily energy-balance evaluation after 00:05 even when no configured windows remain, restoring stored/usable energy, consumption, deficit and decision attributes without creating a false active charging calendar.
 - **Learned household-consumption profiles could include almost all excluded-device demand after Recorder backfill**: external-load energy is now normalized by matching interval coverage without an erroneous second hours conversion, so full and partial exclusions—and additional loads—retain their configured effect. Existing affected profiles are invalidated once and rebuilt automatically.

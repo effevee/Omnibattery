@@ -1688,9 +1688,27 @@ class MarstekVenusPanel extends HTMLElement {
     if (!locale || locale.time_zone === "local") return undefined;
     return this._hass && this._hass.config && this._hass.config.time_zone;
   }
+  /** Whether clocks should use AM/PM, following the HA profile preference. */
+  _useAmPm() {
+    const locale = this._hass && this._hass.locale;
+    const preference = locale && locale.time_format;
+    if (preference === "12") return true;
+    if (preference === "24") return false;
+    // HA's `language` setting follows the selected UI language, while
+    // `system` deliberately asks Intl for the browser/OS default.
+    const language = preference === "system" ? undefined : this._lang();
+    return new Date("January 1, 2023 22:00:00")
+      .toLocaleString(language)
+      .includes("10");
+  }
   _dateTimeOptions(options = {}) {
+    let resolved = options;
+    if (Object.prototype.hasOwnProperty.call(options, "hour")
+        && options.hourCycle == null && options.hour12 == null) {
+      resolved = { ...options, hourCycle: this._useAmPm() ? "h12" : "h23" };
+    }
     const timeZone = this._timeZone();
-    return timeZone ? { ...options, timeZone } : options;
+    return timeZone ? { ...resolved, timeZone } : resolved;
   }
   /** Calendar fields for an instant in the time zone shown by Home Assistant. */
   _dateParts(epochMs = Date.now()) {
@@ -4041,11 +4059,14 @@ class MarstekVenusPanel extends HTMLElement {
   }
 
   // ----- Chart hover readout (crosshair + value tooltip) -----------------
-  /** Local clock "HH:MM" for an epoch-seconds value. */
+  /** Profile-formatted local clock for an epoch-seconds value. */
   _fmtClock(s) {
     if (s == null) return "";
     return new Date(s * 1000).toLocaleTimeString(
-      this._lang(), this._dateTimeOptions({ hour: "2-digit", minute: "2-digit" })
+      this._lang(), this._dateTimeOptions({
+        hour: this._useAmPm() ? "numeric" : "2-digit",
+        minute: "2-digit",
+      })
     );
   }
 
