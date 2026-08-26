@@ -722,6 +722,42 @@ async def test_fake_persistence_restores_current_day_and_actions():
 
 
 @pytest.mark.asyncio
+async def test_config_change_restores_actual_activity_and_discards_old_projection():
+    """A reload after changing options must not erase earlier operation evidence."""
+    clock = MutableClock(datetime(2026, 8, 23, 10, 7, tzinfo=MADRID))
+    store = FakeStore()
+    manager = _manager(clock, store)
+    manager.record_runtime_decision(
+        action_mask=ACTION_DISCHARGE,
+        discharge_power_w=400,
+        duration_s=300,
+        source="runtime_measured",
+    )
+    manager.rebuild_future_projection(
+        [{"index": 41, "action_mask": ACTION_GRID_CHARGE, "solar_kwh": 0.4}],
+        now=clock(),
+    )
+    await manager.async_save_all()
+
+    restored = _manager(clock, store)
+    restored._config_entry.options["offgrid_enabled"] = True
+
+    assert await restored.async_load() is True
+    snapshot = restored.build_public_snapshot()
+    assert snapshot["operations"]["actual_action_mask"][40] == ACTION_DISCHARGE
+    assert snapshot["operations"]["actual_discharge_power_w"][40] == pytest.approx(400)
+    assert snapshot["operations"]["discharge_from_battery_kwh"][40] == pytest.approx(
+        1 / 30
+    )
+    assert snapshot["operations"]["actual_source"][40] == "runtime_measured"
+    assert snapshot["operations"]["planned_action_mask"][41] == 0
+    assert snapshot["series"]["solar_forecast_kwh"][41] is None
+
+    await restored.async_save_all()
+    assert store.data["configuration_fingerprint"] == restored.configuration_fingerprint()
+
+
+@pytest.mark.asyncio
 async def test_persistence_retries_when_data_changes_during_an_inflight_save():
     clock = MutableClock(datetime(2026, 8, 23, 10, 7, tzinfo=MADRID))
     store = BlockingStore()

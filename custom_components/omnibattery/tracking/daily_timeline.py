@@ -1060,7 +1060,13 @@ class DailyOperationTimelineManager:
         return self._as_local_datetime(value)
 
     def configuration_fingerprint(self) -> str:
-        """Hash config/source identity without persisting the config itself."""
+        """Hash the configuration used to build a future projection.
+
+        Runtime observations are a diary of what already happened and remain
+        valid when an option changes. The fingerprint therefore protects only
+        the persisted projection, which must be rebuilt after a reload with
+        different settings.
+        """
         data = getattr(self._config_entry, "data", {}) or {}
         options = getattr(self._config_entry, "options", {}) or {}
         payload = {
@@ -1136,6 +1142,24 @@ class DailyOperationTimelineManager:
             "consumption_fallback_reason": None,
             "operation_plan": None,
         }
+
+    def _clear_projection(self) -> None:
+        """Discard forecast data while retaining measured current-day evidence."""
+        for cell in self._cells:
+            cell.clear_planned()
+        self._planned_solar_kwh = [None] * INTERVAL_COUNT
+        self._planned_consumption_kwh = [None] * INTERVAL_COUNT
+        self._planned_stored_energy_end_kwh = [None] * INTERVAL_COUNT
+        self._extended_projection = []
+        self._mode = self._controller_mode()
+        self._plan_evaluated_at = None
+        self._stale = False
+        self._stale_reason = None
+        self._sources["solar_forecast"] = None
+        self._sources["solar_fallback_reason"] = None
+        self._sources["consumption_forecast"] = None
+        self._sources["consumption_fallback_reason"] = None
+        self._sources["operation_plan"] = None
 
     def _interval_end_timestamps(self, index: int) -> tuple[float, ...]:
         """Return every physical end instant owned by one wall-clock cell.
@@ -2483,12 +2507,14 @@ class DailyOperationTimelineManager:
             or data.get("interval_count") != INTERVAL_COUNT
             or str(data.get("local_date", data.get("date", ""))) != expected_date.isoformat()
             or data.get("timezone") != expected_timezone
-            or data.get("configuration_fingerprint") != expected_fingerprint
         ):
             self._reset_arrays(expected_date)
             self._last_error = "load: identity_mismatch"
             self._restore_status = "discarded"
             return False
+        projection_configuration_changed = (
+            data.get("configuration_fingerprint") != expected_fingerprint
+        )
 
         closed = _fit_list(data.get("closed"), False)
         cells_raw = data.get("cells")
@@ -2574,6 +2600,12 @@ class DailyOperationTimelineManager:
             self._setpoint_info = self._safe_metadata(metadata.get("setpoint"))
             self._delay_info = self._safe_metadata(metadata.get("delay"))
             self._freshness_info = self._safe_metadata(metadata.get("freshness"))
+        if projection_configuration_changed:
+            # A config update can legitimately reload this integration during
+            # the day. Do not erase actual battery activity that occurred
+            # before the reload; only discard the forecast derived from the
+            # previous configuration. Setup immediately builds a new one.
+            self._clear_projection()
         self._configuration_fingerprint = expected_fingerprint
         self._current_index = self._index_for_datetime(current)
         self._current_progress = self._progress_for_datetime(current)
@@ -2581,6 +2613,10 @@ class DailyOperationTimelineManager:
         self._dirty = False
         self._last_error = None
         self._restore_status = "restored"
+        if projection_configuration_changed:
+            # Rewrite the stored projection identity so later reloads do not
+            # keep treating this otherwise restored diary as stale.
+            self.request_save()
         return True
 
     async def async_restore(self) -> bool:
@@ -2588,16 +2624,15 @@ class DailyOperationTimelineManager:
         return await self.async_load()
 
     def invalidate_if_configuration_changed(self) -> bool:
-        """Drop the diary when its source/configuration identity changes."""
+        """Discard only stale projections when configuration changes."""
         current = self.configuration_fingerprint()
         if current == self._configuration_fingerprint:
             return False
-        self._reset_arrays(self._now().date())
+        self._clear_projection()
         self._configuration_fingerprint = current
-        self._last_error = "configuration_changed"
-        self._restore_status = "discarded"
-        self._dirty = True
+        self._last_error = None
         self.request_save()
+        self._notify_listeners()
         return True
 
     async def async_save(self) -> bool:
