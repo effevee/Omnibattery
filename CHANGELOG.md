@@ -17,6 +17,8 @@
 
 ### Fixed
 
+- **An optimistic whole-day solar forecast could become an impossible late-day PV spike**: legacy `today` sensors now use explicit future periods where available, otherwise only the remaining solar curve; actual production from an overestimated morning is no longer moved into the evening. Daily Operation also refreshes its live solar budget without changing predictive-control state.
+
 - **Huawei cascade reconfiguration could pair telemetry and commands with different inverters**: validates the selected Huawei device against the probed inverter serial before applying the reconfiguration.
 
 - **A valid provider solar timeline could be labelled as an alternative estimate because an unused learned profile was rejected**: fallback notices now describe only higher-priority sources that actually failed before the selected source, while full fallback still retains its concrete diagnostic reasons.

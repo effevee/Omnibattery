@@ -666,8 +666,8 @@ class PredictiveChargingStatusSensor(BinarySensorEntity):
 
         # Keep the live remainder current even between pricing reevaluations.
         # This also gives legacy whole-day forecast sensors the same dashboard
-        # value as the control path, which derives the remainder from production
-        # already observed and the solar curve.
+        # value as the control path, which maps the forecast's future periods
+        # or remaining solar curve without moving missed past production later.
         if getattr(self.controller, "_pricing_mgr", None) is not None:
             try:
                 forecast = read_solar_forecast_kwh(self.hass, self.controller)

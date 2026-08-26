@@ -244,6 +244,16 @@ class PricingManager:
             )
 
         diagnostics_data = dict(base_decision_data or {})
+        # Daily Operation refreshes independently of predictive decisions. Its
+        # curve must use the live remaining forecast, not the budget retained
+        # by a morning evaluation. Read without updating controller diagnostics:
+        # this adapter is deliberately a read-only dashboard boundary.
+        live_solar_input = self._read_remaining_solar_input(
+            now=now,
+            update_controller=False,
+        )
+        if live_solar_input is not None and live_solar_input.source != "fallback":
+            diagnostics_data["solar_forecast_input"] = live_solar_input
         plan = self._build_chronological_plan_for_horizon(
             now=now,
             slots=list(slots),
@@ -3900,7 +3910,10 @@ class PricingManager:
         return max(historical_remainder, normal_remaining), historical_rate
 
     def _read_remaining_solar_input(
-        self, *, now: datetime | float | None = None
+        self,
+        *,
+        now: datetime | float | None = None,
+        update_controller: bool = True,
     ) -> SolarForecastInput | None:
         """Read the normalized remaining forecast, retaining dated periods."""
         try:
@@ -3908,6 +3921,7 @@ class PricingManager:
                 self._hass,
                 self._controller,
                 now=now,
+                update_controller=update_controller,
             )
         except (AttributeError, TypeError, ValueError):
             return None
@@ -3915,13 +3929,13 @@ class PricingManager:
     def _remaining_solar_today_kwh(self, now_h: datetime | float) -> float:
         """Solar generation still expected today (kWh), from the forecast sensor.
 
-        Three progressively weaker sources: actual accumulator (forecast −
-        produced-so-far), sinusoidal fraction (when production started but the
-        accumulator is cold), or — before production could plausibly have
-        started — the full forecast. The last branch matters for the SOC-drop
-        re-evaluation (#411), which can fire pre-dawn when both accumulator and
-        T_start are empty: without it the day's entire forecast was treated as
-        0 kWh, booking cheap grid slots for a "deficit" that solar covers.
+        A native remaining sensor or dated provider periods are exact. A
+        legacy whole-day scalar is mapped over the remaining solar curve rather
+        than reduced by actual production, because missed morning forecast must
+        not be moved into the evening. Before production could plausibly have
+        started, the full forecast remains available for the SOC-drop
+        re-evaluation (#411), which otherwise booked cheap grid slots for a
+        "deficit" that solar covers.
         After the cutoff hour with no production seen, keep the conservative
         0 (solar sensor likely broken; better to book the slots than run dry).
         """

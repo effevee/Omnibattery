@@ -135,7 +135,9 @@ por tanto, una protección de calidad de datos, no una orden para descargar.
 El sensor de previsión es el presupuesto energético. Un sensor de «restante de
 hoy» ya representa energía futura y el acumulador de producción local no lo
 reduce otra vez. Los sensores legados de día completo (`today`) se convierten
-una sola vez a presupuesto restante. El sensor opcional de producción real, y
+una sola vez a presupuesto restante mediante sus periodos futuros fechados, o
+la parte restante de la curva solar; la producción ya medida nunca se desplaza
+a intervalos futuros. El sensor opcional de producción real, y
 los canales MPPT legibles de las baterías, solo aprenden la forma intradía; no
 sustituyen el total de la previsión.
 

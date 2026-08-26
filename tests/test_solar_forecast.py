@@ -63,6 +63,88 @@ def test_remaining_forecast_is_not_reduced_by_production():
     assert PricingManager(hass, controller)._remaining_solar_today_kwh(14.0) == pytest.approx(1.81)
 
 
+def test_legacy_today_forecast_uses_dated_future_periods_not_actual_production():
+    """A missed morning must not be moved into the final solar intervals."""
+    now = datetime(2026, 8, 25, 18, 0, tzinfo=MADRID)
+    periods = [
+        {
+            "start": now.replace(hour=8),
+            "end": now,
+            "energy_kwh": 18.71,
+        },
+        {
+            "start": now,
+            "end": now.replace(hour=20),
+            "energy_kwh": 1.81,
+        },
+    ]
+    state = _state(20.52, solar_forecast_periods=periods)
+    hass = SimpleNamespace(
+        config=SimpleNamespace(time_zone="Europe/Madrid"),
+        states=SimpleNamespace(get=lambda _entity_id: state),
+    )
+    controller = SimpleNamespace(
+        solar_forecast_sensor="sensor.today",
+        solar_forecast_remaining_sensor=None,
+        _daily_solar_energy_kwh=12.34,
+    )
+
+    result = read_remaining_solar_kwh(hass, controller, now=now)
+
+    assert result.remaining_kwh == pytest.approx(1.81)
+    assert result.conversion == "dated_periods"
+
+
+def test_legacy_today_forecast_uses_remaining_curve_not_actual_production():
+    """A scalar daily forecast must not turn an optimistic past into sunset PV."""
+    now = datetime(2026, 8, 25, 18, 0, tzinfo=MADRID)
+    tracker = SimpleNamespace(
+        estimate_t_end=lambda: 20.0,
+        get_solar_fraction_done=lambda *_args: 0.9,
+    )
+    controller = SimpleNamespace(
+        solar_forecast_sensor="sensor.today",
+        solar_forecast_remaining_sensor=None,
+        _daily_solar_energy_kwh=12.34,
+        _solar_t_start=8.0,
+        _consumption_tracker=tracker,
+    )
+    hass = SimpleNamespace(
+        states=SimpleNamespace(get=lambda _entity_id: _state(20.52))
+    )
+
+    result = read_remaining_solar_kwh(hass, controller, now=now)
+
+    assert result.remaining_kwh == pytest.approx(2.052)
+    assert result.conversion == "temporal_fraction"
+
+
+def test_read_only_remaining_forecast_does_not_change_controller_diagnostics():
+    now = datetime(2026, 8, 25, 18, 0, tzinfo=MADRID)
+    controller = SimpleNamespace(
+        solar_forecast_sensor=None,
+        solar_forecast_remaining_sensor="sensor.remaining",
+        solar_forecast_source="previous",
+        solar_forecast_diagnostic_source="previous_source",
+        solar_forecast_periods=("previous_periods",),
+        solar_forecast_conversion="previous_conversion",
+    )
+    before = dict(vars(controller))
+    hass = SimpleNamespace(
+        states=SimpleNamespace(get=lambda _entity_id: _state(1.81))
+    )
+
+    result = read_remaining_solar_kwh(
+        hass,
+        controller,
+        now=now,
+        update_controller=False,
+    )
+
+    assert result.remaining_kwh == pytest.approx(1.81)
+    assert vars(controller) == before
+
+
 def test_midnight_zero_scalar_uses_positive_dated_periods_for_new_day():
     now = datetime(2026, 8, 25, 0, 0, tzinfo=MADRID)
     periods = [

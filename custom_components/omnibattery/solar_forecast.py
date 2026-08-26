@@ -280,7 +280,12 @@ def _extract_forecast_periods(state: Any) -> tuple[SolarForecastPeriod, ...]:
     return tuple(parsed)
 
 
-def read_solar_forecast_kwh(hass: Any, controller: Any) -> SolarForecast | None:
+def read_solar_forecast_kwh(
+    hass: Any,
+    controller: Any,
+    *,
+    update_controller: bool = True,
+) -> SolarForecast | None:
     """Read the preferred forecast: remaining first, legacy today second.
 
     An unavailable remaining sensor deliberately falls back to the configured
@@ -300,8 +305,6 @@ def read_solar_forecast_kwh(hass: Any, controller: Any) -> SolarForecast | None:
         state = hass.states.get(sensor)
         value = _state_kwh(state)
         if value is not None:
-            # Kept on the controller for diagnostics and lightweight consumers.
-            controller.solar_forecast_source = source
             forecast = SolarForecast(
                 value,
                 source,
@@ -309,12 +312,18 @@ def read_solar_forecast_kwh(hass: Any, controller: Any) -> SolarForecast | None:
                 periods=_extract_forecast_periods(state),
                 conversion="none",
             )
-            controller.solar_forecast_diagnostic_source = forecast.diagnostic_source
-            controller.solar_forecast_periods = forecast.periods
+            # Most control callers retain the source for diagnostics. Dashboard
+            # projections use the same adapter read-only, so they can refresh
+            # the live value without changing controller-owned runtime state.
+            if update_controller:
+                controller.solar_forecast_source = source
+                controller.solar_forecast_diagnostic_source = forecast.diagnostic_source
+                controller.solar_forecast_periods = forecast.periods
             return forecast
-    controller.solar_forecast_source = None
-    controller.solar_forecast_diagnostic_source = None
-    controller.solar_forecast_periods = ()
+    if update_controller:
+        controller.solar_forecast_source = None
+        controller.solar_forecast_diagnostic_source = None
+        controller.solar_forecast_periods = ()
     return None
 
 
@@ -462,6 +471,7 @@ def read_remaining_solar_kwh(
     controller: Any,
     *,
     now: datetime | float | None = None,
+    update_controller: bool = True,
 ) -> SolarForecastInput:
     """Return one normalized ``remaining`` budget for every caller.
 
@@ -470,10 +480,15 @@ def read_remaining_solar_kwh(
     the conversion is carried on the result so downstream code cannot infer
     the horizon a second time.
     """
-    forecast = read_solar_forecast_kwh(hass, controller)
+    forecast = read_solar_forecast_kwh(
+        hass,
+        controller,
+        update_controller=update_controller,
+    )
     if forecast is None:
-        controller.solar_forecast_source = "fallback"
-        controller.solar_forecast_diagnostic_source = "fallback"
+        if update_controller:
+            controller.solar_forecast_source = "fallback"
+            controller.solar_forecast_diagnostic_source = "fallback"
         return SolarForecastInput(
             0.0,
             "fallback",
@@ -493,8 +508,9 @@ def read_remaining_solar_kwh(
         now,
     )
     if forecast.kwh <= _FORECAST_EPSILON_KWH and period_remaining > _FORECAST_EPSILON_KWH:
-        controller.solar_forecast_conversion = "dated_periods_zero_scalar"
-        controller.solar_forecast_diagnostic_source = forecast.diagnostic_source
+        if update_controller:
+            controller.solar_forecast_conversion = "dated_periods_zero_scalar"
+            controller.solar_forecast_diagnostic_source = forecast.diagnostic_source
         return SolarForecastInput(
             period_remaining,
             forecast.diagnostic_source,
@@ -513,24 +529,17 @@ def read_remaining_solar_kwh(
             original_source="remaining",
             conversion="none",
         )
-        controller.solar_forecast_conversion = "none"
+        if update_controller:
+            controller.solar_forecast_conversion = "none"
         return result
 
-    today = _controller_local_date(controller)
-    accumulator_date = getattr(controller, "_daily_solar_energy_date", None)
-    accumulator = getattr(controller, "_daily_solar_energy_kwh", 0.0)
-    try:
-        accumulator = float(accumulator)
-    except (TypeError, ValueError):
-        accumulator = 0.0
-    accumulator_reliable = (
-        math.isfinite(accumulator)
-        and accumulator > 0.0
-        and (accumulator_date is None or accumulator_date == today)
-    )
-    if accumulator_reliable:
-        remaining = max(0.0, forecast.kwh - accumulator)
-        conversion = "accumulator"
+    # A whole-day scalar has already assigned part of its energy to elapsed
+    # hours.  Subtracting actual production makes any cloudy/optimistic morning
+    # reappear as fictional energy at sunset. Prefer dated provider periods;
+    # otherwise map the total through the remaining part of the solar curve.
+    if forecast.periods:
+        remaining = period_remaining
+        conversion = "dated_periods"
     else:
         tracker = getattr(controller, "_consumption_tracker", None)
         t_start = getattr(controller, "_solar_t_start", None)
@@ -555,8 +564,9 @@ def read_remaining_solar_kwh(
                 remaining = 0.0
                 conversion = "unsafe_zero"
 
-    controller.solar_forecast_conversion = conversion
-    controller.solar_forecast_diagnostic_source = "today_legacy"
+    if update_controller:
+        controller.solar_forecast_conversion = conversion
+        controller.solar_forecast_diagnostic_source = "today_legacy"
     return SolarForecastInput(
         remaining,
         "today_legacy",

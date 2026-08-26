@@ -800,8 +800,9 @@ def test_remaining_solar_zero_when_no_production_after_fallback_hour():
     assert _solar_ctrl()._remaining_solar_today_kwh(16.0) == 0.0
 
 
-def test_remaining_solar_subtracts_produced_when_accumulator_warm():
-    assert _solar_ctrl(produced=10.0)._remaining_solar_today_kwh(12.0) == 30.0
+def test_remaining_solar_keeps_the_curve_when_accumulator_is_warm():
+    # A poor morning is not deferred into the afternoon as fictional PV.
+    assert _solar_ctrl(produced=10.0, t_start=8.0)._remaining_solar_today_kwh(12.0) == 20.0
 
 
 def test_remaining_solar_uses_fraction_when_t_start_known():
@@ -1008,6 +1009,55 @@ def test_extended_projection_adapter_is_read_only_for_dashboard_callers():
     assert result.diagnostics["chronological_planning_active"] is False
     with pytest.raises(TypeError):
         result.diagnostics["chronological_source"] = "mutated"
+
+
+def test_extended_projection_refreshes_the_live_solar_budget():
+    """A dashboard redraw must not reuse a morning solar remainder."""
+    madrid = ZoneInfo("Europe/Madrid")
+    now = datetime(2026, 8, 25, 18, 0, tzinfo=madrid)
+    horizon_end = now.replace(
+        hour=0, minute=0, second=0, microsecond=0
+    ) + timedelta(days=1, hours=12)
+    controller = _controller(
+        solar_forecast_sensor=None,
+        solar_forecast_remaining_sensor="sensor.remaining",
+        solar_forecast_source="previous",
+        solar_forecast_diagnostic_source="previous_source",
+        solar_forecast_periods=("previous_periods",),
+        solar_forecast_conversion="previous_conversion",
+    )
+    state = SimpleNamespace(
+        state="1.81",
+        attributes={"unit_of_measurement": "kWh"},
+    )
+    hass = SimpleNamespace(states=SimpleNamespace(get=lambda _entity_id: state))
+    manager = PricingManager(hass, controller)
+    captured: dict[str, object] = {}
+
+    def capture_projection(**kwargs):
+        captured.update(kwargs["decision_data"])
+        return None
+
+    manager._build_chronological_plan_for_horizon = capture_projection
+    stale_input = SolarForecastInput(8.23, "stale", conversion="stale")
+    base = {"solar_forecast_input": stale_input}
+
+    result = manager.build_extended_chronological_projection(
+        now=now,
+        slots=[],
+        base_decision_data=base,
+        price_ceiling=None,
+        horizon_end=horizon_end,
+    )
+
+    assert result.plan is None
+    assert captured["solar_forecast_input"].remaining_kwh == pytest.approx(1.81)
+    assert captured["solar_forecast_input"].source == "remaining_sensor"
+    assert base["solar_forecast_input"] is stale_input
+    assert controller.solar_forecast_source == "previous"
+    assert controller.solar_forecast_diagnostic_source == "previous_source"
+    assert controller.solar_forecast_periods == ("previous_periods",)
+    assert controller.solar_forecast_conversion == "previous_conversion"
 
 
 def test_canonical_diagnostics_refresh_writes_no_control_runtime_state():

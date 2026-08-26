@@ -134,7 +134,9 @@ data-quality safeguard, not a request for the battery to discharge.
 
 The forecast sensor is the energy budget. A `remaining today` sensor is already
 future energy and is never reduced by the local production accumulator. Legacy
-whole-day (`today`) sensors are converted once to a remaining budget. The
+whole-day (`today`) sensors use their dated future periods when available, or
+the remaining part of the solar curve otherwise; measured past production is
+never shifted into later forecast intervals. The
 optional real-time production sensor, and readable battery MPPT channels, are
 used only to learn the intraday shape; they never replace the forecast total.
 
