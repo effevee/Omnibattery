@@ -1696,6 +1696,7 @@ class ChargeDischargeController:
     def _daily_operation_build_projection(self, now: datetime) -> dict[str, Any] | None:
         """Build the dashboard projection from the existing authoritative planner."""
         from .const import CHARGE_EFFICIENCY
+        from .pricing import PriceSlot
         from .pricing.chronological import SlotAllocation
         from .tracking.daily_projection import (
             DailyOperationProjectionRequest,
@@ -1730,14 +1731,14 @@ class ChargeDischargeController:
             getattr(self, "_last_chronological_diagnostics", None) or {}
         )
         decision_data = dict(base_decision_data)
-        slots = []
+        raw_slots = []
         schedule = getattr(self, "_dynamic_pricing_schedule", None)
         local_midnight = now.replace(
             hour=0, minute=0, second=0, microsecond=0
         ) + timedelta(days=1)
         projection_horizon_end = local_midnight + timedelta(hours=12)
         if mode == "dynamic_pricing" and schedule is not None:
-            slots = list(getattr(schedule, "selected_slots", ()) or ())
+            raw_slots = list(getattr(schedule, "selected_slots", ()) or ())
         elif mode == "time_slot":
             try:
                 # The dashboard deliberately looks beyond today's control
@@ -1748,13 +1749,39 @@ class ChargeDischargeController:
                     planner, "_time_slot_price_slots_for_horizon", None
                 )
                 if callable(preview_slots):
-                    slots = list(preview_slots(now, projection_horizon_end))
+                    raw_slots = list(preview_slots(now, projection_horizon_end))
                 else:
                     # Compatibility with lightweight planners used by older
                     # tests and external custom extensions.
-                    slots = list(planner._time_slot_price_slots(now))
+                    raw_slots = list(planner._time_slot_price_slots(now))
             except (AttributeError, TypeError, ValueError):
-                slots = []
+                raw_slots = []
+
+        def projection_datetime(value: datetime) -> datetime:
+            """Align a control-calendar wall time with the dashboard clock."""
+            if now.tzinfo is None:
+                return value.replace(tzinfo=None)
+            if value.tzinfo is None:
+                return value.replace(tzinfo=now.tzinfo)
+            return value.astimezone(now.tzinfo)
+
+        slot_pairs: list[tuple[Any, PriceSlot]] = []
+        for raw_slot in raw_slots:
+            start = getattr(raw_slot, "start", None)
+            end = getattr(raw_slot, "end", None)
+            if not isinstance(start, datetime) or not isinstance(end, datetime):
+                continue
+            slot_pairs.append(
+                (
+                    raw_slot,
+                    PriceSlot(
+                        projection_datetime(start),
+                        projection_datetime(end),
+                        getattr(raw_slot, "price", 0.0),
+                    ),
+                )
+            )
+        slots = [slot for _raw_slot, slot in slot_pairs]
 
         try:
             projection_builder = getattr(
@@ -1794,8 +1821,8 @@ class ChargeDischargeController:
             targets = getattr(schedule, "slot_energy_targets_kwh", {}) or {}
             deadlines = getattr(schedule, "slot_deadlines", {}) or {}
             kinds = getattr(schedule, "slot_plan_kinds", {}) or {}
-            for slot in slots:
-                target = self._daily_operation_float(targets.get(slot), 0.0)
+            for raw_slot, slot in slot_pairs:
+                target = self._daily_operation_float(targets.get(raw_slot), 0.0)
                 if target <= 0.0:
                     duration_h = max(0.0, (slot.end - slot.start).total_seconds() / 3600.0)
                     target = (
@@ -1816,8 +1843,12 @@ class ChargeDischargeController:
                         SlotAllocation(
                             slot,
                             target,
-                            deadlines.get(slot),
-                            kinds.get(slot, "scheduled"),
+                            (
+                                projection_datetime(deadlines[raw_slot])
+                                if isinstance(deadlines.get(raw_slot), datetime)
+                                else None
+                            ),
+                            kinds.get(raw_slot, "scheduled"),
                         )
                     )
 

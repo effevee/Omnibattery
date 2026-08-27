@@ -214,13 +214,20 @@ def test_reload_without_diagnostics_does_not_make_dashboard_restore_them():
 def test_dashboard_refresh_keeps_the_dynamic_calendar_equivalent():
     """The stored Dynamic Pricing calendar remains authoritative and unchanged."""
     now = datetime(2026, 8, 24, 23, 45, tzinfo=MADRID)
-    controller, _planner, actuator = _controller(now=now, mode="dynamic_pricing")
+    controller, planner, actuator = _controller(now=now, mode="dynamic_pricing")
     schedule = controller._dynamic_pricing_schedule
     # Give the saved calendar a real allocation to cover the projection's
-    # schedule adaptation branch, not merely its empty-schedule fallback.
-    slot = schedule.selected_slots[0]
+    # schedule adaptation branch. Runtime price parsers retain local wall-clock
+    # datetimes without tzinfo, while Home Assistant supplies an aware clock to
+    # the dashboard refresh; the view must align its private copies only.
+    slot = PriceSlot(
+        now.replace(tzinfo=None),
+        (now + timedelta(minutes=15)).replace(tzinfo=None),
+        0.05,
+    )
+    schedule.selected_slots = [slot]
     schedule.slot_energy_targets_kwh[slot] = 0.25
-    schedule.slot_deadlines[slot] = now + timedelta(minutes=15)
+    schedule.slot_deadlines[slot] = (now + timedelta(minutes=15)).replace(tzinfo=None)
     schedule.slot_plan_kinds[slot] = "deadline"
     before = _state(controller)
 
@@ -230,3 +237,7 @@ def test_dashboard_refresh_keeps_the_dynamic_calendar_equivalent():
     assert result["sources"]["operation_plan"] == "dynamic_schedule"
     assert _state(controller) == before
     assert actuator.calls == []
+    projected_slot = planner.extended_calls[0]["slots"][0]
+    assert projected_slot.start == now
+    assert projected_slot.end == now + timedelta(minutes=15)
+    assert projected_slot.start.tzinfo is MADRID
