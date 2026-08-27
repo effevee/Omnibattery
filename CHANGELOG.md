@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.4.0b6] - 2026-08-27
+
+### Fixed
+
+- **Daily Operation could show no projection in Dynamic Pricing mode**: price calendars store local wall-clock slots without timezone metadata, while the dashboard refresh uses timezone-aware Home Assistant timestamps. The read-only projection now aligns private slot and deadline copies with the dashboard timezone without modifying the executable charging schedule.
+
 ## [1.4.0b5] - 2026-08-21
 
 ### Added
@@ -17,7 +23,6 @@
 
 ### Fixed
 
-- **Daily Operation could show no projection in Dynamic Pricing mode**: price calendars store local wall-clock slots without timezone metadata, while the dashboard refresh uses timezone-aware Home Assistant timestamps. The read-only projection now aligns private slot and deadline copies with the dashboard timezone without modifying the executable charging schedule.
 - **Dashboard sliders could jump back while being adjusted on a phone**: touch interaction is now tracked explicitly instead of relying on browser focus, and the submitted thumb position is held briefly until Home Assistant confirms the new value, so frequent state updates no longer interrupt fine adjustments.
 - **Dashboard chart clocks could ignore Home Assistant's 12/24-hour preference** (#266): hover times and zoomed clock labels now follow the user's Home Assistant time-format setting instead of falling back to the UI language's AM/PM convention.
 - **Huawei cascade reconfiguration could pair telemetry and commands with different inverters**: validates the selected Huawei device against the probed inverter serial before applying the reconfiguration.
