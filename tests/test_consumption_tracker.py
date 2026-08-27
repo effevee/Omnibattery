@@ -475,6 +475,18 @@ def _aggregate_pv_unit(solar_power, available=True):
     )
 
 
+def _max_ac_unit(solar_power=800, available=True):
+    """Solarbank Max AC telemetry must not be treated as independent PV."""
+    return SimpleNamespace(
+        capabilities=SimpleNamespace(
+            has_mppt_pv=False,
+            has_solar_telemetry=False,
+        ),
+        data={"solar_power": solar_power},
+        is_available=available,
+    )
+
+
 def test_total_solar_external_only():
     tracker = _make_solar_tracker({"sensor.aps": _w(1500)}, "sensor.aps", [])
     assert tracker._read_total_solar_power_kw() == pytest.approx(1.5)
@@ -497,6 +509,13 @@ def test_total_solar_external_plus_aggregate_pv():
         {"sensor.aps": _w(1500)}, "sensor.aps", [_aggregate_pv_unit(800)]
     )
     assert tracker._read_total_solar_power_kw() == pytest.approx(2.3)
+
+
+def test_total_solar_max_ac_with_external_uses_only_external_sensor():
+    tracker = _make_solar_tracker(
+        {"sensor.aps": _w(1500)}, "sensor.aps", [_max_ac_unit(800)]
+    )
+    assert tracker._read_total_solar_power_kw() == pytest.approx(1.5)
 
 
 def test_total_solar_external_plus_mppt():

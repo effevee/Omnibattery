@@ -15,8 +15,8 @@
  * The flow Grid/Home nodes use the entities the integration was configured
  * with, forwarded through the panel `config` payload (grid_entity / home_entity).
  * Solar uses the configured production sensor (solar_entity, external inverter)
- * when present, else falls back to per-battery MPPT sensors when the model
- * exposes them.
+ * when present, else falls back to per-battery PV sensors when the model exposes
+ * an independent source.
  *
  * Design tokens (OKLCH) are embedded so the look matches the handoff exactly;
  * dark/light follows the user's HA theme (hass.themes.darkMode).
@@ -1858,6 +1858,24 @@ class MarstekVenusPanel extends HTMLElement {
     const u = (stateObj.attributes.unit_of_measurement || "").toLowerCase();
     return u === "kw" ? n * 1000 : n;
   }
+  /** Anker AC models expose a calculated PV-looking value, not DC PV input. */
+  _isAnkerAcOnlyModel(model) {
+    const normalized = String(model || "").trim().toLowerCase();
+    return /(?:^|\s)solarbank\s+(?:max|xe)\s+ac(?:$|\s)/.test(normalized);
+  }
+  /** Only the verified E5000 Anker models may use aggregate PV in the panel. */
+  _isAnkerIndependentPvModel(model) {
+    const normalized = String(model || "").trim().toLowerCase();
+    return normalized.includes("solarbank 4 e5000 pro");
+  }
+  _allowAggregateSolar(model, device) {
+    const manufacturer = String((device && device.manufacturer) || "").toLowerCase();
+    const normalized = String(model || "").trim().toLowerCase();
+    const isAnker = manufacturer.includes("anker") || normalized.includes("solarbank");
+    if (!isAnker) return true;
+    if (this._isAnkerAcOnlyModel(model)) return false;
+    return this._isAnkerIndependentPvModel(model);
+  }
   /** Sum live power (W) of every enabled excluded device. Configuration comes
    *  from the panel payload so disabling a control entity cannot remove a load
    *  from the diagram. A loaded Enabled switch overrides the persisted value,
@@ -1920,6 +1938,10 @@ class MarstekVenusPanel extends HTMLElement {
         return e && e.translation_key === K.batterySoc;
       });
       if (!socObj) continue; // not a battery device
+      const modelLabel = (socObj.attributes && socObj.attributes.model) || "";
+      const socEntity = hass.entities[socObj.entity_id];
+      const device = socEntity && hass.devices && hass.devices[socEntity.device_id];
+      const allowAggregateSolar = this._allowAggregateSolar(modelLabel, device);
       const get = (key) => {
         const id = ids.find((i) => {
           const e = hass.entities[i];
@@ -1940,7 +1962,7 @@ class MarstekVenusPanel extends HTMLElement {
       // Some batteries (Anker Solarbank 4) publish only the aggregate DC PV
       // value. It uses the same canonical translation key as the Venus total,
       // so it can fill the per-battery model without inventing MPPT channels.
-      if (mpptW == null) {
+      if (allowAggregateSolar && mpptW == null) {
         const aggregateSolarW = this._watts(get(K.solarPower));
         if (aggregateSolarW != null) mpptW = Math.max(0, aggregateSolarW);
       }
@@ -2031,8 +2053,8 @@ class MarstekVenusPanel extends HTMLElement {
     const battery = battW != null ? battW / 1000 : 0;
 
     // solar: solar_entity is already the complete production figure — the
-    // system_solar_power aggregate (external + battery-reported DC PV), or the
-    // external-only sensor on non-MPPT systems. So use it directly; ΣMPPT is only
+    // system_solar_power aggregate (external + independent battery-reported DC PV),
+    // or the external-only sensor on AC-derived systems. So use it directly; ΣMPPT is only
     // a fallback for before that aggregate sensor is readable, NOT an addition,
     // otherwise the DC-coupled share is double-counted on vA/vD (#407).
     let solarW = null;

@@ -157,6 +157,22 @@ def test_runtime_diary_composes_grid_and_dc_solar_charge():
     assert decision["simultaneous"] is True
 
 
+def test_runtime_diary_ignores_max_ac_derived_solar_for_charge_source():
+    coordinator = SimpleNamespace(
+        capabilities=SimpleNamespace(
+            has_mppt_pv=False, has_solar_telemetry=False
+        ),
+        data={"ac_power": -600, "solar_power": 1400},
+    )
+    controller = _runtime_controller([coordinator], grid_active=False)
+
+    decision = ChargeDischargeController._daily_operation_runtime_decision(
+        controller, datetime(2026, 8, 23, 11, 30, tzinfo=MADRID)
+    )
+
+    assert decision["action_mask"] == ACTION_GRID_CHARGE
+
+
 def test_runtime_diary_keeps_charge_history_without_inventing_solar():
     coordinators = [
         SimpleNamespace(

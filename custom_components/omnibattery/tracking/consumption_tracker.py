@@ -722,11 +722,11 @@ class ConsumptionTracker:
         """Total instantaneous solar production (kW): external sensor + battery PV.
 
         Sums the configured external solar_production_sensor (e.g. an APS/ECU
-        feed) and the DC-coupled PV reported by every battery. Venus vA/vD
-        contributes its MPPT inputs; Anker contributes its official aggregate
-        PV value. A battery with panels on its own inputs is counted even when
-        no external sensor is configured. Returns None only when no source has
-        a usable reading.
+        feed) and only battery PV sources marked independent by capabilities.
+        Venus vA/vD contributes its MPPT inputs; verified Anker E5000 Pro units
+        contribute their official aggregate PV value. AC-derived Anker readings
+        are deliberately excluded. Returns None only when no source has a
+        usable reading.
         """
         ctrl = self._controller
         total_kw = 0.0
@@ -741,6 +741,9 @@ class ConsumptionTracker:
             # never expired) and would inflate the integrated daily solar total.
             capabilities = getattr(coordinator, "capabilities", None)
             has_mppt = bool(getattr(capabilities, "has_mppt_pv", False))
+            # ``has_solar_telemetry`` means an independent PV source here. In
+            # particular, Solarbank Max/XE expose a PV-looking AC calculation
+            # but must stay on the configured external-sensor-only path.
             has_aggregate = bool(getattr(capabilities, "has_solar_telemetry", False))
             if not (has_mppt or has_aggregate):
                 continue

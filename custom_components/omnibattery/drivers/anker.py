@@ -20,6 +20,7 @@ Sign conventions:
 from __future__ import annotations
 
 import logging
+from dataclasses import replace
 from typing import Optional
 
 from ..infra.anker_modbus_client import AnkerModbusClient
@@ -69,6 +70,10 @@ _PRODUCT_LABELS: dict[str, str] = {
     "DPP4": "Solarbank XE AC",
     "DNN3": "Solarbank XE AC",
 }
+_MAX_AC_PRODUCT_CODES = frozenset({"DMWH", "DMXU", "E25H"})
+_XE_AC_PRODUCT_CODES = frozenset({"DNMS", "DPP4", "DNN3"})
+_INDEPENDENT_PV_PRODUCT_CODES = frozenset({"DN7M", "DPM4"})
+_PV_SOURCE_FIELD_KEYS = frozenset({"pv_power", "third_party_pv_power"})
 _DEFAULT_MODEL_LABEL = "Solarbank Max AC"
 
 # Normalize Anker's battery-status codes to the shared Marstek inverter-state
@@ -219,6 +224,8 @@ SENSOR_DEFINITIONS: list[dict] = [
     {"key": "total_discharging_energy", "name": "Total Discharging Energy", "unit": "kWh",
      "device_class": "energy", "state_class": "total_increasing", "scale": 0.1, "precision": 2,
      "scan_interval": "low", "enabled_by_default": True},
+    # Retained as a lifetime diagnostic counter. It is not an instantaneous
+    # independent PV source and is never consumed by solar totals/profiles.
     {"key": "pv_total_generation", "name": "PV Total Generation", "unit": "kWh",
      "device_class": "energy", "state_class": "total_increasing", "scale": 0.1,
      "precision": 2, "scan_interval": "low", "enabled_by_default": True},
@@ -328,14 +335,49 @@ class AnkerModbusDriver(BatteryDriver):
             actuator_latency_s=1.0,
         )
 
+    @property
+    def is_solarbank_max_ac(self) -> bool:
+        """Whether the connected unit is a Solarbank Max AC SKU."""
+        return self._product_code in _MAX_AC_PRODUCT_CODES
+
+    @property
+    def is_solarbank_xe_ac(self) -> bool:
+        """Whether the connected unit is a Solarbank XE AC SKU."""
+        return self._product_code in _XE_AC_PRODUCT_CODES
+
+    @property
+    def has_independent_pv(self) -> bool:
+        """Whether this SKU's aggregate registers are an independent PV source.
+
+        The official map uses the same 10002/10004 fields for these AC families,
+        but those values are derived from the battery's own AC/P1 calculation on
+        Max AC and XE AC. Only the explicitly verified Solarbank 4 E5000 Pro
+        codes are classified as an independent PV source. Unknown SKUs use the
+        external-sensor-only path until a new product is explicitly classified.
+        """
+        return self._product_code in _INDEPENDENT_PV_PRODUCT_CODES
+
+    def _field_specs_for_model(self) -> list[dict]:
+        """Return the register fields that are meaningful for this model."""
+        if self.has_independent_pv:
+            return _FIELD_SPECS
+        # Max AC and XE AC's PV registers are a derived AC/P1 figure, not an
+        # independent DC-coupled source. Unknown SKUs use the same safe default.
+        # Keep pv_total_generation below as a raw device counter, but do not
+        # decode the instantaneous source fields as solar PV.
+        return [
+            field for field in _FIELD_SPECS if field["key"] not in _PV_SOURCE_FIELD_KEYS
+        ]
+
     def _build_read_groups(self) -> list[ReadGroup]:
         """One ReadGroup per official batch range that contains any mapped field."""
+        field_specs = self._field_specs_for_model()
         groups: list[ReadGroup] = []
         for register_type, ranges in _BATCH_READ_RANGES.items():
             for start, end in ranges:
                 keys = tuple(
                     f["key"]
-                    for f in _FIELD_SPECS
+                    for f in field_specs
                     if f["register_type"] == register_type and start <= f["address"] <= end
                 )
                 if not keys:
@@ -352,7 +394,13 @@ class AnkerModbusDriver(BatteryDriver):
 
     @property
     def capabilities(self) -> DriverCapabilities:
-        return self._capabilities
+        # The AC-family PV registers are calculated, not an independent DC PV
+        # input. Capabilities expose the model-aware whitelist to every consumer
+        # (totals, timeline, efficiency and dashboard).
+        return replace(
+            self._capabilities,
+            has_solar_telemetry=self.has_independent_pv,
+        )
 
     @property
     def model_label(self) -> Optional[str]:
@@ -360,7 +408,17 @@ class AnkerModbusDriver(BatteryDriver):
 
     @property
     def sensor_definitions(self) -> list[dict]:
-        return SENSOR_DEFINITIONS
+        if self.has_independent_pv:
+            return SENSOR_DEFINITIONS
+        # ``SENSOR_DEFINITIONS`` is shared/static, but entity creation must use
+        # the detected SKU. AC and unknown models have no classified independent
+        # solar production entity; pv_total_generation remains a raw device
+        # counter only and is never consumed as instantaneous solar power.
+        return [
+            definition
+            for definition in SENSOR_DEFINITIONS
+            if definition["key"] != "solar_power"
+        ]
 
     @property
     def number_definitions(self) -> list[dict]:
@@ -385,7 +443,7 @@ class AnkerModbusDriver(BatteryDriver):
     @property
     def all_definitions(self) -> list[dict]:
         return (
-            SENSOR_DEFINITIONS
+            self.sensor_definitions
             + NUMBER_DEFINITIONS
             + SELECT_DEFINITIONS
             + SWITCH_DEFINITIONS
@@ -414,6 +472,7 @@ class AnkerModbusDriver(BatteryDriver):
         self._zero_power_streak = 0
         self._client.unit_id = self._slave_id
         await self._refresh_product_code()
+        self._read_groups = self._build_read_groups()
         return True
 
     async def _refresh_product_code(self) -> None:
@@ -424,7 +483,7 @@ class AnkerModbusDriver(BatteryDriver):
         model_value = decode_registers(model_regs, "char") if model_regs else None
         product_code = _extract_product_code(model_value)
         if product_code:
-            self._product_code = product_code
+            self._set_product_code(product_code)
             return
 
         # Some Solarbank firmware returns a generic value from device_model.
@@ -435,7 +494,14 @@ class AnkerModbusDriver(BatteryDriver):
         serial_value = decode_registers(serial_regs, "char") if serial_regs else None
         product_code = _extract_product_code(serial_value)
         if product_code:
-            self._product_code = product_code
+            self._set_product_code(product_code)
+
+    def _set_product_code(self, product_code: str) -> None:
+        """Store a detected SKU and refresh model-dependent read groups."""
+        if product_code == self._product_code:
+            return
+        self._product_code = product_code
+        self._read_groups = self._build_read_groups()
 
     async def close(self) -> None:
         await self._client.async_close()
@@ -452,9 +518,15 @@ class AnkerModbusDriver(BatteryDriver):
     async def read_telemetry(self, keys: Optional[list[str]] = None) -> TelemetrySnapshot:
         self._client.unit_id = self._slave_id
         wanted = set(keys) if keys is not None else set(self._field_by_key)
+        if not self.has_independent_pv:
+            # A direct caller must not re-enable the derived PV source merely by
+            # asking for the legacy key. The device counter is intentionally not
+            # part of this exclusion and remains a normal energy telemetry key.
+            wanted.difference_update(_PV_SOURCE_FIELD_KEYS)
+            wanted.discard("solar_power")
         # solar_power is a semantic aggregate rather than a Modbus field. Pull
         # both official source registers when a caller requests the canonical key.
-        if "solar_power" in wanted:
+        if "solar_power" in wanted and self.has_independent_pv:
             wanted.update({"pv_power", "third_party_pv_power"})
         snapshot: TelemetrySnapshot = {}
 
@@ -489,7 +561,7 @@ class AnkerModbusDriver(BatteryDriver):
                 if field["key"] == "device_model" and isinstance(value, str) and value:
                     product_code = _extract_product_code(value)
                     if product_code:
-                        self._product_code = product_code
+                        self._set_product_code(product_code)
                 if field["key"] == "max_charge_power" and isinstance(value, (int, float)):
                     # Cap at the static family envelope so peak/aggregate readings
                     # (e.g. 7000 W) do not inflate the PD clamp beyond continuous
@@ -504,8 +576,9 @@ class AnkerModbusDriver(BatteryDriver):
 
         pv_power = snapshot.get("pv_power")
         third_party_pv_power = snapshot.get("third_party_pv_power")
-        if isinstance(pv_power, (int, float)) or isinstance(
-            third_party_pv_power, (int, float)
+        if self.has_independent_pv and (
+            isinstance(pv_power, (int, float))
+            or isinstance(third_party_pv_power, (int, float))
         ):
             # PV production is physically non-negative. Clamp malformed or
             # transitional signed-register values before exposing the canonical
@@ -514,6 +587,13 @@ class AnkerModbusDriver(BatteryDriver):
                 0,
                 int(pv_power or 0) + int(third_party_pv_power or 0),
             )
+        else:
+            # The first setup poll can start with an unknown model and decode the
+            # source registers before the identity block classifies this unit.
+            # Do not leak derived values from an AC or unknown SKU into telemetry.
+            snapshot.pop("pv_power", None)
+            snapshot.pop("third_party_pv_power", None)
+            snapshot.pop("solar_power", None)
 
         # Publish semantic aliases expected by the brand-agnostic entity and
         # control layers. Values remain raw here; coordinator scaling is applied

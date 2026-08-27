@@ -79,7 +79,9 @@ class MarstekVenusEfficiencySensor(CoordinatorEntity, RestoreEntity, SensorEntit
         # two independent planes whose difference is the conversion loss. Each leg
         # is the ratio of two simultaneous power readings, so unlike a cumulative
         # charge/discharge ratio it has no SoC-endpoint dependence and can't blow
-        # up on partial cycles. AC-only models keep the accurate hardware counters.
+        # up on partial cycles. AC-only models, including Anker Max/XE, keep the
+        # accurate hardware counters; only capabilities marked as independent PV
+        # use integration.
         capabilities = getattr(coordinator, "capabilities", None)
         self._integrate_mode = bool(
             getattr(capabilities, "has_mppt_pv", False)

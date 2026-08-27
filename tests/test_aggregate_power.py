@@ -5,6 +5,8 @@ Covers System Charge/Discharge Power (Zendure coordinators only synthesise
 System Battery Cell Power (signed, mirroring the dashboard formula
 ``-ac_power - ac_offgrid_power + sum(MPPT)``).
 """
+from types import SimpleNamespace
+
 from homeassistant.util import dt as dt_util
 
 from custom_components.omnibattery.sensors.aggregate_sensors import (
@@ -191,6 +193,19 @@ def test_cell_power_grid_plus_solar_charge():
     va = FakeCoordinator(data={"ac_power": -200, "mppt1_power": 800})
     sensor = _sensor([va], "system_battery_cell_power")
     assert sensor._calculate_battery_cell_power() == 1000
+
+
+def test_cell_power_max_ac_does_not_add_derived_solar_power():
+    # Max AC's solar_power value is a derived AC/P1 figure, not DC PV entering
+    # the cells. The aggregate must use only the AC battery flow for this model.
+    max_ac = SimpleNamespace(
+        is_available=True,
+        data={"ac_power": -200, "solar_power": 800},
+        capabilities=SimpleNamespace(has_mppt_pv=False, has_solar_telemetry=False),
+    )
+    sensor = _sensor([max_ac], "system_battery_cell_power")
+
+    assert sensor._calculate_battery_cell_power() == 200
 
 
 def test_cell_power_solar_bypass_net_discharge():

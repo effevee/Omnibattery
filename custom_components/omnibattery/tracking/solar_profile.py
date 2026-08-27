@@ -594,8 +594,8 @@ class SolarProfileTracker:
             "mppt": sorted(mppt_sources, key=lambda item: json.dumps(item, sort_keys=True, default=str)),
         }
         # Keep the fingerprint byte-for-byte compatible for existing external/
-        # MPPT-only profiles. The extra payload is only needed once an aggregate
-        # PV source (such as Anker) is actually configured.
+        # MPPT-only profiles. The extra payload is only needed once a verified
+        # independent aggregate PV source (Anker E5000 Pro) is configured.
         if aggregate_sources:
             payload["aggregate_pv"] = sorted(
                 aggregate_sources,

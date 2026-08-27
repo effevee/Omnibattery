@@ -370,7 +370,7 @@ class MarstekVenusDataUpdateCoordinator(DataUpdateCoordinator):
         # its definition's scale/precision/state_class. The driver returns raw
         # decoded telemetry and owns the register layout / block grouping (see
         # ``driver.read_groups``); presentation metadata stays coordinator-side.
-        self._def_by_key = {d["key"]: d for d in self._all_definitions}
+        self._sync_driver_definitions()
 
         # Log sensor count for debugging
         _LOGGER.info("[%s] Total sensors to poll: %d", self.name, len(self._all_definitions))
@@ -383,6 +383,28 @@ class MarstekVenusDataUpdateCoordinator(DataUpdateCoordinator):
         version string, keeping them device-agnostic.
         """
         return self.driver.capabilities
+
+    def _sync_driver_definitions(self) -> None:
+        """Refresh the coordinator's key metadata after driver identity detection.
+
+        Some drivers discover the exact product only after connecting. Keep the
+        poll-loop definitions aligned with the driver's dynamic definitions so a
+        model-specific entity cannot be created or scaled from the pre-connect
+        fallback set.
+        """
+        self._def_by_key = {d["key"]: d for d in self._all_definitions}
+        # A reconnect can refine an Anker identity after an earlier poll, and
+        # DataUpdateCoordinator merges snapshots instead of expiring keys. Drop
+        # PV fields that are no longer part of the model's contract so a stale
+        # compatible-model reading cannot reach totals or the dashboard.
+        if (
+            self.brand == "anker"
+            and not getattr(self.driver, "has_independent_pv", False)
+        ):
+            data = getattr(self, "data", None)
+            if isinstance(data, dict):
+                for key in ("solar_power", "pv_power", "third_party_pv_power"):
+                    data.pop(key, None)
 
     def _recompute_effective_power_limits(self) -> None:
         """Recompute the control envelope from device and configured limits."""
@@ -634,6 +656,9 @@ class MarstekVenusDataUpdateCoordinator(DataUpdateCoordinator):
         """Connect to the battery via the driver."""
         connected = await self.driver.connect()
         if connected:
+            sync_definitions = getattr(self, "_sync_driver_definitions", None)
+            if sync_definitions is not None:
+                sync_definitions()
             sync_model = getattr(self, "_sync_detected_zendure_model", None)
             if sync_model is not None:
                 sync_model()
@@ -780,6 +805,9 @@ class MarstekVenusDataUpdateCoordinator(DataUpdateCoordinator):
             connected = await self.driver.connect()
 
             if connected:
+                sync_definitions = getattr(self, "_sync_driver_definitions", None)
+                if sync_definitions is not None:
+                    sync_definitions()
                 sync_model = getattr(self, "_sync_detected_zendure_model", None)
                 if sync_model is not None:
                     sync_model()
@@ -1062,6 +1090,9 @@ class MarstekVenusDataUpdateCoordinator(DataUpdateCoordinator):
                     # a block read where the keys cover a contiguous span) and
                     # returns raw decoded values; failed/unknown keys are omitted.
                     snapshot = await self.driver.read_telemetry(fetch_keys)
+                sync_definitions = getattr(self, "_sync_driver_definitions", None)
+                if sync_definitions is not None:
+                    sync_definitions()
                 # Yield so a control writer waiting on self.lock can acquire it
                 # before the loop re-enters `async with` (otherwise the tight loop
                 # starves apply_power).

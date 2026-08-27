@@ -373,7 +373,9 @@ class MarstekVenusAggregateSensor(RestoreEntity, SensorEntity):
         card's Charge/Discharge blocks link to a value that matches what they show:
         ``-ac_power - ac_offgrid_power + DC PV`` (offgrid only in Backup Mode).
         DC PV is the sum of MPPT channels when available, or the driver's
-        aggregate ``solar_power`` value for devices such as Anker Solarbank 4.
+        aggregate ``solar_power`` value for verified Anker Solarbank 4 units.
+        AC-derived Anker models do not advertise either capability and therefore
+        contribute no DC PV here.
         ac_power is preferred over the
         unreliable battery_power register; drivers without ac_power (no MPPT, so this
         sensor isn't created for them) fall back to their signed battery_power.

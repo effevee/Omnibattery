@@ -91,9 +91,11 @@ class DriverCapabilities:
     # Defaults True for backward compatibility with the Marstek register maps.
     has_daily_energy_counters: bool = True
 
-    # True when the driver exposes aggregate DC/PV production as ``solar_power``.
+    # True when ``solar_power`` is an independent aggregate DC/PV source.
     # This is separate from has_mppt_pv because some devices (Anker Solarbank 4)
     # report the combined PV input but do not expose one telemetry key per MPPT.
+    # A PV-looking value derived from the battery's own AC/P1 calculation must
+    # leave this False so it is never counted as additional production.
     has_solar_telemetry: bool = False
 
     # True if a setpoint readback reliably reflects the just-written command on the

@@ -58,6 +58,60 @@ from .sensors.calculated_sensors import (
 _LOGGER = logging.getLogger(__name__)
 
 
+def _remove_obsolete_anker_solar_entities(
+    hass: HomeAssistant,
+    config_entry: ConfigEntry,
+    coordinators: list[MarstekVenusDataUpdateCoordinator],
+) -> None:
+    """Remove PV entities left by the pre-model-aware Anker implementation.
+
+    Entity setup is additive from Home Assistant's point of view: omitting a
+    definition on reload does not remove an old registry entry. Clean only
+    Anker entities whose live driver says that the SKU has no independent PV;
+    compatible E5000 entities and all non-Anker PV entities are untouched.
+    """
+    from homeassistant.helpers import entity_registry as er
+
+    registry = er.async_get(hass)
+    for coordinator in coordinators:
+        if getattr(coordinator, "brand", None) != "anker":
+            continue
+        if getattr(getattr(coordinator, "driver", None), "has_independent_pv", False):
+            continue
+        for unique_id in (
+            f"{coordinator.device_key}_solar_power",
+            f"{coordinator.host}_solar_power",
+            f"{coordinator.name}_solar_power",
+        ):
+            entity_id = registry.async_get_entity_id("sensor", DOMAIN, unique_id)
+            registered = registry.async_get(entity_id) if entity_id else None
+            if registered and registered.config_entry_id == config_entry.entry_id:
+                registry.async_remove(entity_id)
+
+    # The system aggregate is only meaningful when at least one connected
+    # battery contributes independent PV. Existing installations may still
+    # have this registry entry after upgrading from 1.4.0b4; remove it so the
+    # configured external sensor remains the sole source for AC-only Anker.
+    has_independent_solar = any(
+        bool(
+            getattr(getattr(coordinator, "capabilities", None), "has_mppt_pv", False)
+            or getattr(
+                getattr(coordinator, "capabilities", None),
+                "has_solar_telemetry",
+                False,
+            )
+        )
+        for coordinator in coordinators
+    )
+    if not has_independent_solar:
+        entity_id = registry.async_get_entity_id(
+            "sensor", DOMAIN, f"{SYSTEM_UNIQUE_ID_PREFIX}solar_power"
+        )
+        registered = registry.async_get(entity_id) if entity_id else None
+        if registered and registered.config_entry_id == config_entry.entry_id:
+            registry.async_remove(entity_id)
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
@@ -65,6 +119,8 @@ async def async_setup_entry(
 ) -> None:
     """Set up the sensor platform."""
     coordinators: list[MarstekVenusDataUpdateCoordinator] = hass.data[DOMAIN][entry.entry_id]["coordinators"]
+
+    _remove_obsolete_anker_solar_entities(hass, entry, coordinators)
 
     entities = []
 
@@ -113,8 +169,10 @@ async def async_setup_entry(
                 for spec in pack_specs:
                     entities.append(ZendurePackSensor(coordinator, pack_index, spec))
         # DC-coupled PV total + solar-corrected battery power exist only on
-        # units that expose DC-coupled PV telemetry. Anker exposes the official
-        # aggregate PV value directly; Venus D/A exposes individual MPPT inputs.
+        # units that expose independent DC-coupled PV telemetry. Venus D/A
+        # exposes individual MPPT inputs. Verified Anker E5000 entities expose
+        # their aggregate ``solar_power`` through the driver definitions; Max/XE
+        # do not create that per-battery entity.
         if coordinator.capabilities.has_mppt_pv:
             for definition in SOLAR_POWER_SENSOR_DEFINITIONS:
                 entities.append(MarstekVenusSolarPowerSensor(coordinator, definition))
@@ -172,8 +230,8 @@ async def async_setup_entry(
 
     # Exact daily energy totals from the real power sensors (panel "Energía hoy").
     # Each is added only when its source sensor is configured.
-    # Daily solar = external solar sensor + battery-reported DC-coupled PV
-    # (individual MPPT channels or an official aggregate value).
+    # Daily solar = external solar sensor + independent battery-reported
+    # DC-coupled PV (individual MPPT channels or verified Anker aggregate).
     has_solar_telemetry = any(
         bool(
             getattr(getattr(c, "capabilities", None), "has_mppt_pv", False)
@@ -2300,9 +2358,10 @@ class DailySolarEnergySensor(SensorEntity):
     """Exact daily solar production (kWh), integrated from the real solar power.
 
     The controller integrates total solar — the configured solar_production_sensor
-    plus each Venus vA/vD unit's DC-coupled PV (MPPT inputs) — at control-loop
-    cadence and resets at local midnight (see ConsumptionTracker); this entity just
-    surfaces that running total. total_increasing so HA handles the daily reset.
+    plus independent battery PV (Venus MPPT inputs or verified Anker E5000
+    aggregate) — at control-loop cadence and resets at local midnight (see
+    ConsumptionTracker); this entity just surfaces that running total.
+    total_increasing so HA handles the daily reset.
     """
 
     _attr_has_entity_name = True
@@ -2337,14 +2396,13 @@ class DailySolarEnergySensor(SensorEntity):
 
 
 class SystemSolarPowerSensor(SensorEntity):
-    """Instantaneous total solar production (W): external solar sensor + Venus DC-coupled PV.
+    """Instantaneous total solar production from external and independent PV.
 
-    Sums the configured solar_production_sensor and every Venus vA/vD unit's MPPT
-    inputs — the same total the ConsumptionTracker integrates into daily solar
-    energy, just surfaced live. Lets the dashboard Solar node link to a value that
-    matches what it displays, and gives HA's Energy dashboard a single solar source.
-    Added only when at least one battery has MPPT (vA/vD); on systems without
-    DC-coupled PV it would duplicate the external sensor and is omitted as noise.
+    Sums the configured solar_production_sensor and independent battery PV —
+    Venus MPPT inputs or verified Anker E5000 aggregate telemetry — just as the
+    ConsumptionTracker does for daily solar energy. AC-derived Anker Max/XE
+    readings are excluded, and the entity is omitted when no battery contributes
+    independent PV so it cannot duplicate the external sensor.
     """
 
     _attr_has_entity_name = True

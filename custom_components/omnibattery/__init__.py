@@ -316,6 +316,38 @@ def _excluded_devices_panel_config(data: dict, ent_reg) -> list[dict]:
     return devices
 
 
+def _has_battery_reported_solar(coordinators) -> bool:
+    """Return whether any connected model has an independent PV source."""
+    return any(
+        bool(
+            getattr(getattr(coordinator, "capabilities", None), "has_mppt_pv", False)
+            or getattr(
+                getattr(coordinator, "capabilities", None),
+                "has_solar_telemetry",
+                False,
+            )
+        )
+        for coordinator in coordinators or ()
+    )
+
+
+def _panel_solar_entity(coordinators, ent_reg, external_entity: str | None) -> str | None:
+    """Choose the panel's complete solar source from live model capabilities.
+
+    The system aggregate is preferred only when a connected battery really
+    contributes independent PV. If the aggregate entity is not registered yet
+    (the first registration happens before platforms finish) or no such battery
+    exists, fall back to the configured external sensor.
+    """
+    if _has_battery_reported_solar(coordinators):
+        solar_entity = ent_reg.async_get_entity_id(
+            "sensor", DOMAIN, "marstek_venus_system_solar_power"
+        )
+        if solar_entity:
+            return solar_entity
+    return external_entity
+
+
 async def _async_register_frontend_panel(hass: HomeAssistant, entry: ConfigEntry | None = None) -> None:
     """Register (or refresh) the custom sidebar panel.
 
@@ -366,7 +398,6 @@ async def _async_register_frontend_panel(hass: HomeAssistant, entry: ConfigEntry
                 "sensor.omnibattery_daily_operation_timeline"
             )
             from .const import (
-                CONF_BATTERY_VERSION,
                 CONF_SOLAR_FORECAST_SENSOR,
                 CONF_SOLAR_FORECAST_REMAINING_SENSOR,
                 CONF_SOLAR_PRODUCTION_SENSOR,
@@ -405,24 +436,20 @@ async def _async_register_frontend_panel(hass: HomeAssistant, entry: ConfigEntry
                 panel_config["solar_forecast_remaining_entity"] = data[
                     CONF_SOLAR_FORECAST_REMAINING_SENSOR
                 ]
-            # Solar node click target. When any battery has battery-reported
-            # DC-coupled PV (Venus MPPT or Anker aggregate), the node shows
-            # external + battery PV, so link the live total-solar sensor
-            # (sensor.marstek_venus_system_solar_power, gated on PV telemetry in
-            # sensor.py). Non-PV systems keep the external-only link (or none).
-            versions = {b.get(CONF_BATTERY_VERSION) for b in data.get("batteries", [])}
-            brands = {
-                str(b.get("brand", "")).strip().lower()
-                for b in data.get("batteries", [])
-            }
-            if versions & {"vA", "vD"} or "anker" in brands:
-                solar_eid = ent_reg.async_get_entity_id(
-                    "sensor", DOMAIN, "marstek_venus_system_solar_power"
-                )
-                if solar_eid:
-                    panel_config["solar_entity"] = solar_eid
-            elif data.get(CONF_SOLAR_PRODUCTION_SENSOR):
-                panel_config["solar_entity"] = data[CONF_SOLAR_PRODUCTION_SENSOR]
+            # Solar node click target. Use the capabilities of the live
+            # coordinators, not the configured brand: Anker model identity is
+            # discovered during connect and Solarbank Max AC must use only the
+            # configured external sensor. The second panel registration at the
+            # end of setup refreshes this payload after all models are known.
+            coordinator_data = hass.data.get(DOMAIN, {}).get(entry.entry_id, {})
+            coordinators = coordinator_data.get("coordinators", ())
+            solar_eid = _panel_solar_entity(
+                coordinators,
+                ent_reg,
+                data.get(CONF_SOLAR_PRODUCTION_SENSOR),
+            )
+            if solar_eid:
+                panel_config["solar_entity"] = solar_eid
 
         # Remove any previous registration so the module URL / config refresh.
         # warn_if_unknown=False: on first setup after restart the panel isn't
