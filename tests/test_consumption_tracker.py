@@ -404,7 +404,7 @@ async def test_full_day_history_is_restored_without_invalidation():
 
 
 @pytest.mark.asyncio
-async def test_legacy_same_day_accumulator_is_rebuilt_from_recorder(monkeypatch):
+async def test_legacy_same_day_accumulator_rebuild_is_deferred_to_backfill():
     tracker = _make_history_tracker([], _MON_FRI)
     tracker._controller._household_energy_accumulator = 1.0
     tracker._controller._household_accumulator_date = None
@@ -412,19 +412,12 @@ async def test_legacy_same_day_accumulator_is_rebuilt_from_recorder(monkeypatch)
         {"date": date.today().isoformat(), "household_kwh": 1.0}
     )
 
-    async def _rebuild(_target_date):
-        return 4.25
-
-    monkeypatch.setattr(tracker, "backfill_home_from_history", _rebuild)
-
     await tracker.load_accumulators()
 
-    assert tracker._controller._household_energy_accumulator == pytest.approx(4.25)
+    assert tracker._controller._household_energy_accumulator == pytest.approx(0.0)
     assert tracker._controller._household_accumulator_date == date.today()
-    assert (
-        tracker._accumulator_store._data["consumption_scope"]
-        == CONSUMPTION_HISTORY_SCOPE
-    )
+    assert tracker._legacy_accumulator_rebuild_pending is True
+    assert "consumption_scope" not in tracker._accumulator_store._data
 
 
 # ----------------------------------------------------------------------

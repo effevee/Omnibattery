@@ -69,6 +69,36 @@ class WeeklyFullChargeManager:
         # completion, not once per is_active() call (called per-battery per-cycle).
         self._already_complete_logged = False
 
+    def _create_background_task(self, coroutine, name: str) -> asyncio.Task | None:
+        """Create persistence work through the owning entry controller."""
+        create = getattr(self._controller, "_create_entry_background_task", None)
+        if callable(create):
+            task = create(coroutine, name)
+        else:
+            hass = getattr(self, "_hass", None)
+            if hass is None:
+                close = getattr(coroutine, "close", None)
+                if callable(close):
+                    close()
+                return None
+            create = getattr(hass, "async_create_task", None)
+            if callable(create):
+                try:
+                    task = create(coroutine, name=name)
+                except TypeError:
+                    task = create(coroutine)
+            else:
+                try:
+                    task = asyncio.get_running_loop().create_task(coroutine, name=name)
+                except TypeError:
+                    task = asyncio.get_running_loop().create_task(coroutine)
+        if isinstance(task, asyncio.Task):
+            return task
+        close = getattr(coroutine, "close", None)
+        if callable(close):
+            close()
+        return None
+
     @property
     def store(self) -> Store:
         """Expose the underlying Store (for legacy attribute compatibility)."""
@@ -252,7 +282,9 @@ class WeeklyFullChargeManager:
                 ctrl._weekly_charge_status["state"] = "Idle"
                 ctrl._weekly_charge_status.pop("completion_reason", None)
                 # Save the cleared state asynchronously (don't await to avoid blocking)
-                asyncio.create_task(self.save_state())
+                self._create_background_task(
+                    self.save_state(), "omnibattery_weekly_charge_state_save"
+                )
 
         ctrl.last_checked_weekday = current_weekday
 
@@ -587,7 +619,9 @@ class WeeklyFullChargeManager:
             ctrl._weekly_charge_status.pop("completion_reason", None)
             # Persist state so that the next restart can restore both registers_written
             # and the status field immediately.
-            asyncio.create_task(self.save_state())
+            self._create_background_task(
+                self.save_state(), "omnibattery_weekly_charge_state_save"
+            )
 
         if hasattr(ctrl, "_normal_balance_reset_if_new_day"):
             ctrl._normal_balance_reset_if_new_day()

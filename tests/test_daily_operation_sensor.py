@@ -138,6 +138,21 @@ def test_timeline_entity_has_stable_identity_and_local_date(attribute: str):
     assert sensor.native_value == date(2026, 8, 22)
 
 
+def test_timeline_native_value_reads_manager_date_without_building_snapshot():
+    class _O1Manager:
+        local_date = date(2026, 8, 22)
+
+        def snapshot(self):
+            raise AssertionError("native_value must not build the timeline DTO")
+
+    sensor = DailyOperationTimelineSensor(
+        SimpleNamespace(daily_operation_timeline=_O1Manager())
+    )
+
+    assert sensor._attr_should_poll is False
+    assert sensor.native_value == date(2026, 8, 22)
+
+
 def test_timeline_entity_publishes_fixed_96_element_json_safe_dto():
     sensor = DailyOperationTimelineSensor(
         SimpleNamespace(daily_operation_timeline=_TimelineManager(_snapshot()))

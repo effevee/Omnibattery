@@ -23,6 +23,7 @@ from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
 from ..const import DEFAULT_BASE_CONSUMPTION_KWH, DOMAIN
+from .backfill import BackfillToken, RecorderBackfillCoordinator, local_day_bounds
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -550,6 +551,29 @@ class ConsumptionProfileTracker:
         self._fallback_daily_kwh = fallback_daily_kwh
         self._active_fingerprint = self.configuration_fingerprint()
         self._excluded_periods: list[tuple[datetime, datetime | None]] = []
+        self._backfill_coordinator: RecorderBackfillCoordinator | None = None
+        self._backfill_generation = 1
+        self._backfill_status = "not_started"
+        self._backfill_current_date: date | None = None
+        self._backfill_blocks = 0
+        self._backfill_last_duration_s = 0.0
+
+    def set_backfill_coordinator(
+        self, coordinator: RecorderBackfillCoordinator
+    ) -> None:
+        """Attach the entry-owned Recorder coordinator."""
+        self._backfill_coordinator = coordinator
+
+    @property
+    def backfill_generation(self) -> int:
+        return self._backfill_generation
+
+    def cancel_backfill(self) -> None:
+        """Invalidate this profile's result application without doing I/O."""
+        self._backfill_generation += 1
+        if self._backfill_task is not None and not self._backfill_task.done():
+            self._backfill_task.cancel()
+        self._backfill_status = "cancelled"
 
     # ------------------------------------------------------------------
     # Configuration, time and validation
@@ -794,6 +818,7 @@ class ConsumptionProfileTracker:
         current = self.configuration_fingerprint()
         if current == self._active_fingerprint:
             return False
+        self.cancel_backfill()
         self._days = {}
         self._active_fingerprint = current
         self._invalidated = True
@@ -843,17 +868,19 @@ class ConsumptionProfileTracker:
 
     async def async_save_all(self) -> None:
         """Flush profile data and stop a pending Recorder backfill."""
+        self.cancel_backfill()
         if self._backfill_task is not None and not self._backfill_task.done():
-            self._backfill_task.cancel()
             try:
                 await self._backfill_task
             except asyncio.CancelledError:
                 pass
+        self._backfill_task = None
         if self._save_task is not None and not self._save_task.done():
             try:
                 await self._save_task
             except asyncio.CancelledError:
                 pass
+        self._save_task = None
         await self.async_save()
 
     # ------------------------------------------------------------------
@@ -876,6 +903,34 @@ class ConsumptionProfileTracker:
                 changed = True
         self._prune(current_date)
         return changed
+
+    def daily_energy_for_date(
+        self,
+        local_date: date,
+        *,
+        allow_partial: bool = False,
+    ) -> float | None:
+        """Return the adjusted energy already captured for one local day.
+
+        The legacy seven-day history can reuse this result after the profile
+        worker has processed a day. Past days are only reused when they meet
+        the same 75% interval-quality threshold used for profile training;
+        callers can request the currently elapsed part of today explicitly.
+        """
+        day = self._days.get(local_date)
+        if day is None or (not allow_partial and not day.complete):
+            return None
+        valid = [
+            index
+            for index in range(INTERVAL_COUNT)
+            if day.normalized_interval(index) is not None
+        ]
+        if not valid:
+            return None
+        if not allow_partial and len(valid) < math.ceil(INTERVAL_COUNT * 0.75):
+            return None
+        energy = math.fsum(day.energy_kwh[index] for index in valid)
+        return round(energy, 2) if math.isfinite(energy) and energy > 0.0 else None
 
     def record_power_sample(
         self,
@@ -1457,167 +1512,202 @@ class ConsumptionProfileTracker:
     # Recorder backfill
     # ------------------------------------------------------------------
 
-    async def async_backfill_from_recorder(self) -> bool:
-        """Populate missing raw intervals with one query per source.
+    def _day_needs_backfill(self, local_date: date) -> bool:
+        """Return whether a day lacks enough interval coverage to be trusted."""
+        day = self._days.get(local_date)
+        if day is None or not day.complete:
+            return True
+        # A complete Recorder day with a large sensor gap remains retryable.
+        # 75% is the same minimum coverage policy used by profile training and
+        # avoids repeatedly fetching days that are already useful.
+        return day.valid_interval_count() < math.ceil(INTERVAL_COUNT * 0.75)
 
-        Recorder is optional.  This method is intentionally best-effort and can
-        be run in a background task after startup without affecting control.
-        """
-        try:
-            from homeassistant.components.recorder import get_instance, history
-        except ImportError:
-            self._last_error = "backfill: recorder unavailable"
-            return False
-
-        source_entity = getattr(self._controller, "home_consumption_sensor", None)
-        if not source_entity:
-            resolver = getattr(self._controller, "_consumption_tracker", None)
-            resolver = getattr(resolver, "_home_consumption_entity_id", None)
-            if callable(resolver):
-                try:
-                    source_entity = resolver()
-                except Exception:  # noqa: BLE001
-                    source_entity = None
-        if not source_entity:
-            self._last_error = "backfill: home consumption entity unavailable"
-            return False
-
-        today = self._today()
-        local_tz = self._timezone()
-        start_time = datetime.combine(
-            today - timedelta(days=PROFILE_RETENTION_DAYS),
-            time.min,
-            tzinfo=local_tz,
+    def _backfill_token_valid(
+        self, token: BackfillToken | None, generation: int
+    ) -> bool:
+        return self._backfill_generation == generation and (
+            token is None or token.is_valid()
         )
-        end_time = self._now()
+
+    async def async_backfill_from_recorder(
+        self, token: BackfillToken | None = None
+    ) -> bool:
+        """Populate missing raw intervals with one local-day query at a time."""
+        started = monotonic()
+        generation = self._backfill_generation
+        self._backfill_status = "running"
+        changed = False
         try:
-            recorder = get_instance(self._hass)
-            home_states_map = await recorder.async_add_executor_job(
-                history.state_changes_during_period,
-                self._hass,
-                start_time,
-                end_time,
-                source_entity,
-            )
+            source_entity = getattr(self._controller, "home_consumption_sensor", None)
+            if not source_entity:
+                resolver = getattr(self._controller, "_consumption_tracker", None)
+                resolver = getattr(resolver, "_home_consumption_entity_id", None)
+                if callable(resolver):
+                    try:
+                        source_entity = resolver()
+                    except Exception:  # noqa: BLE001
+                        source_entity = None
+            if not source_entity:
+                self._last_error = "backfill: home consumption entity unavailable"
+                self._backfill_status = "no_source"
+                return False
+
+            coordinator = self._backfill_coordinator
+            if token is None and coordinator is not None:
+                token = coordinator.new_token()
+            today = self._today()
+            local_tz = self._timezone()
+            floor = self._retention_floor(today)
+            config_data = getattr(self._config_entry, "data", {}) or {}
+            devices = [
+                device
+                for device in config_data.get("excluded_devices", []) or []
+                if isinstance(device, dict)
+                and device.get("enabled", True)
+                and not device.get("ev_charger_no_telemetry", False)
+                and device.get("power_sensor")
+            ]
+
+            for offset in range((today - floor).days + 1):
+                local_date = floor + timedelta(days=offset)
+                self._backfill_current_date = local_date
+                if not self._backfill_token_valid(token, generation):
+                    self._backfill_status = "cancelled"
+                    return False
+                if not self._day_needs_backfill(local_date):
+                    if coordinator is not None:
+                        coordinator.note_skipped()
+                    continue
+
+                start, end = local_day_bounds(
+                    local_date,
+                    local_tz,
+                    now=self._now(),
+                )
+                if coordinator is None:
+                    self._last_error = "backfill: coordinator unavailable"
+                    self._backfill_status = "failed"
+                    return False
+                states = await coordinator.async_query(
+                    token,
+                    source_entity,
+                    start,
+                    end,
+                    block=local_date.isoformat(),
+                )
+                if states is None:
+                    self._backfill_status = "cancelled"
+                    return False
+                home_days = _series_to_bins(states, local_tz)
+                del states
+                home_day = home_days.get(local_date)
+                del home_days
+                if home_day is None:
+                    await asyncio.sleep(0)
+                    continue
+
+                adjusted = ProfileDay(
+                    local_date,
+                    list(home_day.energy_kwh),
+                    list(home_day.coverage_s),
+                    complete=local_date < today,
+                )
+                for device in devices:
+                    if not self._backfill_token_valid(token, generation):
+                        self._backfill_status = "cancelled"
+                        return False
+                    sensor = str(device["power_sensor"])
+                    device_states = await coordinator.async_query(
+                        token,
+                        sensor,
+                        start,
+                        end,
+                        block=local_date.isoformat(),
+                    )
+                    if device_states is None:
+                        self._backfill_status = "cancelled"
+                        return False
+                    device_days = _series_to_bins(device_states, local_tz)
+                    del device_states
+                    device_day = device_days.get(local_date)
+                    del device_days
+                    if device_day is None:
+                        continue
+                    if device.get("included_in_consumption", True):
+                        try:
+                            exclusion_factor = max(
+                                0.0,
+                                min(
+                                    100.0,
+                                    float(device.get("exclusion_pct", 100.0)),
+                                ),
+                            ) / 100.0
+                        except (TypeError, ValueError):
+                            exclusion_factor = 1.0
+                        sign = -exclusion_factor
+                    else:
+                        sign = 1.0
+                    _apply_external_load_to_day(adjusted, device_day, sign)
+
+                if not self._backfill_token_valid(token, generation):
+                    self._backfill_status = "cancelled"
+                    return False
+                before = self._days.get(local_date)
+                day_changed = False
+                if before is None:
+                    self._days[local_date] = adjusted
+                    changed = day_changed = True
+                else:
+                    for index in range(INTERVAL_COUNT):
+                        if adjusted.coverage_s[index] > before.coverage_s[index]:
+                            before.energy_kwh[index] = adjusted.energy_kwh[index]
+                            before.coverage_s[index] = adjusted.coverage_s[index]
+                            changed = day_changed = True
+                    if adjusted.complete and not before.complete:
+                        before.complete = True
+                        changed = day_changed = True
+                self._backfill_blocks += 1
+                self._prune(today)
+                # A checkpoint after every completed local day bounds both the
+                # amount of work lost on restart and the size of live state.
+                if local_date < today and day_changed:
+                    await self.async_save()
+                await asyncio.sleep(0)
+
+            if changed and self._backfill_token_valid(token, generation):
+                await self.async_save()
+            self._last_error = None if changed else "backfill: no better intervals"
+            self._backfill_status = "complete"
+            return changed
         except asyncio.CancelledError:
+            self._backfill_status = "cancelled"
             raise
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001 - learning is best effort
             self._last_error = f"backfill: {exc}"
+            self._backfill_status = "failed"
             _LOGGER.warning("Consumption profile: Recorder backfill failed: %s", exc)
             return False
+        finally:
+            self._backfill_current_date = None
+            self._backfill_last_duration_s = max(0.0, monotonic() - started)
 
-        try:
-            home_days = await recorder.async_add_executor_job(
-                _series_to_bins,
-                (home_states_map or {}).get(source_entity, []),
-                local_tz,
-            )
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:  # noqa: BLE001
-            self._last_error = f"backfill: binning failed: {exc}"
-            _LOGGER.warning("Consumption profile: home backfill binning failed: %s", exc)
-            return False
-        if not home_days:
-            self._last_error = "backfill: no home consumption states"
-            return False
-
-        external_days: list[tuple[dict[str, Any], dict[date, ProfileDay]]] = []
-        config_data = getattr(self._config_entry, "data", {}) or {}
-        for device in config_data.get("excluded_devices", []) or []:
-            if not isinstance(device, dict) or not device.get("enabled", True):
-                continue
-            if device.get("ev_charger_no_telemetry", False):
-                continue
-            sensor = device.get("power_sensor")
-            if not sensor:
-                continue
-            try:
-                states_map = await recorder.async_add_executor_job(
-                    history.state_changes_during_period,
-                    self._hass,
-                    start_time,
-                    end_time,
-                    sensor,
-                )
-            except asyncio.CancelledError:
-                raise
-            except Exception as exc:  # noqa: BLE001
-                _LOGGER.debug("Consumption profile: external backfill failed for %s: %s", sensor, exc)
-                continue
-            try:
-                device_days = await recorder.async_add_executor_job(
-                    _series_to_bins,
-                    (states_map or {}).get(sensor, []),
-                    local_tz,
-                )
-            except asyncio.CancelledError:
-                raise
-            except Exception as exc:  # noqa: BLE001
-                _LOGGER.debug(
-                    "Consumption profile: external backfill binning failed for %s: %s",
-                    sensor,
-                    exc,
-                )
-                continue
-            external_days.append((device, device_days))
-
-        changed = False
-        for local_date, home_day in home_days.items():
-            if local_date > today or local_date < self._retention_floor(today):
-                continue
-            adjusted = ProfileDay(
-                local_date,
-                list(home_day.energy_kwh),
-                list(home_day.coverage_s),
-                complete=local_date < today,
-            )
-            for device, device_days in external_days:
-                device_day = device_days.get(local_date)
-                if device_day is None:
-                    continue
-                if device.get("included_in_consumption", True):
-                    try:
-                        exclusion_factor = max(
-                            0.0,
-                            min(100.0, float(device.get("exclusion_pct", 100.0))),
-                        ) / 100.0
-                    except (TypeError, ValueError):
-                        exclusion_factor = 1.0
-                    sign = -exclusion_factor
-                else:
-                    sign = 1.0
-                _apply_external_load_to_day(adjusted, device_day, sign)
-            before = self._days.get(local_date)
-            for index in range(INTERVAL_COUNT):
-                if (
-                    before is None
-                    or adjusted.coverage_s[index] > before.coverage_s[index]
-                ):
-                    if before is None:
-                        before = ProfileDay(local_date)
-                        self._days[local_date] = before
-                    before.energy_kwh[index] = adjusted.energy_kwh[index]
-                    before.coverage_s[index] = adjusted.coverage_s[index]
-                    before.complete = before.complete or adjusted.complete
-                    changed = True
-
-        if changed:
-            self._prune(today)
-            await self.async_save()
-        self._last_error = None if changed else "backfill: no better intervals"
-        return changed
-
-    def start_backfill(self) -> None:
-        """Start at most one background Recorder backfill."""
+    def start_backfill(
+        self, coordinator: RecorderBackfillCoordinator | None = None
+    ) -> None:
+        """Start at most one entry-owned background Recorder backfill."""
+        if coordinator is not None:
+            self.set_backfill_coordinator(coordinator)
         if self._backfill_task is not None and not self._backfill_task.done():
+            is_cancelling = getattr(self._backfill_task, "cancelling", lambda: 0)()
+            if not is_cancelling:
+                return
+        if self._backfill_coordinator is None:
+            self._backfill_status = "coordinator_unavailable"
+            self._last_error = "backfill: coordinator unavailable"
             return
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            self._backfill_task = None
-            return
-        self._backfill_task = loop.create_task(self.async_backfill_from_recorder())
+        self._backfill_task = self._backfill_coordinator.submit(
+            "consumption_profile", self.async_backfill_from_recorder
+        )
 
     # ------------------------------------------------------------------
     # Diagnostics
@@ -1660,4 +1750,12 @@ class ConsumptionProfileTracker:
             ),
             "fallback_reason": forecast.fallback_reason,
             "last_error": self._last_error,
+            "backfill_status": self._backfill_status,
+            "backfill_date": (
+                self._backfill_current_date.isoformat()
+                if self._backfill_current_date is not None
+                else None
+            ),
+            "backfill_blocks": self._backfill_blocks,
+            "backfill_duration_last_s": round(self._backfill_last_duration_s, 3),
         }

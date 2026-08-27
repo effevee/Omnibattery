@@ -204,6 +204,7 @@ from .const import (
     DEFAULT_CHARGE_HYSTERESIS_PERCENT,
     DEBUG_CONTROL_LOOP_DETAIL,
 )
+from .infra.lifecycle import is_reload_pending
 from .control.charge_delay import ChargeDelayManager
 from .infra.coordinator import MarstekVenusDataUpdateCoordinator
 from .infra.mac_tracking import publishable_macs
@@ -600,6 +601,9 @@ class ChargeDischargeController:
         # belongs per-battery in the power distribution, not in the loop cadence.
         self._min_cycle_interval_s = config_entry.data.get(CONF_PD_MIN_CYCLE_INTERVAL, DEFAULT_PD_MIN_CYCLE_INTERVAL)
         self._last_cycle_monotonic = 0.0
+        self._background_tasks: set[asyncio.Task] = set()
+        self._startup_dynamic_pricing_task: asyncio.Task | None = None
+        self._unloading = False
         self.target_grid_power = config_entry.data.get(CONF_TARGET_GRID_POWER, DEFAULT_TARGET_GRID_POWER)
         # No-PD direct-tracking mode (opt-in): see _apply_no_pd_overrides. Overrides
         # are applied at the end of __init__, after the grid filter tau is set below.
@@ -6920,11 +6924,74 @@ class ChargeDischargeController:
         every integration set up after this one. Background tasks are exempt
         from the startup gate and are still cancelled on entry unload.
         """
-        self.config_entry.async_create_background_task(
-            self.hass,
-            self.async_update_charge_discharge(now),
-            "omnibattery_control_cycle",
-        )
+        if getattr(self, "_unloading", False):
+            return
+        coroutine = self.async_update_charge_discharge(now)
+        create = getattr(self, "_create_entry_background_task", None)
+        if callable(create):
+            create(coroutine, "omnibattery_control_cycle")
+        else:
+            self.config_entry.async_create_background_task(
+                self.hass, coroutine, "omnibattery_control_cycle"
+            )
+
+    def _create_entry_background_task(
+        self, coroutine, name: str
+    ) -> asyncio.Task | None:
+        """Create and retain an entry-owned task until it has finished."""
+        if getattr(self, "_unloading", False):
+            close = getattr(coroutine, "close", None)
+            if callable(close):
+                close()
+            return None
+        create = getattr(self.config_entry, "async_create_background_task", None)
+        task = None
+        if callable(create):
+            try:
+                task = create(self.hass, coroutine, name)
+            except TypeError:
+                task = create(coroutine, name)
+        else:
+            create = getattr(self.hass, "async_create_task", None)
+            if callable(create):
+                try:
+                    task = create(coroutine, name=name)
+                except TypeError:
+                    task = create(coroutine)
+            else:
+                try:
+                    task = asyncio.get_running_loop().create_task(coroutine, name=name)
+                except TypeError:
+                    task = asyncio.get_running_loop().create_task(coroutine)
+        if isinstance(task, asyncio.Task):
+            self._background_tasks.add(task)
+            task.add_done_callback(self._background_tasks.discard)
+            return task
+        close = getattr(coroutine, "close", None)
+        if callable(close):
+            close()
+        return None
+
+    async def async_stop_background_tasks(self) -> None:
+        """Stop entry-owned control/pricing tasks before hardware teardown."""
+        self._unloading = True
+        self._cancel_no_pd_debounced_run()
+        current = asyncio.current_task()
+        tasks = {
+            task
+            for task in self._background_tasks
+            if task is not current and not task.done()
+        }
+        if self._startup_dynamic_pricing_task is not None:
+            task = self._startup_dynamic_pricing_task
+            if task is not current and not task.done():
+                tasks.add(task)
+            self._startup_dynamic_pricing_task = None
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        self._background_tasks.clear()
 
     async def async_update_charge_discharge(self, now=None):
         """Run one control cycle, guarded against overlapping triggers.
@@ -6934,6 +7001,8 @@ class ChargeDischargeController:
         trigger is skipped: the in-flight cycle already reads the current state,
         so re-entering would only risk concurrent Modbus writes.
         """
+        if getattr(self, "_unloading", False):
+            return
         # No-PD command delay (debounce): on a sensor event, defer the cycle by
         # the configured delay and collapse any further events in that window into
         # the single deferred run, which reads the latest sensor value at fire time.
@@ -6987,11 +7056,16 @@ class ChargeDischargeController:
         as a startup-tracked task.
         """
         self._no_pd_debounce_unsub = None
-        self.config_entry.async_create_background_task(
-            self.hass,
-            self._run_no_pd_debounced_cycle(),
-            "omnibattery_no_pd_cycle",
-        )
+        if getattr(self, "_unloading", False):
+            return
+        coroutine = self._run_no_pd_debounced_cycle()
+        create = getattr(self, "_create_entry_background_task", None)
+        if callable(create):
+            create(coroutine, "omnibattery_no_pd_cycle")
+        else:
+            self.config_entry.async_create_background_task(
+                self.hass, coroutine, "omnibattery_no_pd_cycle"
+            )
 
     async def _run_no_pd_debounced_cycle(self):
         """Run the deferred no-PD control cycle."""
@@ -9552,6 +9626,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     from .tracking.consumption_tracker import ConsumptionTracker
     consumption_tracker = ConsumptionTracker(hass, entry, controller)
     controller._consumption_tracker = consumption_tracker
+    # Calculated sensors that need a short Recorder recovery query (currently
+    # the daily counter migration) must use the same entry-owned coordinator
+    # as profile and legacy backfills. Attach it before platform setup starts.
+    for coordinator in coordinators:
+        coordinator._omnibattery_backfill_coordinator = (
+            consumption_tracker._backfill_coordinator
+        )
     await consumption_tracker.load_vacation_state()
     daily_operation_timeline = DailyOperationTimelineManager(
         hass, entry, controller
@@ -9625,7 +9706,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         now=startup_now, force_projection=True
     )
 
-    # Set up periodic timers and store unsub callbacks for manual cancellation during unload.
+    # Set up the control safety timer and store unsub callbacks for manual cancellation during unload.
     # Each unsub is registered twice: stored in hass.data so async_unload_entry can cancel
     # the timers early (before platform teardown), and via entry.async_on_unload so HA cleans
     # up on setup failure. The state-change tracker's unsub raises on a second call
@@ -9645,19 +9726,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass, controller.schedule_control_cycle, timedelta(seconds=2.0)
     ))
     entry.async_on_unload(unsub_control)
-
-    # Force coordinator updates every 1.5 seconds with timestamp-based per-sensor polling
-    # This ensures all sensors update according to their scan_interval
-    async def _force_coordinator_refresh(now):
-        """Force coordinator to check and update data based on timestamp thresholds."""
-        await asyncio.gather(*[coordinator.async_request_refresh() for coordinator in coordinators])
-
-    _LOGGER.debug("Setting up periodic refresh for all coordinators")
-
-    unsub_refresh = _call_once(async_track_time_interval(
-        hass, _force_coordinator_refresh, timedelta(seconds=1.5)
-    ))
-    entry.async_on_unload(unsub_refresh)
 
     # Event-driven control: also run the control cycle the instant the grid
     # consumption sensor publishes a new value, so PD reacts at the sensor's
@@ -9780,7 +9848,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "controller": controller,
         "daily_operation_timeline": daily_operation_timeline,
         "unsub_control": unsub_control,
-        "unsub_refresh": unsub_refresh,
         "unsub_consumption": unsub_consumption,
         "unsub_consumption_reported": unsub_consumption_reported,
         "unsub_phase": unsub_phase,
@@ -9792,6 +9859,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Listen for config entry updates so config entities refresh their state
     async def _async_update_listener(hass: HomeAssistant, updated_entry: ConfigEntry) -> None:
         """Handle config entry updates (from Options Flow or config entities)."""
+        if is_reload_pending(hass, updated_entry.entry_id) or getattr(
+            controller, "_unloading", False
+        ):
+            _LOGGER.debug(
+                "Ignoring stale config update callback for entry %s",
+                updated_entry.entry_id,
+            )
+            return
         _LOGGER.debug("Config entry updated, hot-reloading controller parameters")
         if controller:
             controller.update_pd_parameters()
@@ -9856,7 +9931,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Replace default consumption data with real recorder data
     # On reload HA is already running, so backfill immediately;
     # on fresh boot, wait for homeassistant_started so the recorder is ready
-    if needs_consumption_capture:
+    needs_recorder_backfill = needs_consumption_capture or bool(
+        getattr(consumption_tracker, "_legacy_accumulator_rebuild_pending", False)
+    )
+    if needs_recorder_backfill:
         if hass.state == CoreState.running:
             await consumption_tracker.startup_backfill_consumption()
             _LOGGER.info("Startup consumption backfill executed immediately (reload)")
@@ -9902,7 +9980,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             controller.predictive_charging_enabled
             and not controller.predictive_charging_overridden
         ):
-            hass.async_create_task(controller._startup_dynamic_pricing_evaluation())
+            controller._startup_dynamic_pricing_task = controller._create_entry_background_task(
+                controller._startup_dynamic_pricing_evaluation(),
+                "omnibattery_dynamic_pricing_startup",
+            )
             _LOGGER.info("Dynamic pricing: startup evaluation task scheduled")
 
     return True
@@ -9911,44 +9992,61 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
 
-    if data := hass.data[DOMAIN].get(entry.entry_id):
+    data = hass.data.get(DOMAIN, {}).get(entry.entry_id)
+    if data:
         coordinators = data.get("coordinators", [])
         controller = data.get("controller")
+        tracker = getattr(controller, "_consumption_tracker", None)
+
+        # Stop producers first. Set the guard synchronously before removing
+        # trackers so a callback already queued by HA cannot create a new task
+        # while the entry is being torn down.
+        if controller is not None:
+            controller._unloading = True
+
+        # Cancel periodic timers/callbacks before waiting for long work. The
+        # coordinator owns its 1.5-second update interval; there is no second
+        # explicit refresh loop.
+        for key in (
+            "unsub_control",
+            "unsub_consumption",
+            "unsub_consumption_reported",
+            "unsub_phase",
+            "unsub_phase_reported",
+            "unsub_blueprint_measurement",
+        ):
+            if unsub := data.get(key):
+                unsub()
+
+        # Invalidate lifecycle generations and await every task that can still
+        # touch the entry before any platform/hardware teardown starts.
+        if controller is not None:
+            stop_tasks = getattr(controller, "async_stop_background_tasks", None)
+            if callable(stop_tasks):
+                await stop_tasks()
+        if tracker is not None:
+            stop_tracker = getattr(tracker, "async_stop_background_work", None)
+            if callable(stop_tracker):
+                await stop_tracker()
         if controller is not None:
             # Remove the opt-in runtime override/blockers before the control
             # timer and entities disappear.  The plan itself is never persisted.
             controller._pricing_mgr.clear_curtailment_runtime("unload")
             controller._pricing_mgr.clear_negative_price_runtime("unload")
 
-        # 1. Cancel periodic timers FIRST to stop control loop and coordinator refresh
-        # These run every 2.0s / 1.5s and would write registers on a closing connection
-        if unsub := data.get("unsub_control"):
-            unsub()
-        if unsub := data.get("unsub_refresh"):
-            unsub()
-        if unsub := data.get("unsub_consumption"):
-            unsub()
-        if unsub := data.get("unsub_consumption_reported"):
-            unsub()
-        if unsub := data.get("unsub_phase"):
-            unsub()
-        if unsub := data.get("unsub_phase_reported"):
-            unsub()
-        if unsub := data.get("unsub_blueprint_measurement"):
-            unsub()
-
-        # 2. Set shutdown flag on all coordinators to suppress expected errors
+        # Set shutdown flag on all coordinators to suppress expected errors.
         for coordinator in coordinators:
             coordinator.set_shutting_down(True)
 
-        # 3. Brief delay to let any in-flight control loop iteration complete
+        # Give callbacks owned by older HA versions a short chance to observe
+        # the shutdown flag after their entry task has been cancelled.
         await asyncio.sleep(0.3)
 
-    # 4. Unload platforms (removes entities)
+    # Unload platforms (removes entities)
     unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
 
-    # 5. Write shutdown registers and disconnect (no more interference from timers)
-    if data := hass.data[DOMAIN].get(entry.entry_id):
+    # Write shutdown registers and disconnect (no more interference from timers)
+    if data := hass.data.get(DOMAIN, {}).get(entry.entry_id):
         coordinators = data.get("coordinators", [])
 
         _LOGGER.info("Shutting down integration - stopping all battery operations")

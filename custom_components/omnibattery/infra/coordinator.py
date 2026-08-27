@@ -2,6 +2,7 @@
 import asyncio
 import logging
 import time
+from collections import deque
 from datetime import timedelta, datetime
 
 from homeassistant.core import HomeAssistant
@@ -244,6 +245,11 @@ class MarstekVenusDataUpdateCoordinator(DataUpdateCoordinator):
         # Timestamp-based update tracking
         self._last_update_times = {}
         self._critical_group_failures = {}
+        self._refresh_count = 0
+        self._refresh_times: deque[float] = deque(maxlen=256)
+        self._active_refreshes = 0
+        self._max_concurrent_refreshes = 0
+        self._last_refresh_duration_s = 0.0
         # Last-written select values that override buggy register readbacks.
         # Repopulated from persisted battery_config after construction; initialised
         # here so get_shadow_select before that assignment returns None instead of
@@ -932,9 +938,56 @@ class MarstekVenusDataUpdateCoordinator(DataUpdateCoordinator):
                 ",".join(keys): _iso(ts)
                 for keys, ts in self._last_update_times.items()
             },
+            "refresh_count": getattr(self, "_refresh_count", 0),
+            "refreshes_last_minute": MarstekVenusDataUpdateCoordinator._refreshes_last_minute(
+                self
+            ),
+            "active_refreshes": getattr(self, "_active_refreshes", 0),
+            "max_concurrent_refreshes": getattr(
+                self, "_max_concurrent_refreshes", 0
+            ),
+            "last_refresh_duration_s": round(
+                getattr(self, "_last_refresh_duration_s", 0.0), 3
+            ),
         }
 
+    def _refreshes_last_minute(self) -> int:
+        """Return the bounded number of refreshes started in the last minute."""
+        events = getattr(self, "_refresh_times", None)
+        if events is None:
+            return 0
+        now = time.monotonic()
+        while events and now - events[0] > 60.0:
+            events.popleft()
+        return len(events)
+
     async def _async_update_data(self) -> dict:
+        """Run one poll and record bounded refresh metrics."""
+        now = time.monotonic()
+        if not hasattr(self, "_refresh_times"):
+            self._refresh_times = deque(maxlen=256)
+        self._refresh_count = getattr(self, "_refresh_count", 0) + 1
+        self._refresh_times.append(now)
+        self._active_refreshes = getattr(self, "_active_refreshes", 0) + 1
+        self._max_concurrent_refreshes = max(
+            getattr(self, "_max_concurrent_refreshes", 0),
+            self._active_refreshes,
+        )
+        started = time.monotonic()
+        try:
+            # Some unit tests invoke this method unbound with a lightweight
+            # SimpleNamespace instead of a real coordinator instance.
+            update_impl = getattr(self, "_async_update_data_impl", None)
+            if update_impl is None:
+                result = MarstekVenusDataUpdateCoordinator._async_update_data_impl(self)
+            else:
+                result = update_impl()
+            return await result
+        finally:
+            self._active_refreshes = max(0, self._active_refreshes - 1)
+            self._last_refresh_duration_s = max(0.0, time.monotonic() - started)
+
+    async def _async_update_data_impl(self) -> dict:
         """Update all sensors asynchronously with per-sensor interval skipping.
 
         Sensors disabled in Home Assistant are skipped, except dependencies which are always fetched.

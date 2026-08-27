@@ -3,8 +3,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
-from datetime import date, datetime
-from functools import partial
+from datetime import date
 
 from homeassistant.components.sensor import SensorEntity
 from homeassistant.config_entries import ConfigEntry
@@ -18,6 +17,7 @@ from homeassistant.util import dt as dt_util
 from ..const import DOMAIN, EFFICIENCY_SENSOR_DEFINITIONS, STORED_ENERGY_SENSOR_DEFINITIONS, CYCLE_SENSOR_DEFINITIONS
 from ..infra.coordinator import MarstekVenusDataUpdateCoordinator
 from ..infra.entity_naming import english_entity_id
+from ..tracking.backfill import local_day_bounds
 
 # Skip integration across gaps larger than this (stalled coordinator / sensor
 # offline) so a resumed update can't dump one giant energy block.
@@ -536,26 +536,42 @@ class CumulativeDailyEnergySensor(CoordinatorEntity, RestoreEntity, SensorEntity
 
     async def _recover_daily_value_from_recorder(self, today: str) -> float | None:
         """Recover this entity's current-day state from Home Assistant Recorder."""
-        try:
-            from homeassistant.components.recorder import get_instance, history
-
-            local_tz = dt_util.get_time_zone(self.hass.config.time_zone) or dt_util.UTC
-            start = datetime.combine(
-                date.fromisoformat(today), datetime.min.time(), tzinfo=local_tz
+        backfill = getattr(
+            self.coordinator,
+            "_omnibattery_backfill_coordinator",
+            None,
+        )
+        if backfill is not None:
+            configured_timezone = getattr(
+                getattr(self.hass, "config", None), "time_zone", None
             )
-            query = partial(
-                history.state_changes_during_period,
-                self.hass,
+            local_tz = dt_util.get_time_zone(configured_timezone) or dt_util.UTC
+            local_date = date.fromisoformat(today)
+            start, end = local_day_bounds(
+                local_date,
+                local_tz,
+                now=dt_util.now(),
+            )
+            token = backfill.new_token()
+            states = await backfill.async_query(
+                token,
+                self.entity_id,
                 start,
-                entity_id=self.entity_id,
+                end,
+                block=f"daily_energy:{self.entity_id}",
                 include_start_time_state=False,
             )
-            states_map = await get_instance(self.hass).async_add_executor_job(query)
-        except Exception as err:  # Recorder is optional and may not be ready at boot.
-            _LOGGER.debug("Could not recover %s from recorder: %s", self.entity_id, err)
-            return None
-
-        return _highest_daily_energy_value(states_map.get(self.entity_id, []))
+            if states is None:
+                return None
+            try:
+                return _highest_daily_energy_value(states)
+            finally:
+                del states
+        # Real setup always attaches the entry-owned coordinator before this
+        # entity is created.  Without it there is no safe way to issue a
+        # Recorder query without bypassing the entry's serialization and
+        # cancellation guarantees.
+        return None
 
     @callback
     def _handle_coordinator_update(self) -> None:

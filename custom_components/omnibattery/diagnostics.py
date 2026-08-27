@@ -553,6 +553,14 @@ def _daily_operation_timeline_summary(controller) -> dict[str, Any]:
             "last_updated": None,
             "last_update": None,
             "plan_evaluated_at": None,
+            "revision": 0,
+            "snapshot_build_count": 0,
+            "notification_count": 0,
+            "save_count": 0,
+            "snapshot_age_s": None,
+            "last_save_age_s": None,
+            "publications_last_minute": 0,
+            "writes_last_minute": 0,
             "sources": {},
             "freshness": {},
             "counts": {
@@ -714,6 +722,14 @@ def _daily_operation_timeline_summary(controller) -> dict[str, Any]:
         "timezone": payload.get("timezone"),
         "interval_minutes": 15,
         "interval_count": 96,
+        "revision": payload.get("revision", 0),
+        "snapshot_build_count": payload.get("snapshot_build_count", 0),
+        "notification_count": payload.get("notification_count", 0),
+        "save_count": payload.get("save_count", 0),
+        "snapshot_age_s": payload.get("snapshot_age_s"),
+        "last_save_age_s": payload.get("last_save_age_s"),
+        "publications_last_minute": payload.get("publications_last_minute", 0),
+        "writes_last_minute": payload.get("writes_last_minute", 0),
         "current_index": payload.get("current_index"),
         "last_updated": payload.get("generated_at"),
         "last_update": payload.get("generated_at"),
@@ -803,6 +819,7 @@ async def async_get_config_entry_diagnostics(
     consumption_profile = {}
     solar_profile = {}
     vacation = {}
+    recorder_backfill = {}
     tracker = getattr(controller, "_consumption_tracker", None)
     profile = getattr(tracker, "consumption_profile", None)
     if profile is not None:
@@ -810,6 +827,12 @@ async def async_get_config_entry_diagnostics(
             consumption_profile = _json_safe(profile.diagnostics())
         except Exception as exc:  # noqa: BLE001
             consumption_profile = {"error": str(exc)}
+    backfill_info = getattr(tracker, "backfill_diagnostics", None)
+    if callable(backfill_info):
+        try:
+            recorder_backfill = _json_safe(backfill_info())
+        except Exception as exc:  # noqa: BLE001
+            recorder_backfill = {"error": str(exc)}
     vacation_info = getattr(tracker, "vacation_diagnostics", None)
     if callable(vacation_info):
         try:
@@ -838,6 +861,7 @@ async def async_get_config_entry_diagnostics(
         "dynamic_pricing": _dynamic_pricing_info(controller),
         "daily_operation_timeline": _daily_operation_timeline_summary(controller),
         "consumption_profile": consumption_profile,
+        "recorder_backfill": recorder_backfill,
         "vacation_learning": vacation,
         "solar_profile": solar_profile,
         "curtailment": _curtailment_info(controller),

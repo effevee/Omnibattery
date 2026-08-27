@@ -600,10 +600,14 @@ class PredictiveChargingSwitch(SwitchEntity):
         self.async_write_ha_state()
         self.controller.schedule_control_cycle()
         if self.controller.predictive_charging_mode == PREDICTIVE_MODE_DYNAMIC_PRICING:
-            self.hass.async_create_task(
-                self._async_rebuild_dynamic_schedule(),
-                "Rebuild dynamic pricing after predictive charging enable",
-            )
+            coroutine = self._async_rebuild_dynamic_schedule()
+            create = getattr(self.controller, "_create_entry_background_task", None)
+            if callable(create):
+                create(coroutine, "omnibattery_dynamic_pricing_rebuild")
+            else:
+                self.hass.async_create_task(
+                    coroutine, "Rebuild dynamic pricing after predictive charging enable"
+                )
 
     async def async_turn_off(self, **kwargs) -> None:
         """Disable predictive charging (clear enabled, set override)."""

@@ -38,6 +38,7 @@ from .consumption_profile import (
     _state_to_power_kw,
     split_sample_across_bins,
 )
+from .backfill import BackfillToken, RecorderBackfillCoordinator, local_day_bounds
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -458,6 +459,11 @@ class SolarProfileTracker:
         self._backfill_task: asyncio.Task | None = None
         self._last_error: str | None = None
         self._backfill_status = "not_started"
+        self._backfill_coordinator: RecorderBackfillCoordinator | None = None
+        self._backfill_runtime_generation = 1
+        self._backfill_current_date: date | None = None
+        self._backfill_blocks = 0
+        self._backfill_last_duration_s = 0.0
         self._loaded = False
         self._active_fingerprint = self.configuration_fingerprint()
         self._generation = 1
@@ -473,6 +479,19 @@ class SolarProfileTracker:
                 "solar_profile_mode", DEFAULT_SOLAR_PROFILE_MODE
             )
         )
+
+    def set_backfill_coordinator(
+        self, coordinator: RecorderBackfillCoordinator
+    ) -> None:
+        """Attach the entry-owned Recorder coordinator."""
+        self._backfill_coordinator = coordinator
+
+    def cancel_backfill(self) -> None:
+        """Invalidate this profile's pending Recorder result application."""
+        self._backfill_runtime_generation += 1
+        if self._backfill_task is not None and not self._backfill_task.done():
+            self._backfill_task.cancel()
+        self._backfill_status = "cancelled"
 
     # ------------------------------------------------------------------
     # Time, source and persistence
@@ -691,6 +710,7 @@ class SolarProfileTracker:
         current = self.configuration_fingerprint()
         if current == self._active_fingerprint:
             return False
+        self.cancel_backfill()
         self._days = {}
         self._generation += 1
         self._active_fingerprint = current
@@ -730,17 +750,19 @@ class SolarProfileTracker:
         self._save_task = loop.create_task(self.async_save())
 
     async def async_save_all(self) -> None:
+        self.cancel_backfill()
         if self._backfill_task is not None and not self._backfill_task.done():
-            self._backfill_task.cancel()
             try:
                 await self._backfill_task
             except asyncio.CancelledError:
                 pass
+        self._backfill_task = None
         if self._save_task is not None and not self._save_task.done():
             try:
                 await self._save_task
             except asyncio.CancelledError:
                 pass
+        self._save_task = None
         await self.async_save()
 
     # ------------------------------------------------------------------
@@ -1258,73 +1280,206 @@ class SolarProfileTracker:
     # Recorder backfill and diagnostics
     # ------------------------------------------------------------------
 
-    async def async_backfill_from_recorder(self) -> bool:
-        entity_id = getattr(self._controller, "solar_production_sensor", None)
-        if not entity_id:
-            self._backfill_status = "no_direct_source"
-            return False
-        try:
-            from homeassistant.components.recorder import get_instance, history
-            recorder = get_instance(self._hass)
-            start = self._now() - timedelta(days=SOLAR_PROFILE_RETENTION_DAYS + 1)
-            states_map = await recorder.async_add_executor_job(
-                history.state_changes_during_period,
-                self._hass,
-                start,
-                self._now(),
-                entity_id,
-            )
-            states = (states_map or {}).get(entity_id, [])
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:  # noqa: BLE001
-            self._backfill_status = f"error: {exc}"
-            self._last_error = self._backfill_status
-            return False
+    def _day_needs_backfill(self, local_date: date) -> bool:
+        """Return whether a day lacks enough raw coverage to be trusted."""
+        day = self._days.get(local_date)
+        if day is None or not day.complete or day.generation != self._generation:
+            return True
+        return sum(value > 0.0 for value in day.coverage_s) < math.ceil(
+            SOLAR_PROFILE_INTERVAL_COUNT * 0.75
+        )
+
+    def _backfill_token_valid(
+        self, token: BackfillToken | None, generation: int
+    ) -> bool:
+        return self._backfill_runtime_generation == generation and (
+            token is None or token.is_valid()
+        )
+
+    def _build_backfill_day(
+        self,
+        local_date: date,
+        states: list[Any],
+        today: date,
+    ) -> SolarProfileDay | None:
+        """Convert one detached Recorder list into one temporary solar day."""
+        day = SolarProfileDay(local_date, generation=self._generation)
         previous_time: datetime | None = None
         previous_power: float | None = None
-        changed = False
+        positive_start: datetime | None = None
+        positive_run_s = 0.0
+        local_tz = self._timezone()
+
         for state in states:
             timestamp = _state_timestamp(state)
             power = _state_to_power_kw(state)
             if timestamp is None or power is None:
                 previous_time = None
                 previous_power = None
+                positive_start = None
+                positive_run_s = 0.0
                 continue
-            timestamp = timestamp.astimezone(self._timezone()) if timestamp.tzinfo else timestamp.replace(tzinfo=self._timezone())
+            timestamp = (
+                timestamp.astimezone(local_tz)
+                if timestamp.tzinfo
+                else timestamp.replace(tzinfo=local_tz)
+            )
             if previous_time is not None and previous_power is not None:
                 gap = _as_timestamp(timestamp) - _as_timestamp(previous_time)
-                if 0.0 < gap <= MAX_SAMPLE_GAP_SECONDS:
-                    for contribution in split_sample_across_bins(previous_time, timestamp, previous_power, power):
-                        day = self._day(contribution.local_date)
-                        day.energy_kwh[contribution.interval_index] += contribution.energy_kwh
-                        day.coverage_s[contribution.interval_index] += contribution.coverage_s
-                        if power >= SOLAR_POWER_NOISE_KW:
-                            day.solar_start = day.solar_start or previous_time
-                            day.solar_end = timestamp
-                        changed = True
-            previous_time, previous_power = timestamp, power
-        today = self._today()
-        for local_date, day in self._days.items():
-            if local_date < today:
-                day.complete = True
-                self._classify_day(day)
-        self._prune(today)
-        self._backfill_status = "completed" if changed else "no_better_intervals"
-        if changed:
-            await self.async_save()
-        return changed
+                if 0.0 < gap <= SOLAR_MAX_SAMPLE_GAP_SECONDS:
+                    for contribution in split_sample_across_bins(
+                        previous_time,
+                        timestamp,
+                        previous_power,
+                        power,
+                    ):
+                        target = day if contribution.local_date == local_date else None
+                        if target is None:
+                            continue
+                        index = contribution.interval_index
+                        target.energy_kwh[index] += contribution.energy_kwh
+                        target.coverage_s[index] += contribution.coverage_s
 
-    def start_backfill(self) -> None:
-        if self._backfill_task is not None and not self._backfill_task.done():
-            return
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            self._backfill_task = None
-            return
+            if power >= SOLAR_POWER_NOISE_KW:
+                if positive_start is None:
+                    positive_start = timestamp
+                    positive_run_s = 0.0
+                elif previous_time is not None:
+                    gap = _as_timestamp(timestamp) - _as_timestamp(previous_time)
+                    if 0.0 < gap <= SOLAR_MAX_SAMPLE_GAP_SECONDS:
+                        positive_run_s += gap
+                if positive_run_s >= SOLAR_MIN_SUSTAINED_SECONDS:
+                    if day.solar_start is None:
+                        day.solar_start = positive_start
+                    day.solar_end = timestamp
+            else:
+                positive_start = None
+                positive_run_s = 0.0
+            previous_time, previous_power = timestamp, power
+
+        if sum(day.coverage_s) <= 0.0:
+            return None
+        day.complete = local_date < today
+        if day.complete:
+            self._classify_day(day)
+        return day
+
+    def _merge_backfill_day(self, day: SolarProfileDay) -> bool:
+        """Merge a better day while retaining existing quality evidence."""
+        before = self._days.get(day.local_date)
+        before_signature = before.as_dict() if before is not None else None
+        self.add_day(day)
+        merged = self._days.get(day.local_date)
+        if merged is None:
+            return False
+        if day.solar_start is not None and (
+            merged.solar_start is None or day.solar_start < merged.solar_start
+        ):
+            merged.solar_start = day.solar_start
+        if day.solar_end is not None and (
+            merged.solar_end is None or day.solar_end > merged.solar_end
+        ):
+            merged.solar_end = day.solar_end
+        merged.complete = merged.complete or day.complete
+        merged.generation = self._generation
+        return before_signature != merged.as_dict()
+
+    async def async_backfill_from_recorder(
+        self, token: BackfillToken | None = None
+    ) -> bool:
+        """Populate missing raw days using one local-day query at a time."""
+        started = monotonic()
+        generation = self._backfill_runtime_generation
         self._backfill_status = "running"
-        self._backfill_task = loop.create_task(self.async_backfill_from_recorder())
+        changed = False
+        try:
+            entity_id = getattr(self._controller, "solar_production_sensor", None)
+            if not entity_id:
+                self._backfill_status = "no_direct_source"
+                return False
+            coordinator = self._backfill_coordinator
+            if token is None and coordinator is not None:
+                token = coordinator.new_token()
+            if coordinator is None:
+                self._backfill_status = "coordinator_unavailable"
+                self._last_error = "backfill: coordinator unavailable"
+                return False
+
+            today = self._today()
+            local_tz = self._timezone()
+            floor = self._retention_floor(today)
+            for offset in range((today - floor).days + 1):
+                local_date = floor + timedelta(days=offset)
+                self._backfill_current_date = local_date
+                if not self._backfill_token_valid(token, generation):
+                    self._backfill_status = "cancelled"
+                    return False
+                if not self._day_needs_backfill(local_date):
+                    coordinator.note_skipped()
+                    continue
+                start, end = local_day_bounds(local_date, local_tz, now=self._now())
+                states = await coordinator.async_query(
+                    token,
+                    str(entity_id),
+                    start,
+                    end,
+                    block=local_date.isoformat(),
+                )
+                if states is None:
+                    self._backfill_status = "cancelled"
+                    return False
+                day = self._build_backfill_day(local_date, states, today)
+                del states
+                if day is None:
+                    await asyncio.sleep(0)
+                    continue
+                if not self._backfill_token_valid(token, generation):
+                    self._backfill_status = "cancelled"
+                    return False
+                day_changed = self._merge_backfill_day(day)
+                if day_changed:
+                    changed = True
+                self._backfill_blocks += 1
+                self._prune(today)
+                if local_date < today and day_changed:
+                    await self.async_save()
+                await asyncio.sleep(0)
+
+            if changed and self._backfill_token_valid(token, generation):
+                await self.async_save()
+            self._backfill_status = "completed" if changed else "no_better_intervals"
+            self._last_error = None if changed else "backfill: no better intervals"
+            return changed
+        except asyncio.CancelledError:
+            self._backfill_status = "cancelled"
+            raise
+        except Exception as exc:  # noqa: BLE001 - learning is best effort
+            self._backfill_status = f"error: {exc}"
+            self._last_error = self._backfill_status
+            _LOGGER.warning("Solar profile: Recorder backfill failed: %s", exc)
+            return False
+        finally:
+            self._backfill_current_date = None
+            self._backfill_last_duration_s = max(0.0, monotonic() - started)
+
+    def start_backfill(
+        self, coordinator: RecorderBackfillCoordinator | None = None
+    ) -> None:
+        """Start at most one entry-owned background Recorder backfill."""
+        if coordinator is not None:
+            self.set_backfill_coordinator(coordinator)
+        if self._backfill_task is not None and not self._backfill_task.done():
+            is_cancelling = getattr(self._backfill_task, "cancelling", lambda: 0)()
+            if not is_cancelling:
+                return
+        self._backfill_status = "running"
+        if self._backfill_coordinator is None:
+            self._backfill_status = "coordinator_unavailable"
+            self._last_error = "backfill: coordinator unavailable"
+            return
+        self._backfill_task = self._backfill_coordinator.submit(
+            "solar_profile", self.async_backfill_from_recorder
+        )
 
     def diagnostics(self, target_date: date | None = None) -> dict[str, Any]:
         target_date = target_date or self._today()
@@ -1360,6 +1515,13 @@ class SolarProfileTracker:
             "fallback_reason": snapshot.fallback_reason,
             "last_error": self._last_error,
             "backfill_status": self._backfill_status,
+            "backfill_date": (
+                self._backfill_current_date.isoformat()
+                if self._backfill_current_date is not None
+                else None
+            ),
+            "backfill_blocks": self._backfill_blocks,
+            "backfill_duration_last_s": round(self._backfill_last_duration_s, 3),
             "shape_progress_24": summary[:24],
         }
 

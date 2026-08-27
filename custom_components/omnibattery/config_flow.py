@@ -55,6 +55,7 @@ from .config_backup import (
     async_load_config_backup,
     async_restore_config_backup,
 )
+from .infra.lifecycle import clear_reload_pending, mark_reload_pending
 from .solar_forecast import normalize_solar_forecast_config
 from .const import (
     DOMAIN,
@@ -3630,10 +3631,15 @@ class OptionsFlowHandler(OptionsFlow):
             new_data.pop(CONF_OFFGRID_MODE_ENABLED, None)
         new_data = normalize_solar_forecast_config(new_data)
         new_data[CONF_ENABLE_BALANCE_MONITOR] = True
-        self.hass.config_entries.async_update_entry(
-            self.config_entry, data=new_data
-        )
-        await self.hass.config_entries.async_reload(self.config_entry.entry_id)
+        entry_id = self.config_entry.entry_id
+        mark_reload_pending(self.hass, entry_id)
+        try:
+            self.hass.config_entries.async_update_entry(
+                self.config_entry, data=new_data
+            )
+            await self.hass.config_entries.async_reload(entry_id)
+        finally:
+            clear_reload_pending(self.hass, entry_id)
         return self.async_create_entry(title="", data={})
 
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> FlowResult:

@@ -1156,7 +1156,7 @@ class NonResponsiveBatteriesSensor(SensorEntity):
 _DAILY_OPERATION_INTERVAL_COUNT = 96
 _DAILY_OPERATION_INTERVAL_MINUTES = 15
 _DAILY_OPERATION_EXTENDED_INTERVAL_COUNT = 48
-_DAILY_OPERATION_EVENT_THROTTLE_S = 5.0
+_DAILY_OPERATION_EVENT_THROTTLE_S = 15.0
 _TIMELINE_MISSING = object()
 
 
@@ -1788,6 +1788,44 @@ def _daily_operation_timeline_attributes(controller: object) -> dict[str, object
         "timezone": timezone_value,
         "interval_minutes": _DAILY_OPERATION_INTERVAL_MINUTES,
         "interval_count": _DAILY_OPERATION_INTERVAL_COUNT,
+        "revision": int(
+            _timeline_number(_timeline_find(source, ("revision",), metadata), 0)
+            or 0
+        ),
+        "snapshot_build_count": int(
+            _timeline_number(
+                _timeline_find(source, ("snapshot_build_count",), metadata), 0
+            )
+            or 0
+        ),
+        "notification_count": int(
+            _timeline_number(
+                _timeline_find(source, ("notification_count",), metadata), 0
+            )
+            or 0
+        ),
+        "save_count": int(
+            _timeline_number(_timeline_find(source, ("save_count",), metadata), 0)
+            or 0
+        ),
+        "snapshot_age_s": _timeline_number(
+            _timeline_find(source, ("snapshot_age_s",), metadata), 3
+        ),
+        "last_save_age_s": _timeline_number(
+            _timeline_find(source, ("last_save_age_s",), metadata), 3
+        ),
+        "publications_last_minute": int(
+            _timeline_number(
+                _timeline_find(source, ("publications_last_minute",), metadata), 0
+            )
+            or 0
+        ),
+        "writes_last_minute": int(
+            _timeline_number(
+                _timeline_find(source, ("writes_last_minute",), metadata), 0
+            )
+            or 0
+        ),
         "generated_at": _timeline_scalar(
             _timeline_find(source, ("generated_at", "updated_at", "last_updated"), metadata)
         ),
@@ -2086,7 +2124,7 @@ class DailyOperationTimelineSensor(SensorEntity):
     _attr_state_class = None
     _attr_icon = "mdi:chart-timeline-variant"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
-    _attr_should_poll = True
+    _attr_should_poll = False
     _unrecorded_attributes = frozenset(
         {
             "series",
@@ -2105,11 +2143,28 @@ class DailyOperationTimelineSensor(SensorEntity):
         self.entity_id = system_entity_id("sensor", "daily_operation_timeline")
         self._timeline_listener_unsub = None
         self._last_event_update_at = 0.0
+        self._timeline_publish_handle = None
+        self._attributes_cache_revision = None
+        self._attributes_cache = None
+
+    def _cancel_timeline_publish(self) -> None:
+        """Cancel a coalesced publication scheduled for the next throttle edge."""
+        handle = self._timeline_publish_handle
+        self._timeline_publish_handle = None
+        if handle is not None:
+            handle.cancel()
 
     @property
     def native_value(self) -> date | None:
         """Return the local date represented by the current snapshot."""
-        value = _daily_operation_timeline_attributes(self._controller).get("local_date")
+        source = _daily_operation_timeline_source(self._controller)
+        value = _timeline_read(source, "local_date", _TIMELINE_MISSING)
+        if value is _TIMELINE_MISSING:
+            value = _daily_operation_timeline_attributes(self._controller).get(
+                "local_date"
+            )
+        if isinstance(value, date) and not isinstance(value, datetime):
+            return value
         if not isinstance(value, str):
             return None
         try:
@@ -2120,11 +2175,24 @@ class DailyOperationTimelineSensor(SensorEntity):
     @property
     def extra_state_attributes(self) -> dict[str, object]:
         """Return the bounded JSON-safe DTO consumed by the frontend."""
-        return _daily_operation_timeline_attributes(self._controller)
+        manager = _daily_operation_timeline_source(self._controller)
+        revision = _timeline_read(manager, "revision", _TIMELINE_MISSING)
+        if (
+            revision is not _TIMELINE_MISSING
+            and self._attributes_cache is not None
+            and self._attributes_cache_revision == revision
+        ):
+            return self._attributes_cache
+        attributes = _daily_operation_timeline_attributes(self._controller)
+        if revision is not _TIMELINE_MISSING:
+            self._attributes_cache_revision = revision
+            self._attributes_cache = attributes
+        return attributes
 
     async def async_added_to_hass(self) -> None:
         """Subscribe to an optional manager/controller listener."""
         await super().async_added_to_hass()
+        self.async_on_remove(self._cancel_timeline_publish)
         await self._async_subscribe_to_timeline()
 
     async def _async_subscribe_to_timeline(self) -> None:
@@ -2164,14 +2232,12 @@ class DailyOperationTimelineSensor(SensorEntity):
                     self.async_on_remove(unsubscribe)
                 return
 
-    def _handle_timeline_update(self, *_args: Any, **_kwargs: Any) -> None:
-        """Safely request a state publication after a manager event."""
+    def _publish_timeline_update(self) -> None:
+        """Publish the latest cached snapshot, if the entity is still alive."""
+        self._timeline_publish_handle = None
         if getattr(self, "hass", None) is None:
             return
-        now = time.monotonic()
-        if now - self._last_event_update_at < _DAILY_OPERATION_EVENT_THROTTLE_S:
-            return
-        self._last_event_update_at = now
+        self._last_event_update_at = time.monotonic()
         try:
             # schedule_update_ha_state is safe when a manager callback happens
             # from a worker thread; HA reads the DTO later on its event loop.
@@ -2183,6 +2249,32 @@ class DailyOperationTimelineSensor(SensorEntity):
                 self.async_write_ha_state()
             except (AttributeError, RuntimeError, TypeError):
                 _LOGGER.debug("Unable to publish daily operation timeline update")
+
+    def _handle_timeline_update(self, *_args: Any, **_kwargs: Any) -> None:
+        """Coalesce continuous activity and publish structural events now."""
+        if getattr(self, "hass", None) is None:
+            return
+        manager = _daily_operation_timeline_source(self._controller)
+        immediate = bool(_timeline_read(manager, "last_notification_immediate", False))
+        now = time.monotonic()
+        if immediate:
+            self._cancel_timeline_publish()
+            self._publish_timeline_update()
+            return
+
+        remaining = _DAILY_OPERATION_EVENT_THROTTLE_S - (
+            now - self._last_event_update_at
+        )
+        if remaining <= 0.0:
+            self._cancel_timeline_publish()
+            self._publish_timeline_update()
+            return
+        if self._timeline_publish_handle is None:
+            loop = getattr(self.hass, "loop", None)
+            if loop is not None:
+                self._timeline_publish_handle = loop.call_later(
+                    remaining, self._publish_timeline_update
+                )
 
     @property
     def device_info(self):

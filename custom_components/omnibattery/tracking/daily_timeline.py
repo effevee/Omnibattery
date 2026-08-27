@@ -19,9 +19,11 @@ import inspect
 import json
 import logging
 import math
+from collections import deque
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta, timezone
+from time import monotonic
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -49,6 +51,9 @@ TIMELINE_SCHEMA_VERSION = DAILY_TIMELINE_SCHEMA_VERSION
 TIMELINE_STORE_VERSION = DAILY_TIMELINE_STORE_VERSION
 DAILY_TIMELINE_INTERVAL_COUNT = INTERVAL_COUNT
 DAILY_TIMELINE_INTERVAL_MINUTES = INTERVAL_MINUTES
+# A full minute bounds continuous-activity persistence to one Store write per
+# minute while still keeping structural changes on the immediate path.
+DEFAULT_TIMELINE_DEBOUNCE_SECONDS = 60.0
 
 # Names shared with the pure ``pricing.daily_timeline`` DTO.  They are copied
 # here intentionally: this runtime module can be integrated before the pricing
@@ -593,6 +598,14 @@ class DailyOperationTimelineSnapshot(Mapping[str, Any]):
     interval_grid: Mapping[str, Any] = field(default_factory=dict)
     extended_horizon: Mapping[str, Any] = field(default_factory=dict)
     extended_projection: tuple[Mapping[str, Any], ...] = ()
+    revision: int = 0
+    snapshot_build_count: int = 0
+    notification_count: int = 0
+    save_count: int = 0
+    snapshot_age_s: float | None = None
+    last_save_age_s: float | None = None
+    publications_last_minute: int = 0
+    writes_last_minute: int = 0
 
     @classmethod
     def from_dict(cls, payload: Mapping[str, Any]) -> DailyOperationTimelineSnapshot:
@@ -619,6 +632,14 @@ class DailyOperationTimelineSnapshot(Mapping[str, Any]):
                 for item in (payload.get("extended_projection") or ())
                 if isinstance(item, Mapping)
             ),
+            revision=int(payload.get("revision", 0)),
+            snapshot_build_count=int(payload.get("snapshot_build_count", 0)),
+            notification_count=int(payload.get("notification_count", 0)),
+            save_count=int(payload.get("save_count", 0)),
+            snapshot_age_s=_finite_non_negative(payload.get("snapshot_age_s")),
+            last_save_age_s=_finite_non_negative(payload.get("last_save_age_s")),
+            publications_last_minute=int(payload.get("publications_last_minute", 0)),
+            writes_last_minute=int(payload.get("writes_last_minute", 0)),
         )
 
     def as_dict(self) -> dict[str, Any]:
@@ -642,6 +663,14 @@ class DailyOperationTimelineSnapshot(Mapping[str, Any]):
                 "interval_grid": dict(self.interval_grid),
                 "extended_horizon": dict(self.extended_horizon),
                 "extended_projection": list(self.extended_projection),
+                "revision": self.revision,
+                "snapshot_build_count": self.snapshot_build_count,
+                "notification_count": self.notification_count,
+                "save_count": self.save_count,
+                "snapshot_age_s": self.snapshot_age_s,
+                "last_save_age_s": self.last_save_age_s,
+                "publications_last_minute": self.publications_last_minute,
+                "writes_last_minute": self.writes_last_minute,
             }
         )
 
@@ -764,7 +793,7 @@ class DailyOperationTimelineManager:
         store: Any = None,
         now_provider: Callable[[], datetime] | datetime | None = None,
         clock: Callable[[], datetime] | datetime | None = None,
-        debounce_seconds: float = 1.0,
+        debounce_seconds: float = DEFAULT_TIMELINE_DEBOUNCE_SECONDS,
     ) -> None:
         self._hass = hass
         self._config_entry = config_entry
@@ -787,8 +816,14 @@ class DailyOperationTimelineManager:
         else:
             self._now_provider = self._default_now
 
-        parsed_debounce = _finite_non_negative(debounce_seconds, 1.0)
-        self._debounce_seconds = parsed_debounce if parsed_debounce is not None else 1.0
+        parsed_debounce = _finite_non_negative(
+            debounce_seconds, DEFAULT_TIMELINE_DEBOUNCE_SECONDS
+        )
+        self._debounce_seconds = (
+            parsed_debounce
+            if parsed_debounce is not None
+            else DEFAULT_TIMELINE_DEBOUNCE_SECONDS
+        )
         self._save_handle: asyncio.TimerHandle | None = None
         self._save_task: asyncio.Task | None = None
         self._save_revision = 0
@@ -833,6 +868,19 @@ class DailyOperationTimelineManager:
             "consumption_fallback_reason": None,
             "operation_plan": None,
         }
+        self._revision = 0
+        self._snapshot_cache_revision = -1
+        self._snapshot_cache: dict[str, Any] | None = None
+        self._snapshot_build_count = 0
+        self._last_snapshot_monotonic: float | None = None
+        self._notification_count = 0
+        self._last_notification_monotonic: float | None = None
+        self._notification_times: deque[float] = deque(maxlen=256)
+        self._save_count = 0
+        self._last_save_monotonic: float | None = None
+        self._save_times: deque[float] = deque(maxlen=256)
+        self._last_notification_kind = "activity"
+        self._last_notification_immediate = False
         self._configuration_fingerprint = self.configuration_fingerprint()
         self._reset_arrays(self._local_date)
 
@@ -872,6 +920,66 @@ class DailyOperationTimelineManager:
     def closed_intervals(self) -> tuple[bool, ...]:
         return tuple(self._closed)
 
+    @property
+    def revision(self) -> int:
+        """Return the monotonic revision of the public timeline contract."""
+        return self._revision
+
+    @property
+    def snapshot_build_count(self) -> int:
+        """Return the number of expensive public snapshot builds."""
+        return self._snapshot_build_count
+
+    @property
+    def notification_count(self) -> int:
+        """Return the number of listener publications since setup."""
+        return self._notification_count
+
+    @property
+    def save_count(self) -> int:
+        """Return the number of completed Store writes since setup."""
+        return self._save_count
+
+    @property
+    def snapshot_age_s(self) -> float | None:
+        """Return the age of the last expensive snapshot build."""
+        if self._last_snapshot_monotonic is None:
+            return None
+        return max(0.0, monotonic() - self._last_snapshot_monotonic)
+
+    @property
+    def last_save_age_s(self) -> float | None:
+        """Return the age of the last successful Store write."""
+        if self._last_save_monotonic is None:
+            return None
+        return max(0.0, monotonic() - self._last_save_monotonic)
+
+    @staticmethod
+    def _events_last_minute(events: deque[float]) -> int:
+        """Return a bounded event count for the rolling one-minute window."""
+        now = monotonic()
+        while events and now - events[0] > 60.0:
+            events.popleft()
+        return len(events)
+
+    @property
+    def publications_last_minute(self) -> int:
+        """Return timeline listener publications in the last minute."""
+        return self._events_last_minute(self._notification_times)
+
+    @property
+    def writes_last_minute(self) -> int:
+        """Return successful timeline Store writes in the last minute."""
+        return self._events_last_minute(self._save_times)
+
+    @property
+    def last_notification_kind(self) -> str:
+        return self._last_notification_kind
+
+    @property
+    def last_notification_immediate(self) -> bool:
+        return self._last_notification_immediate
+
     def async_add_listener(self, listener: Callable[..., Any]) -> Callable[[], None]:
         """Register a lightweight synchronous listener for entity updates."""
         if not callable(listener):
@@ -893,10 +1001,23 @@ class DailyOperationTimelineManager:
 
     add_listener = async_add_listener
 
+    def _mark_public_change(
+        self, kind: str = "activity", *, immediate: bool = False
+    ) -> None:
+        """Invalidate the public snapshot only after a material mutation."""
+        self._revision += 1
+        self._snapshot_cache_revision = -1
+        self._snapshot_cache = None
+        self._last_notification_kind = kind
+        self._last_notification_immediate = immediate
+
     def _notify_listeners(self) -> None:
         if self._update_batch_depth > 0:
             self._update_notification_pending = True
             return
+        self._notification_count += 1
+        self._last_notification_monotonic = monotonic()
+        self._notification_times.append(self._last_notification_monotonic)
         for listener in tuple(self._listeners):
             try:
                 listener(self)
@@ -973,7 +1094,19 @@ class DailyOperationTimelineManager:
         if delay is not None:
             self._delay_info = self._safe_metadata(delay)
         if freshness is not None:
-            self._freshness_info = self._safe_metadata(freshness)
+            incoming_freshness = self._safe_metadata(freshness)
+            # ``updated_at`` is useful in the DTO, but the control loop calls
+            # this method every cycle. Keep the previous timestamp while the
+            # freshness state is unchanged so it does not invalidate the
+            # public snapshot on every tick.
+            if (
+                incoming_freshness.get("state")
+                == self._freshness_info.get("state")
+                and "updated_at" in incoming_freshness
+                and "updated_at" in self._freshness_info
+            ):
+                incoming_freshness["updated_at"] = self._freshness_info["updated_at"]
+            self._freshness_info = incoming_freshness
         if restoration is not None:
             restore = self._safe_metadata(restoration)
             status = restore.get("status")
@@ -1003,7 +1136,11 @@ class DailyOperationTimelineManager:
         changed = old != current
         if changed:
             self._dirty = True
-            self.request_save()
+            stale_changed = old[6] != self._stale or old[7] != self._stale_reason
+            restoration_changed = old[3] != self._restore_status
+            kind = "stale" if stale_changed else "recovery" if restoration_changed else "plan"
+            self._mark_public_change(kind, immediate=True)
+            self.request_save(immediate=True)
             self._notify_listeners()
         return changed
 
@@ -1220,7 +1357,10 @@ class DailyOperationTimelineManager:
             return False
         index = self._index_for_datetime(current)
         progress = self._progress_for_datetime(current)
-        changed = index != self._current_index or progress != self._current_progress
+        # Progress is deliberately not a public revision: it changes every
+        # control tick and would defeat the snapshot cache. The interval index
+        # and closure state are material timeline changes.
+        changed = index != self._current_index
         self._current_index = index
         self._current_progress = progress
         self._last_clock_timestamp = timestamp
@@ -1454,6 +1594,7 @@ class DailyOperationTimelineManager:
                 consumption_coverage[current_index] = min(float(INTERVAL_SECONDS), parsed)
                 solar_coverage[current_index] = min(float(INTERVAL_SECONDS), parsed)
 
+        sources_before = tuple(self._sources.items())
         changed = day_changed
         changed |= self._merge_actual_series(
             consumption_values,
@@ -1478,10 +1619,17 @@ class DailyOperationTimelineManager:
         if solar_fallback:
             self._sources["solar_fallback_reason"] = solar_fallback
 
+        closed_before_clock = tuple(self._closed)
         changed |= self._advance_clock(current)
+        interval_closed = closed_before_clock != tuple(self._closed)
+        changed |= sources_before != tuple(self._sources.items())
         if changed:
             self._dirty = True
-            self.request_save()
+            self._mark_public_change(
+                "rollover" if day_changed else "activity",
+                immediate=day_changed or interval_closed,
+            )
+            self.request_save(immediate=day_changed or interval_closed)
             self._notify_listeners()
         return bool(changed)
 
@@ -1591,11 +1739,14 @@ class DailyOperationTimelineManager:
         quarter remain distinguishable through their durations).
         """
         event_time = self._as_local_datetime(at or timestamp)
+        day_changed = False
         if event_time.date() != self._local_date:
             if event_time.date() != self._now().date():
                 return False
-            self._ensure_current_day(event_time)
-        self._advance_clock(event_time)
+            day_changed = self._ensure_current_day(event_time)
+        closed_before_clock = tuple(self._closed)
+        clock_changed = self._advance_clock(event_time)
+        interval_closed = closed_before_clock != tuple(self._closed)
         index = self._index_for_datetime(event_time)
         if interval_index is not None:
             try:
@@ -1627,6 +1778,7 @@ class DailyOperationTimelineManager:
             if context_mask is not None
             else self._context_mask_from_decision(mapping)
         )
+        mode_before = self._mode
         mode = _normalize_mode(mapping.get("mode", kwargs.get("mode", self._mode)))
         self._mode = mode if mode != "unknown" else self._mode
         if mode == "dynamic_pricing" or mode == "dynamic":
@@ -1850,10 +2002,17 @@ class DailyOperationTimelineManager:
             cell.planned_delay_until = cell.actual_delay_until
             cell.planned_source = cell.actual_source
             cell.planned_slot = cell.actual_slot
-        changed = old != cell.as_dict()
+        changed = old != cell.as_dict() or clock_changed or day_changed
         if changed:
             self._dirty = True
-            self.request_save()
+            mode_changed = mode_before != self._mode
+            self._mark_public_change(
+                "mode" if mode_changed else "rollover" if day_changed else "activity",
+                immediate=mode_changed or day_changed or interval_closed,
+            )
+            self.request_save(
+                immediate=mode_changed or day_changed or interval_closed
+            )
             self._notify_listeners()
         return changed
 
@@ -2065,10 +2224,17 @@ class DailyOperationTimelineManager:
         if projection is None:
             projection = kwargs.get("future_projection", kwargs.get("plan"))
         current = self._as_local_datetime(now or at)
+        day_changed = False
         if current.date() != self._local_date:
-            self._ensure_current_day(current)
-        self._advance_clock(current)
+            day_changed = self._ensure_current_day(current)
+        clock_changed = self._advance_clock(current)
         index = self._current_index
+        old_projection = self._projection_signature()
+        old_sources = tuple(self._sources.items())
+        old_plan_evaluated_at = self._plan_evaluated_at
+        old_mode = self._mode
+        old_stale = self._stale
+        old_stale_reason = self._stale_reason
         mapping = _object_mapping(projection)
         selected_mode = mode
         if selected_mode is None and mapping is not None:
@@ -2108,7 +2274,6 @@ class DailyOperationTimelineManager:
         if kwargs.get("source") is not None:
             self._sources["operation_plan"] = _safe_text(kwargs["source"], max_length=128)
 
-        old = self._projection_signature()
         self._extended_projection = []
         for cell_index in range(index, INTERVAL_COUNT):
             if self._closed[cell_index]:
@@ -2286,10 +2451,30 @@ class DailyOperationTimelineManager:
             if self._sources.get("operation_plan") is None:
                 self._sources["operation_plan"] = "projection"
 
-        self._dirty = True
-        changed = old != self._projection_signature()
-        self.request_save()
+        projection_changed = old_projection != self._projection_signature()
+        if not projection_changed:
+            # The planner commonly stamps an otherwise identical projection
+            # with ``now``. That timestamp is diagnostic metadata, not a new
+            # plan, and must not turn the control loop into a Store writer or
+            # force a dashboard publication every time it is evaluated.
+            self._plan_evaluated_at = old_plan_evaluated_at
+        plan_timestamp_changed = old_plan_evaluated_at != self._plan_evaluated_at
+        changed = (
+            day_changed
+            or clock_changed
+            or projection_changed
+            or plan_timestamp_changed
+            or old_sources != tuple(self._sources.items())
+        )
         if changed:
+            self._dirty = True
+            mode_changed = old_mode != self._mode
+            stale_changed = old_stale != self._stale or old_stale_reason != self._stale_reason
+            self._mark_public_change(
+                "mode" if mode_changed else "stale" if stale_changed else "plan",
+                immediate=True,
+            )
+            self.request_save(immediate=True)
             self._notify_listeners()
         return changed
 
@@ -2324,7 +2509,6 @@ class DailyOperationTimelineManager:
                 for item in self._extended_projection
             ),
             self._mode,
-            self._plan_evaluated_at,
             self._stale,
             self._stale_reason,
         )
@@ -2613,6 +2797,7 @@ class DailyOperationTimelineManager:
         self._dirty = False
         self._last_error = None
         self._restore_status = "restored"
+        self._mark_public_change("recovery", immediate=True)
         if projection_configuration_changed:
             # Rewrite the stored projection identity so later reloads do not
             # keep treating this otherwise restored diary as stale.
@@ -2631,7 +2816,8 @@ class DailyOperationTimelineManager:
         self._clear_projection()
         self._configuration_fingerprint = current
         self._last_error = None
-        self.request_save()
+        self._mark_public_change("plan", immediate=True)
+        self.request_save(immediate=True)
         self._notify_listeners()
         return True
 
@@ -2657,6 +2843,9 @@ class DailyOperationTimelineManager:
             self._dirty = True
             self._save_reschedule_requested = True
         self._last_error = None
+        self._save_count += 1
+        self._last_save_monotonic = monotonic()
+        self._save_times.append(self._last_save_monotonic)
         return True
 
     def _reschedule_after_save(self, _task: asyncio.Task) -> None:
@@ -2802,7 +2991,29 @@ class DailyOperationTimelineManager:
         # but a read never closes an interval.  At midnight retain the last
         # coherent day until a mutating control refresh performs the rollover.
         if current.date() == self._local_date:
-            self._advance_clock(current, close_elapsed=False)
+            if self._advance_clock(current, close_elapsed=False):
+                self._mark_public_change("activity")
+        if (
+            self._snapshot_cache is not None
+            and self._snapshot_cache_revision == self._revision
+        ):
+            # Progress is intentionally excluded from the material revision,
+            # but it is still cheap and useful to keep the cached scalar fresh
+            # without rebuilding any of the 96-cell arrays.
+            self._snapshot_cache["current_progress"] = round(
+                self._current_progress, 6
+            )
+            self._snapshot_cache["notification_count"] = self._notification_count
+            self._snapshot_cache["save_count"] = self._save_count
+            self._snapshot_cache["snapshot_age_s"] = self.snapshot_age_s
+            self._snapshot_cache["last_save_age_s"] = self.last_save_age_s
+            self._snapshot_cache["publications_last_minute"] = (
+                self.publications_last_minute
+            )
+            self._snapshot_cache["writes_last_minute"] = self.writes_last_minute
+            if as_dto:
+                return DailyOperationTimelineSnapshot.from_dict(self._snapshot_cache)
+            return self._snapshot_cache
         self._generated_at = current.isoformat()
         action_durations = self._public_action_durations()
         actual_coverage = [
@@ -2977,6 +3188,14 @@ class DailyOperationTimelineManager:
             "interval_minutes": INTERVAL_MINUTES,
             "interval_count": INTERVAL_COUNT,
             "generated_at": current.isoformat(),
+            "revision": self._revision,
+            "snapshot_build_count": self._snapshot_build_count + 1,
+            "notification_count": self._notification_count,
+            "save_count": self._save_count,
+            "snapshot_age_s": 0.0,
+            "last_save_age_s": self.last_save_age_s,
+            "publications_last_minute": self.publications_last_minute,
+            "writes_last_minute": self.writes_last_minute,
             "plan_evaluated_at": self._plan_evaluated_at,
             "current_index": self._current_index,
             "current_progress": round(self._current_progress, 6),
@@ -3062,6 +3281,11 @@ class DailyOperationTimelineManager:
             "extended_projection": list(self._extended_projection),
         }
         safe_payload = _json_safe(payload)
+        self._snapshot_cache = safe_payload
+        self._snapshot_cache_revision = self._revision
+        self._snapshot_build_count += 1
+        self._last_snapshot_monotonic = monotonic()
+        self._snapshot_cache["snapshot_age_s"] = 0.0
         if as_dto:
             return DailyOperationTimelineSnapshot.from_dict(safe_payload)
         return safe_payload
@@ -3089,6 +3313,7 @@ __all__ = [
     "DAILY_OPERATION_TIMELINE_STORE_VERSION",
     "DAILY_TIMELINE_INTERVAL_COUNT",
     "DAILY_TIMELINE_INTERVAL_MINUTES",
+    "DEFAULT_TIMELINE_DEBOUNCE_SECONDS",
     "DAILY_TIMELINE_SCHEMA_VERSION",
     "DAILY_TIMELINE_STORE_KEY",
     "DAILY_TIMELINE_STORE_VERSION",

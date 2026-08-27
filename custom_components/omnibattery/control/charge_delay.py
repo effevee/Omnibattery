@@ -90,6 +90,30 @@ class ChargeDelayManager:
         )
         self._save_task: asyncio.Task | None = None
 
+    def _create_background_task(self, coroutine, name: str) -> asyncio.Task | None:
+        """Create persistence work through the owning entry controller."""
+        create = getattr(self._controller, "_create_entry_background_task", None)
+        if callable(create):
+            task = create(coroutine, name)
+        else:
+            create = getattr(self._hass, "async_create_task", None)
+            if callable(create):
+                try:
+                    task = create(coroutine, name=name)
+                except TypeError:
+                    task = create(coroutine)
+            else:
+                try:
+                    task = asyncio.get_running_loop().create_task(coroutine, name=name)
+                except TypeError:
+                    task = asyncio.get_running_loop().create_task(coroutine)
+        if isinstance(task, asyncio.Task):
+            return task
+        close = getattr(coroutine, "close", None)
+        if callable(close):
+            close()
+        return None
+
     async def load_state(self) -> None:
         """Restore same-day charge delay latch state from storage."""
         ctrl = self._controller
@@ -125,7 +149,9 @@ class ChargeDelayManager:
 
         if self._save_task and not self._save_task.done():
             self._save_task.cancel()
-        self._save_task = asyncio.create_task(self._deferred_save())
+        self._save_task = self._create_background_task(
+            self._deferred_save(), "omnibattery_charge_delay_save"
+        )
 
     async def _deferred_save(self) -> None:
         """Let the current control-cycle state settle before saving."""
@@ -255,7 +281,10 @@ class ChargeDelayManager:
         _LOGGER.info("Charge Delay: Unlocked (target_soc=%d%%) - charging now allowed", target_soc)
         # Persist unlock state if on weekly charge day
         if ctrl._weekly_charge_mgr.is_active():
-            asyncio.create_task(ctrl._weekly_charge_mgr.save_state())
+            self._create_background_task(
+                ctrl._weekly_charge_mgr.save_state(),
+                "omnibattery_weekly_charge_state_save",
+            )
         return False
 
     def refresh_setpoint_blocks(self) -> None:

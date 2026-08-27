@@ -682,6 +682,46 @@ def test_snapshot_poll_does_not_close_a_partial_previous_interval():
     assert after["operations"]["closed"][40] is True
 
 
+def test_snapshot_cache_reuses_same_revision_and_only_refreshes_progress():
+    clock = MutableClock(datetime(2026, 8, 23, 10, 7, tzinfo=MADRID))
+    manager = _manager(clock)
+
+    first = manager.build_public_snapshot()
+    assert manager.snapshot_build_count == 1
+    first_progress = first["current_progress"]
+    first_revision = manager.revision
+
+    clock.value = datetime(2026, 8, 23, 10, 10, tzinfo=MADRID)
+    second = manager.build_public_snapshot()
+
+    assert second is first
+    assert manager.revision == first_revision
+    assert manager.snapshot_build_count == 1
+    assert second["current_progress"] > first_progress
+
+    manager.record_runtime_decision(action_mask=ACTION_GRID_CHARGE)
+    third = manager.build_public_snapshot()
+    assert third is not second
+    assert manager.snapshot_build_count == 2
+
+
+def test_identical_projection_refresh_does_not_publish_only_new_evaluation_time():
+    clock = MutableClock(datetime(2026, 8, 23, 10, 7, tzinfo=MADRID))
+    manager = _manager(clock, mode="normal")
+    projection = [{"index": 42, "action_mask": ACTION_GRID_CHARGE}]
+
+    assert manager.rebuild_future_projection(
+        projection, mode="normal", evaluated_at=clock.value
+    ) is True
+    revision = manager.revision
+
+    clock.value = datetime(2026, 8, 23, 10, 8, tzinfo=MADRID)
+    assert manager.rebuild_future_projection(
+        projection, mode="normal", evaluated_at=clock.value
+    ) is False
+    assert manager.revision == revision
+
+
 def test_out_of_order_callback_cannot_reopen_or_move_the_clock_backwards():
     clock = MutableClock(datetime(2026, 8, 23, 10, 20, tzinfo=MADRID))
     manager = _manager(clock)
