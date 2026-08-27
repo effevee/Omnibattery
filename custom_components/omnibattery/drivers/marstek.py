@@ -18,10 +18,17 @@ duplicated logic.
 from __future__ import annotations
 
 import asyncio
+from copy import deepcopy
+from dataclasses import replace
 import logging
 from typing import Optional
 
-from ..const import MESSAGE_WAIT_MS, READ_TIMEOUT_S, REGISTER_MAP
+from ..const import (
+    MESSAGE_WAIT_MS,
+    READ_TIMEOUT_S,
+    REGISTER_MAP,
+    max_power_for_battery_version,
+)
 from ..infra.modbus_client import MarstekModbusClient, decode_registers
 from .base import (
     BatteryDriver,
@@ -123,15 +130,27 @@ def _load_definitions(version: str) -> dict[str, list[dict]]:
         binary_sensor = BINARY_SENSOR_DEFINITIONS
         button = BUTTON_DEFINITIONS
 
-    return {
+    # Venus D number definitions contain mutable slider metadata.  Each Venus D
+    # driver needs its own copy because its maxima can change after EMS firmware
+    # detection.  Preserve the established shared-list identity for other models.
+    if version == "vD":
+        number = deepcopy(number)
+    definitions = {
         "sensor": sensor,
         "number": number,
         "select": select,
         "switch": switch,
         "binary_sensor": binary_sensor,
         "button": button,
-        "all": sensor + number + select + switch + binary_sensor,
     }
+    definitions["all"] = (
+        definitions["sensor"]
+        + definitions["number"]
+        + definitions["select"]
+        + definitions["switch"]
+        + definitions["binary_sensor"]
+    )
+    return definitions
 
 
 def _load_register_blocks(version: str) -> list[dict]:
@@ -167,6 +186,7 @@ class MarstekModbusDriver(BatteryDriver):
         definitions: Optional[list[dict]] = None,
         client: Optional[MarstekModbusClient] = None,
         serial_port: Optional[str] = None,
+        ems_version: object = None,
     ) -> None:
         """Build the driver.
 
@@ -180,6 +200,7 @@ class MarstekModbusDriver(BatteryDriver):
         with version-correct timing.
         """
         self._version = version
+        self._ems_version = ems_version
         self._is_v3_family = version in _V3_FAMILY
         self._slave_id = slave_id
 
@@ -244,6 +265,11 @@ class MarstekModbusDriver(BatteryDriver):
         number_defs = {d.get("key"): d for d in self._definitions["number"]}
         hw_charge_ceiling = int(number_defs.get("max_charge_power", {}).get("max", max_charge_power_w))
         hw_discharge_ceiling = int(number_defs.get("max_discharge_power", {}).get("max", max_discharge_power_w))
+        if version == "vD":
+            firmware_ceiling = max_power_for_battery_version(version, ems_version)
+            hw_charge_ceiling = min(hw_charge_ceiling, firmware_ceiling)
+            hw_discharge_ceiling = min(hw_discharge_ceiling, firmware_ceiling)
+            self._set_power_definition_ceiling(firmware_ceiling)
         # Register floor (v2/v3 = 800 W, vA/vD = 0): the minimum reliable operating
         # power the thermal derate must not command below. 0 when absent.
         hw_charge_floor = int(number_defs.get("max_charge_power", {}).get("min", 0))
@@ -273,6 +299,39 @@ class MarstekModbusDriver(BatteryDriver):
             # write + the inverter engaging settles slower than v2's 50 ms/frame.
             actuator_latency_s=0.8 if self._is_v3_family else 0.3,
         )
+
+    def _set_power_definition_ceiling(self, ceiling: int) -> None:
+        """Update the four Venus D power-number bounds in this driver instance."""
+        for definition in self._definitions["number"]:
+            if definition.get("key") in {
+                "set_charge_power",
+                "set_discharge_power",
+                "max_charge_power",
+                "max_discharge_power",
+            }:
+                definition["max"] = int(ceiling)
+
+    def update_ems_version(self, ems_version: object) -> bool:
+        """Apply a newly detected Venus D EMS firmware power envelope.
+
+        Returns True when the effective hardware ceiling changed.
+        """
+        if self._version != "vD":
+            return False
+        ceiling = max_power_for_battery_version(self._version, ems_version)
+        self._ems_version = ems_version
+        changed = (
+            self._capabilities.max_charge_power_w != ceiling
+            or self._capabilities.max_discharge_power_w != ceiling
+        )
+        self._set_power_definition_ceiling(ceiling)
+        if changed:
+            self._capabilities = replace(
+                self._capabilities,
+                max_charge_power_w=ceiling,
+                max_discharge_power_w=ceiling,
+            )
+        return changed
 
     # --- identity -----------------------------------------------------------
 
@@ -550,6 +609,11 @@ class MarstekModbusDriver(BatteryDriver):
         conversion only changes what is sent to the battery.
         """
         value = int(value)
+        if self._version == "vD" and key in (
+            "max_charge_power",
+            "max_discharge_power",
+        ):
+            return min(value, self._capabilities.max_charge_power_w)
         if self._version not in ("v2", "v3"):
             return value
         if key not in ("max_charge_power", "max_discharge_power"):
@@ -718,18 +782,18 @@ class MarstekModbusDriver(BatteryDriver):
         return value == _RS485_ENABLE
 
     @classmethod
-    async def probe(cls, host: str, port: int, version: str, slave_id: int = 1, serial_port: Optional[str] = None) -> bool:
-        """Test whether a Marstek battery responds for this version.
-
-        Creates a temporary client, reads the SOC register, then tears it down.
-        Returns True if a value was read, False on any failure (bad version,
-        connection refused, read timeout, etc.). Used by the config / options flow
-        to validate host/port/version before committing them. ``serial_port``, when
-        set, probes over Modbus RTU instead of TCP (discussion #350).
-        """
+    async def probe_details(
+        cls,
+        host: str,
+        port: int,
+        version: str,
+        slave_id: int = 1,
+        serial_port: Optional[str] = None,
+    ) -> tuple[bool, int | None]:
+        """Probe a Marstek and also return its EMS firmware when available."""
         soc_register = REGISTER_MAP.get(version, {}).get("battery_soc")
         if soc_register is None:
-            return False
+            return False, None
         client = MarstekModbusClient(
             host, port,
             message_wait_ms=MESSAGE_WAIT_MS.get(version, 50),
@@ -740,14 +804,36 @@ class MarstekModbusDriver(BatteryDriver):
         )
         try:
             if not await client.async_connect():
-                return False
+                return False, None
             value = await client.async_read_register(soc_register, "uint16")
-            return value is not None
+            if value is None:
+                return False, None
+            ems_version = (
+                await client.async_read_register(30200, "uint16")
+                if version == "vD"
+                else None
+            )
+            return True, int(ems_version) if ems_version is not None else None
         except Exception as e:
             _LOGGER.debug("Probe of %s:%s (%s) failed: %s", host, port, version, e)
-            return False
+            return False, None
         finally:
             try:
                 await client.async_close()
             except Exception:
                 pass
+
+    @classmethod
+    async def probe(cls, host: str, port: int, version: str, slave_id: int = 1, serial_port: Optional[str] = None) -> bool:
+        """Test whether a Marstek battery responds for this version.
+
+        Creates a temporary client, reads the SOC register, then tears it down.
+        Returns True if a value was read, False on any failure (bad version,
+        connection refused, read timeout, etc.). Used by the config / options flow
+        to validate host/port/version before committing them. ``serial_port``, when
+        set, probes over Modbus RTU instead of TCP (discussion #350).
+        """
+        ok, _ems_version = await cls.probe_details(
+            host, port, version, slave_id, serial_port
+        )
+        return ok

@@ -9362,6 +9362,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             max_discharge_power=battery_config["max_discharge_power"],
             device_max_charge_power=battery_config.get("device_max_charge_power"),
             device_max_discharge_power=battery_config.get("device_max_discharge_power"),
+            ems_version=battery_config.get("ems_version"),
             max_soc=battery_config["max_soc"],
             min_soc=battery_config["min_soc"],
             charge_hysteresis_percent=battery_config.get(

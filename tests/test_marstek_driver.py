@@ -18,7 +18,10 @@ from custom_components.omnibattery.drivers import (
     DriverCapabilities,
     MarstekModbusDriver,
 )
-from custom_components.omnibattery.const import REGISTER_MAP
+from custom_components.omnibattery.const import (
+    REGISTER_MAP,
+    max_power_for_battery_version,
+)
 
 
 def _fake_client():
@@ -29,6 +32,8 @@ def _fake_client():
 
 
 def _driver(version="v3", definitions=None, client=None, **kw):
+    if version == "vD" and "ems_version" not in kw:
+        kw["ems_version"] = 149
     return MarstekModbusDriver(
         "1.2.3.4", 502, version,
         definitions=definitions or [],
@@ -100,6 +105,43 @@ def test_capability_envelope_uses_hardware_ceiling_not_user_limit():
     )
     assert drv.capabilities.max_charge_power_w == 2500
     assert drv.capabilities.max_discharge_power_w == 2500
+
+
+@pytest.mark.parametrize("ems_version,expected", [
+    (None, 2200),
+    (147, 2200),
+    (148, 2200),
+    (149, 2500),
+    (150, 2500),
+])
+def test_venus_d_power_ceiling_depends_on_ems_firmware(ems_version, expected):
+    assert max_power_for_battery_version("vD", ems_version) == expected
+    drv = MarstekModbusDriver(
+        "1.2.3.4", 502, "vD", client=_fake_client(), ems_version=ems_version
+    )
+    assert drv.capabilities.max_charge_power_w == expected
+    assert drv.capabilities.max_discharge_power_w == expected
+    power_defs = {
+        d["key"]: d["max"]
+        for d in drv.number_definitions
+        if d["key"] in {
+            "set_charge_power", "set_discharge_power",
+            "max_charge_power", "max_discharge_power",
+        }
+    }
+    assert set(power_defs.values()) == {expected}
+
+
+def test_venus_d_power_ceiling_updates_when_firmware_is_detected():
+    drv = MarstekModbusDriver("1.2.3.4", 502, "vD", client=_fake_client())
+    assert drv.capabilities.max_charge_power_w == 2200
+
+    assert drv.update_ems_version(149) is True
+    assert drv.capabilities.max_charge_power_w == 2500
+    assert {d["max"] for d in drv.number_definitions if "power" in d["key"]} == {2500}
+
+    assert drv.update_ems_version(147) is True
+    assert drv.capabilities.max_discharge_power_w == 2200
 
 
 def test_mppt_pv_capability_derived_from_definitions():
@@ -832,6 +874,52 @@ async def test_probe_returns_true_when_soc_readable(monkeypatch):
 
     assert await MarstekModbusDriver.probe("1.2.3.4", 502, "v2") is True
     client.async_read_register.assert_awaited_once()
+
+
+async def test_probe_details_returns_ems_firmware(monkeypatch):
+    client = AsyncMock()
+    client.async_connect = AsyncMock(return_value=True)
+    client.async_read_register = AsyncMock(side_effect=[47, 149])
+    client.async_close = AsyncMock()
+    monkeypatch.setattr(
+        "custom_components.omnibattery.drivers.marstek.MarstekModbusClient",
+        lambda *a, **kw: client,
+    )
+
+    assert await MarstekModbusDriver.probe_details(
+        "1.2.3.4", 502, "vD"
+    ) == (True, 149)
+
+
+@pytest.mark.parametrize("ems_version,expected", [(147, 2200), (149, 2500)])
+async def test_config_flow_uses_detected_venus_d_firmware(
+    monkeypatch, ems_version, expected
+):
+    from custom_components.omnibattery.config_flow import MarstekVenusConfigFlow
+
+    monkeypatch.setattr(
+        MarstekModbusDriver,
+        "probe_details",
+        AsyncMock(return_value=(True, ems_version)),
+    )
+    flow = MarstekVenusConfigFlow()
+    flow.config_data = {"num_batteries": 1}
+
+    form = await flow.async_step_battery_connection({
+        "name": "Venus D",
+        "host": "1.2.3.4",
+        "port": 502,
+        "slave_id": 1,
+        "battery_version": "vD",
+    })
+
+    fields = {
+        marker.schema: selector
+        for marker, selector in form["data_schema"].schema.items()
+    }
+    assert flow._current_battery_data["ems_version"] == ems_version
+    assert fields["max_charge_power"].config["max"] == expected
+    assert fields["max_discharge_power"].config["max"] == expected
 
 
 async def test_probe_returns_false_when_connection_fails(monkeypatch):

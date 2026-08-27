@@ -9,6 +9,7 @@ from custom_components.omnibattery import _device_owns_initial_config
 from custom_components.omnibattery.infra.coordinator import (
     MarstekVenusDataUpdateCoordinator,
 )
+from custom_components.omnibattery.drivers.marstek import MarstekModbusDriver
 
 
 def test_only_zendure_owns_initial_config():
@@ -131,6 +132,35 @@ def test_power_limits_expose_normalized_layers_and_legacy_aliases():
     assert coordinator.configured_max_charge_power == 3000
     assert coordinator.effective_max_charge_power == 2400
 
+
+def test_venus_d_runtime_firmware_sync_clamps_legacy_config():
+    coordinator = object.__new__(MarstekVenusDataUpdateCoordinator)
+    coordinator.brand = "marstek"
+    coordinator.battery_version = "vD"
+    coordinator.name = "Venus D"
+    coordinator.ems_version = 149
+    coordinator.driver = MarstekModbusDriver(
+        "1.2.3.4", 502, "vD", client=AsyncMock(), ems_version=149
+    )
+    coordinator.data = {"ems_version": 147}
+    coordinator._device_max_charge_power = 2500
+    coordinator._device_max_discharge_power = 2500
+    coordinator._configured_max_charge_power = 2500
+    coordinator._configured_max_discharge_power = 2500
+    coordinator._effective_max_charge_power = 2500
+    coordinator._effective_max_discharge_power = 2500
+    coordinator.persist_battery_config = Mock()
+
+    coordinator._sync_marstek_ems_power_ceiling()
+
+    assert coordinator.device_max_charge_power == 2200
+    assert coordinator.device_max_discharge_power == 2200
+    assert coordinator.configured_max_charge_power == 2200
+    assert coordinator.configured_max_discharge_power == 2200
+    assert coordinator.effective_max_charge_power == 2200
+    assert coordinator.effective_max_discharge_power == 2200
+    assert call("ems_version", 147) in coordinator.persist_battery_config.call_args_list
+    assert call("max_charge_power", 2200) in coordinator.persist_battery_config.call_args_list
 
 def test_zendure_model_promotion_updates_device_cap_and_persists_model():
     coordinator = object.__new__(MarstekVenusDataUpdateCoordinator)

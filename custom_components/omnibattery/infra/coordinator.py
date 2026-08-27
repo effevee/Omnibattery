@@ -130,6 +130,7 @@ class MarstekVenusDataUpdateCoordinator(DataUpdateCoordinator):
                  battery_manual_mode_enabled: bool = False,
                  device_max_charge_power: int | None = None,
                  device_max_discharge_power: int | None = None,
+                 ems_version: object = None,
                  mac: str | None = None) -> None:
         """Initialize the data update coordinator."""
         super().__init__(
@@ -154,6 +155,7 @@ class MarstekVenusDataUpdateCoordinator(DataUpdateCoordinator):
         self.serial_port = serial_port
         self.consumption_sensor = consumption_sensor
         self.brand = brand
+        self.ems_version = ems_version
         self.zendure_model = zendure_model
         if self.brand in ("zendure", "anker", "hoymiles", "huawei"):
             full_charge_voltage_taper_enabled = False
@@ -325,6 +327,7 @@ class MarstekVenusDataUpdateCoordinator(DataUpdateCoordinator):
                 max_charge_power_w=self.configured_max_charge_power,
                 max_discharge_power_w=self.configured_max_discharge_power,
                 serial_port=self.serial_port,
+                ems_version=self.ems_version,
             )
 
         # Driver capabilities are the fallback physical envelope. Config-flow
@@ -341,6 +344,17 @@ class MarstekVenusDataUpdateCoordinator(DataUpdateCoordinator):
             if device_max_discharge_power is not None
             else self.driver.capabilities.max_discharge_power_w
         )
+        if self.brand == "marstek" and self.battery_version == "vD":
+            # A stale config entry may still carry the former unconditional
+            # 2500 W device cap.  The firmware-aware driver is authoritative.
+            self.device_max_charge_power = min(
+                self.device_max_charge_power,
+                self.driver.capabilities.max_charge_power_w,
+            )
+            self.device_max_discharge_power = min(
+                self.device_max_discharge_power,
+                self.driver.capabilities.max_discharge_power_w,
+            )
         if self.brand == "sessy":
             # Sessy has a fixed asymmetric envelope. Clamp malformed legacy
             # entries (for example the former symmetric 5,000 W default) so
@@ -695,6 +709,50 @@ class MarstekVenusDataUpdateCoordinator(DataUpdateCoordinator):
             old_limit,
             self.effective_max_discharge_power,
         )
+
+    def _sync_marstek_ems_power_ceiling(self) -> None:
+        """Apply the firmware-dependent Venus D power ceiling after polling."""
+        if self.brand != "marstek" or self.battery_version != "vD" or not self.data:
+            return
+        ems_version = self.data.get("ems_version")
+        if ems_version is None:
+            return
+
+        firmware_changed = str(self.ems_version) != str(ems_version)
+        changed = self.driver.update_ems_version(ems_version)
+        ceiling = self.driver.capabilities.max_charge_power_w
+        device_changed = (
+            self.device_max_charge_power != ceiling
+            or self.device_max_discharge_power != ceiling
+        )
+        self.ems_version = ems_version
+        self.device_max_charge_power = ceiling
+        self.device_max_discharge_power = ceiling
+
+        configured_changed = False
+        if self.configured_max_charge_power > ceiling:
+            self.configured_max_charge_power = ceiling
+            configured_changed = True
+        if self.configured_max_discharge_power > ceiling:
+            self.configured_max_discharge_power = ceiling
+            configured_changed = True
+
+        if not (firmware_changed or changed or device_changed or configured_changed):
+            return
+
+        self.persist_battery_config("ems_version", int(ems_version))
+        self.persist_battery_config("device_max_charge_power", ceiling)
+        self.persist_battery_config("device_max_discharge_power", ceiling)
+        if configured_changed:
+            self.persist_battery_config("max_charge_power", self.configured_max_charge_power)
+            self.persist_battery_config("max_discharge_power", self.configured_max_discharge_power)
+        if changed or configured_changed or device_changed:
+            _LOGGER.info(
+                "[%s] Applied Venus D EMS %s power ceiling: %d W",
+                self.name,
+                ems_version,
+                ceiling,
+            )
 
     async def disconnect(self) -> None:
         """Disconnect from the battery via the driver."""
@@ -1140,6 +1198,10 @@ class MarstekVenusDataUpdateCoordinator(DataUpdateCoordinator):
 
         # Update the coordinator's data
         self.data.update(updated_data)
+
+        sync_marstek_ceiling = getattr(self, "_sync_marstek_ems_power_ceiling", None)
+        if sync_marstek_ceiling is not None:
+            sync_marstek_ceiling()
 
         # Zendure names its writable discharge ceiling ``inverseMaxPower``.
         # Treat the reported value like the canonical max_discharge_power used

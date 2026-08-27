@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- **Venus D firmware below EMS 149 could reject 2500 W power limits**: setup, runtime capabilities and battery number entities now derive their maximum from the detected EMS firmware. Venus D units below 149 are limited to 2200 W; firmware 149 and newer retain the 2500 W ceiling, and unknown firmware starts conservatively at 2200 W until detected.
 - **Daily Operation could show no projection in Dynamic Pricing mode**: price calendars store local wall-clock slots without timezone metadata, while the dashboard refresh uses timezone-aware Home Assistant timestamps. The read-only projection now aligns private slot and deadline copies with the dashboard timezone without modifying the executable charging schedule.
 
 ## [1.4.0b5] - 2026-08-21
