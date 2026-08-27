@@ -172,6 +172,17 @@ class ChargeDelayManager:
         except Exception as exc:
             _LOGGER.error("Charge Delay: failed to save persisted state: %s", exc)
 
+    async def async_flush_state(self) -> None:
+        """Persist the latest latch after entry-owned saves are cancelled."""
+        task = self._save_task
+        current = asyncio.current_task()
+        if task is not None and task is not current and not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+        self._save_task = None
+        if self._controller.charge_delay_enabled:
+            await self._save_state()
+
     def handle_daily_reset_and_eval(self) -> None:
         """Reset the delay latch on a new day, then evaluate to keep the sensor live.
 

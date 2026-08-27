@@ -6993,6 +6993,14 @@ class ChargeDischargeController:
             await asyncio.gather(*tasks, return_exceptions=True)
         self._background_tasks.clear()
 
+        # Entry-owned persistence tasks above are deliberately cancelled so an
+        # old runtime cannot write after unload. Flush their managers directly
+        # now, while this generation still owns the final coherent state.
+        for manager in (self._charge_delay_mgr, self._weekly_charge_mgr):
+            flush = getattr(manager, "async_flush_state", None)
+            if callable(flush):
+                await flush()
+
     async def async_update_charge_discharge(self, now=None):
         """Run one control cycle, guarded against overlapping triggers.
 

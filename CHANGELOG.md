@@ -2,10 +2,21 @@
 
 ## [1.4.0b6] - 2026-08-27
 
+### Changed
+
+- **Recorder backfills now use bounded local-day queries under one entry-owned coordinator**: household, legacy consumption, solar-profile and daily-counter recovery work is serialized, observes DST-aware 23/24/25-hour boundaries, checkpoints completed days and skips profile coverage already stored. Historical reconstruction no longer blocks integration setup, and generation guards prevent an unloaded runtime from applying late query results.
+- **Daily Operation timeline updates are cached, push-only and coalesced**: public snapshots are rebuilt only after material revisions, the date state no longer constructs the full DTO, continuous activity is published at most every 15 seconds, and Store persistence uses a 60-second debounce with immediate flushes for interval closure, rollover, structural plan changes and unload.
+- **Battery coordinators now have one polling owner**: the redundant explicit 1.5-second refresh timer was removed in favor of `DataUpdateCoordinator`, with bounded refresh/backfill/timeline counters added to diagnostics. Control, pricing, persistence and notification tasks are tied to the config-entry lifecycle and cancelled before hardware teardown.
+
 ### Fixed
 
+- **Saving options could overlap historical work from the old and new integration runtimes**: Options Flow marks its pending reload before updating the entry, the old live-update listener ignores that transition, and unload invalidates and awaits background generations before platform or battery shutdown.
+- **Recorder backfill could still pause Home Assistant while binning a high-cadence day**: detached state lists are now converted into 15-minute bins in the executor while unload waits for that bounded processing to release its memory. A synthetic 86,401-state day that previously occupied the event loop for about one second now remains off the control path.
+- **Partial profile coverage could be reused as an understated legacy daily total**: profile-derived totals now require every physical local-day interval, while spring and autumn DST days retain their real 23/25-hour energy. Current-day accumulator migrations always use the bounded Recorder query instead of dropping an open interval or earlier gaps.
+- **Reloading could discard a pending Charge Delay or Weekly Full Charge state save**: entry-owned persistence tasks are cancelled first, then both managers synchronously flush their final coherent latch and restore state before teardown.
 - **Venus D firmware below EMS 149 could reject 2500 W power limits**: setup, runtime capabilities and battery number entities now derive their maximum from the detected EMS firmware. Venus D units below 149 are limited to 2200 W; firmware 149 and newer retain the 2500 W ceiling, and unknown firmware starts conservatively at 2200 W until detected.
 - **Daily Operation could show no projection in Dynamic Pricing mode**: price calendars store local wall-clock slots without timezone metadata, while the dashboard refresh uses timezone-aware Home Assistant timestamps. The read-only projection now aligns private slot and deadline copies with the dashboard timezone without modifying the executable charging schedule.
+- **Anker Solarbank Max AC could double-count solar production** (#340): model-specific PV handling no longer exposes or aggregates the derived `solar_power` value for Max AC (`DMWH`/`DMXU`/`E25H`) or XE AC models, so the configured external solar sensor remains the only source. Solarbank 4 E5000 Pro (`DN7M`/`DPM4`) retains its internal aggregate PV behavior, with unknown models following the safe external-only fallback.
 
 ## [1.4.0b5] - 2026-08-21
 

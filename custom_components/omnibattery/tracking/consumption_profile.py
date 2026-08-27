@@ -907,30 +907,72 @@ class ConsumptionProfileTracker:
     def daily_energy_for_date(
         self,
         local_date: date,
-        *,
-        allow_partial: bool = False,
     ) -> float | None:
-        """Return the adjusted energy already captured for one local day.
+        """Return adjusted energy only for a physically complete local day.
 
         The legacy seven-day history can reuse this result after the profile
-        worker has processed a day. Past days are only reused when they meet
-        the same 75% interval-quality threshold used for profile training;
-        callers can request the currently elapsed part of today explicitly.
+        worker has processed a day. Profile training tolerates incomplete days,
+        but a daily total cannot: accepting the training threshold here would
+        turn 75% coverage into a value 25% below the real daily consumption.
+        Spring DST days legitimately contain only 92 wall-clock quarters, while
+        autumn's repeated hour maps into the same 96 bins with double coverage.
         """
         day = self._days.get(local_date)
-        if day is None or (not allow_partial and not day.complete):
+        if day is None or not day.complete:
             return None
-        valid = [
-            index
-            for index in range(INTERVAL_COUNT)
-            if day.normalized_interval(index) is not None
-        ]
-        if not valid:
+
+        local_tz = self._timezone()
+        start, end = local_day_bounds(local_date, local_tz)
+        required_indexes: set[int] = set()
+        cursor = start.timestamp()
+        end_timestamp = end.timestamp()
+        while cursor < end_timestamp:
+            midpoint = datetime.fromtimestamp(
+                min(end_timestamp, cursor + INTERVAL_SECONDS) - INTERVAL_SECONDS / 2,
+                local_tz,
+            )
+            required_indexes.add(
+                _interval_index(midpoint.timetz().replace(tzinfo=None))
+            )
+            cursor += INTERVAL_SECONDS
+
+        if not required_indexes or any(
+            day.normalized_interval(index) is None
+            for index in required_indexes
+        ):
             return None
-        if not allow_partial and len(valid) < math.ceil(INTERVAL_COUNT * 0.75):
-            return None
-        energy = math.fsum(day.energy_kwh[index] for index in valid)
+        energy = math.fsum(day.energy_kwh[index] for index in required_indexes)
         return round(energy, 2) if math.isfinite(energy) and energy > 0.0 else None
+
+    async def _series_to_bins_in_executor(
+        self,
+        states: list[Any],
+        local_tz: Any,
+    ) -> dict[date, ProfileDay]:
+        """Bin one detached Recorder day without blocking Home Assistant."""
+        create = getattr(self._hass, "async_add_executor_job", None)
+        if callable(create):
+            raw_job = create(_series_to_bins, states, local_tz)
+        else:
+            raw_job = asyncio.get_running_loop().run_in_executor(
+                None, _series_to_bins, states, local_tz
+            )
+        job = (
+            raw_job
+            if isinstance(raw_job, asyncio.Future)
+            else asyncio.ensure_future(raw_job)
+        )
+        try:
+            return await asyncio.shield(job)
+        except asyncio.CancelledError:
+            # Keep the entry alive until the executor releases its reference to
+            # the potentially large state list. This prevents a reload from
+            # overlapping old binning memory with a new Recorder backfill.
+            try:
+                await asyncio.shield(job)
+            except Exception:  # noqa: BLE001 - cancellation remains authoritative
+                pass
+            raise
 
     def record_power_sample(
         self,
@@ -1598,7 +1640,7 @@ class ConsumptionProfileTracker:
                 if states is None:
                     self._backfill_status = "cancelled"
                     return False
-                home_days = _series_to_bins(states, local_tz)
+                home_days = await self._series_to_bins_in_executor(states, local_tz)
                 del states
                 home_day = home_days.get(local_date)
                 del home_days
@@ -1627,7 +1669,9 @@ class ConsumptionProfileTracker:
                     if device_states is None:
                         self._backfill_status = "cancelled"
                         return False
-                    device_days = _series_to_bins(device_states, local_tz)
+                    device_days = await self._series_to_bins_in_executor(
+                        device_states, local_tz
+                    )
                     del device_states
                     device_day = device_days.get(local_date)
                     del device_days

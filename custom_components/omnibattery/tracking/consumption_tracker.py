@@ -1532,18 +1532,12 @@ class ConsumptionTracker:
         if self._legacy_accumulator_rebuild_pending:
             if not token.is_valid():
                 return False
-            rebuilt = None
-            profile_daily_energy = getattr(
-                self._consumption_profile, "daily_energy_for_date", None
-            )
-            if callable(profile_daily_energy):
-                rebuilt = profile_daily_energy(today, allow_partial=True)
-            if rebuilt is None:
-                self._legacy_recorder_days += 1
-                rebuilt = await self.backfill_home_from_history(today, token=token)
-            else:
-                self._legacy_derived_days += 1
-                self._backfill_coordinator.note_skipped()
+            # Today's open profile necessarily contains a partial interval and
+            # may contain earlier Recorder gaps. It is suitable for forecasting,
+            # not for replacing the monotonic full-day accumulator. Query the
+            # bounded current-day history so migration never drops that energy.
+            self._legacy_recorder_days += 1
+            rebuilt = await self.backfill_home_from_history(today, token=token)
             if rebuilt is not None:
                 ctrl._household_energy_accumulator = rebuilt
                 ctrl._household_accumulator_date = today

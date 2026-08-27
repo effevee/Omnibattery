@@ -10,8 +10,10 @@ so the latch logic can be exercised without an event loop or storage.
 """
 from __future__ import annotations
 
+import asyncio
 from datetime import date
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -114,6 +116,23 @@ def _make_mgr(ctrl, states=None):
 
 def _state(value):
     return SimpleNamespace(state=str(value))
+
+
+@pytest.mark.asyncio
+async def test_flush_state_replaces_cancelled_deferred_save_with_final_snapshot():
+    ctrl = _controller()
+    mgr = _make_mgr(ctrl)
+    mgr._store = SimpleNamespace(async_save=AsyncMock())
+    pending = asyncio.create_task(asyncio.sleep(60))
+    mgr._save_task = pending
+
+    await mgr.async_flush_state()
+
+    assert pending.cancelled()
+    mgr._store.async_save.assert_awaited_once()
+    payload = mgr._store.async_save.await_args.args[0]
+    assert payload["delay_unlocked"] is False
+    assert payload["delay_setpoint_reached"] is False
 
 
 # ----------------------------------------------------------------------

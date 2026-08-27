@@ -1,6 +1,7 @@
 """Pure tests for the quarter-hour consumption profile."""
 from __future__ import annotations
 
+import asyncio
 from datetime import date, datetime, timedelta
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo
@@ -156,6 +157,31 @@ def test_recorder_utc_timestamps_are_binned_in_configured_local_timezone():
     assert days[date(2026, 8, 11)].coverage_s[4] == pytest.approx(60)
 
 
+@pytest.mark.asyncio
+async def test_recorder_binning_runs_through_home_assistant_executor():
+    profile = _profile()
+    executor_calls = []
+
+    def async_add_executor_job(target, *args):
+        executor_calls.append((target, args))
+        return asyncio.get_running_loop().run_in_executor(None, target, *args)
+
+    profile._hass.async_add_executor_job = async_add_executor_job
+    states = [
+        SimpleNamespace(
+            state="1000",
+            attributes={"unit_of_measurement": "W"},
+            last_updated=datetime(2026, 8, 10, 10, minute, tzinfo=MADRID),
+        )
+        for minute in (0, 1)
+    ]
+
+    days = await profile._series_to_bins_in_executor(states, MADRID)
+
+    assert executor_calls == [(_series_to_bins, (states, MADRID))]
+    assert days[date(2026, 8, 10)].coverage_s[40] == pytest.approx(60)
+
+
 @pytest.mark.parametrize(
     ("factor", "expected_kwh"),
     [
@@ -232,6 +258,50 @@ def test_profile_day_requires_seventy_five_percent_coverage():
 
     day.coverage_s[0] = MIN_INTERVAL_COVERAGE_S
     assert day.normalized_interval(0) == pytest.approx(INTERVAL_SECONDS / MIN_INTERVAL_COVERAGE_S)
+
+
+def test_daily_energy_does_not_reuse_training_only_partial_coverage():
+    local_date = date(2026, 8, 10)
+    day = ProfileDay(
+        local_date,
+        [0.25] * 72 + [0.0] * 24,
+        [INTERVAL_SECONDS] * 72 + [0.0] * 24,
+        complete=True,
+    )
+    profile = _profile({local_date: day})
+
+    # The day remains useful for profile training but cannot be treated as a
+    # complete legacy daily total (18 kWh instead of the physical 24 kWh).
+    assert profile._day_needs_backfill(local_date) is False
+    assert profile.daily_energy_for_date(local_date) is None
+
+
+@pytest.mark.parametrize(
+    ("local_date", "skipped", "repeated", "expected_kwh"),
+    [
+        (date(2026, 3, 29), range(8, 12), (), 23.0),
+        (date(2026, 10, 25), (), range(8, 12), 25.0),
+    ],
+)
+def test_daily_energy_accepts_complete_dst_days(
+    local_date,
+    skipped,
+    repeated,
+    expected_kwh,
+):
+    energy = [0.25] * INTERVAL_COUNT
+    coverage = [INTERVAL_SECONDS] * INTERVAL_COUNT
+    for index in skipped:
+        energy[index] = 0.0
+        coverage[index] = 0.0
+    for index in repeated:
+        energy[index] = 0.5
+        coverage[index] = 2 * INTERVAL_SECONDS
+    profile = _profile(
+        {local_date: ProfileDay(local_date, energy, coverage, complete=True)}
+    )
+
+    assert profile.daily_energy_for_date(local_date) == pytest.approx(expected_kwh)
 
 
 def test_profile_retention_keeps_current_and_previous_twenty_eight_days():

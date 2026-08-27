@@ -405,6 +405,10 @@ class WeeklyFullChargeManager:
         except Exception as e:
             _LOGGER.error("Weekly Full Charge: Failed to save state: %s", e)
 
+    async def async_flush_state(self) -> None:
+        """Persist the coherent weekly state during config-entry unload."""
+        await self.save_state()
+
     def _restore_saved_max_soc(self, stored: Any) -> None:
         """Restore per-battery SOC values saved before a 100% override."""
         saved = getattr(self._controller, "_weekly_charge_saved_max_soc", None)
