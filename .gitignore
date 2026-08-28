@@ -37,6 +37,14 @@ CLAUDE.md
 *.tmp
 .env
 
+# Generated GitHub feature reports and poll drafts
+feature-requests-*.md
+feature-requests-*.json
+feature-poll-draft-*.md
+
+# Project-local Codex skills
+/.agents/skills/
+
 CLAUDE.md
 .agents/scripts/publish_release.py
 .agents/workflows/publish_release.md
