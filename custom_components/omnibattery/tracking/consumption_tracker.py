@@ -27,6 +27,7 @@ from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
 from ..const import DEFAULT_BASE_CONSUMPTION_KWH, DOMAIN
+from ..infra.entity_naming import is_omnibattery_solar_entity
 from .backfill import BackfillToken, RecorderBackfillCoordinator, local_day_bounds
 from .consumption_profile import ConsumptionForecast, ConsumptionProfileTracker, INTERVAL_COUNT
 from .solar_profile import SolarProfileTracker
@@ -823,6 +824,15 @@ class ConsumptionTracker:
 
     def _read_power_kw(self, entity_id: str) -> Optional[float]:
         """Read a power entity and return its value in kW, or None if unusable."""
+        if is_omnibattery_solar_entity(self._hass, entity_id):
+            if not getattr(self, "_solar_self_reference_warned", False):
+                _LOGGER.error(
+                    "Ignoring invalid solar production sensor %s: an OmniBattery "
+                    "solar output cannot be reused as an external input",
+                    entity_id,
+                )
+                self._solar_self_reference_warned = True
+            return None
         state = self._hass.states.get(entity_id)
         if state is None or state.state in ("unknown", "unavailable"):
             return None

@@ -485,6 +485,17 @@ def test_total_solar_external_only():
     assert tracker._read_total_solar_power_kw() == pytest.approx(1.5)
 
 
+def test_total_solar_ignores_circular_omnibattery_external_sensor():
+    tracker = _make_solar_tracker(
+        {"sensor.omnibattery_solar_power": _w(999999)},
+        "sensor.omnibattery_solar_power",
+        [_aggregate_pv_unit(1500)],
+    )
+
+    assert tracker._read_total_solar_power_kw() == pytest.approx(1.5)
+    assert tracker._solar_self_reference_warned is True
+
+
 def test_total_solar_mppt_only_no_external():
     # No external sensor configured, panels on the Venus MPPT inputs.
     tracker = _make_solar_tracker({}, None, [_vunit("vA", 800)])

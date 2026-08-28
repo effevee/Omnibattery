@@ -10,6 +10,7 @@
 
 ### Fixed
 
+- **Selecting an OmniBattery solar output as the external production sensor could create runaway totals**: setup and options now reject aggregate or per-battery solar entities created by OmniBattery, including renamed and legacy entities. Existing circular configurations are also ignored at runtime, preventing the aggregate solar value from feeding itself and inflating both solar production and derived home consumption on every update.
 - **Daily Operation could project solar charging while Charge Delay was still active**: when the delay SOC setpoint was enabled and already reached, the future projection dropped the delay boundary, omitted its clock markers and assigned solar surplus to the battery before the estimated unlock. Delayed quarters now remain neutral and non-charging, retain their unlock clocks, and prorate only the portion of the boundary quarter that occurs after release.
 - **Venus A/D multi-pack charging could stop after a later pack handover** (#350): a sustained accepted 200 W retry now rearms the provisional BMS-cutoff detection for the next coupled pack, while a retry followed by another confirmed refusal still completes charging.
 - **Saving options could overlap historical work from the old and new integration runtimes**: Options Flow marks its pending reload before updating the entry, the old live-update listener ignores that transition, and unload invalidates and awaits background generations before platform or battery shutdown.

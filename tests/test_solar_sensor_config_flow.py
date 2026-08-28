@@ -44,6 +44,25 @@ async def test_initial_flow_reports_production_sensor_unit_error_on_that_field()
     }
 
 
+async def test_initial_flow_rejects_omnibattery_solar_output_as_input():
+    flow = MarstekVenusConfigFlow()
+    flow.hass = _hass_with_states(
+        {"sensor.omnibattery_solar_power": _state("W")}
+    )
+
+    result = await flow.async_step_user(
+        {
+            "consumption_sensor": "sensor.grid",
+            "max_contracted_power": 7000,
+            CONF_SOLAR_PRODUCTION_SENSOR: "sensor.omnibattery_solar_power",
+        }
+    )
+
+    assert result["errors"] == {
+        CONF_SOLAR_PRODUCTION_SENSOR: "solar_production_sensor_circular"
+    }
+
+
 async def test_initial_flow_validates_remaining_forecast_unit_separately():
     flow = MarstekVenusConfigFlow()
     flow.hass = _hass_with_states({"sensor.remaining": _state("W")})
@@ -126,6 +145,39 @@ async def test_options_flow_reports_production_sensor_unit_error_on_that_field()
 
     assert result["errors"] == {
         CONF_SOLAR_PRODUCTION_SENSOR: "solar_production_invalid_unit"
+    }
+
+
+async def test_options_flow_rejects_legacy_omnibattery_solar_output_as_input():
+    entry = SimpleNamespace(
+        entry_id="test-entry",
+        data={"consumption_sensor": "sensor.grid", "max_contracted_power": 7000},
+        options={},
+    )
+    flow = OptionsFlowHandler(entry)
+    flow.hass = SimpleNamespace(
+        states=SimpleNamespace(
+            get={"sensor.marstek_venus_system_solar_power": _state("W")}.get
+        ),
+        config_entries=SimpleNamespace(
+            async_get_known_entry=lambda entry_id: (
+                entry if entry_id == entry.entry_id else None
+            ),
+            async_entries=lambda _domain: [],
+        ),
+    )
+    flow.handler = entry.entry_id
+
+    result = await flow.async_step_sensors(
+        {
+            "consumption_sensor": "sensor.grid",
+            "max_contracted_power": 7000,
+            CONF_SOLAR_PRODUCTION_SENSOR: "sensor.marstek_venus_system_solar_power",
+        }
+    )
+
+    assert result["errors"] == {
+        CONF_SOLAR_PRODUCTION_SENSOR: "solar_production_sensor_circular"
     }
 
 

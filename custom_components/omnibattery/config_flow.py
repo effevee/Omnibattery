@@ -56,6 +56,7 @@ from .config_backup import (
     async_restore_config_backup,
 )
 from .infra.lifecycle import clear_reload_pending, mark_reload_pending
+from .infra.entity_naming import is_omnibattery_solar_entity
 from .solar_forecast import normalize_solar_forecast_config
 from .const import (
     DOMAIN,
@@ -221,6 +222,23 @@ def _validate_offgrid_power_sensor(
         return {CONF_OFFGRID_POWER_SENSOR: "offgrid_sensor_not_found"}
     if state.attributes.get("unit_of_measurement", "") not in ("W", "kW"):
         return {CONF_OFFGRID_POWER_SENSOR: "offgrid_sensor_invalid_unit"}
+    return {}
+
+
+def _validate_solar_production_sensor(
+    hass: HomeAssistant, user_input: dict[str, Any]
+) -> dict[str, str]:
+    """Validate the optional external solar source without allowing feedback."""
+    sensor = user_input.get(CONF_SOLAR_PRODUCTION_SENSOR)
+    if not sensor:
+        return {}
+    if is_omnibattery_solar_entity(hass, sensor):
+        return {CONF_SOLAR_PRODUCTION_SENSOR: "solar_production_sensor_circular"}
+    state = hass.states.get(sensor)
+    if state is None:
+        return {CONF_SOLAR_PRODUCTION_SENSOR: "solar_production_sensor_not_found"}
+    if state.attributes.get("unit_of_measurement", "") not in ("W", "kW"):
+        return {CONF_SOLAR_PRODUCTION_SENSOR: "solar_production_invalid_unit"}
     return {}
 
 
@@ -1247,16 +1265,7 @@ class MarstekVenusConfigFlow(LegacyDomainMigrationMixin, ConfigFlow, domain=DOMA
                     elif forecast_state.attributes.get("unit_of_measurement", "") not in ["kWh", "Wh"]:
                         errors[key] = "invalid_unit"
 
-            # Validate solar production sensor if provided
-            solar_sensor = user_input.get(CONF_SOLAR_PRODUCTION_SENSOR)
-            if solar_sensor:
-                solar_state = self.hass.states.get(solar_sensor)
-                if solar_state is None:
-                    errors[CONF_SOLAR_PRODUCTION_SENSOR] = "solar_production_sensor_not_found"
-                else:
-                    unit = solar_state.attributes.get("unit_of_measurement", "")
-                    if unit not in ["W", "kW"]:
-                        errors[CONF_SOLAR_PRODUCTION_SENSOR] = "solar_production_invalid_unit"
+            errors.update(_validate_solar_production_sensor(self.hass, user_input))
 
             errors.update(_validate_offgrid_power_sensor(self.hass, user_input))
 
@@ -3683,16 +3692,7 @@ class OptionsFlowHandler(OptionsFlow):
                         elif forecast_state.attributes.get("unit_of_measurement", "") not in ["kWh", "Wh"]:
                             errors[key] = "invalid_unit"
 
-                # Validate solar production sensor if provided
-                solar_sensor = user_input.get(CONF_SOLAR_PRODUCTION_SENSOR)
-                if solar_sensor:
-                    solar_state = self.hass.states.get(solar_sensor)
-                    if solar_state is None:
-                        errors[CONF_SOLAR_PRODUCTION_SENSOR] = "solar_production_sensor_not_found"
-                    else:
-                        unit = solar_state.attributes.get("unit_of_measurement", "")
-                        if unit not in ["W", "kW"]:
-                            errors[CONF_SOLAR_PRODUCTION_SENSOR] = "solar_production_invalid_unit"
+                errors.update(_validate_solar_production_sensor(self.hass, user_input))
 
                 errors.update(_validate_offgrid_power_sensor(self.hass, user_input))
 
