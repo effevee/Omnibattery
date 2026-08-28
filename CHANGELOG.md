@@ -10,6 +10,7 @@
 
 ### Fixed
 
+- **Venus A/D multi-pack charging could stop after a later pack handover** (#350): a sustained accepted 200 W retry now rearms the provisional BMS-cutoff detection for the next coupled pack, while a retry followed by another confirmed refusal still completes charging.
 - **Saving options could overlap historical work from the old and new integration runtimes**: Options Flow marks its pending reload before updating the entry, the old live-update listener ignores that transition, and unload invalidates and awaits background generations before platform or battery shutdown.
 - **Recorder backfill could still pause Home Assistant while binning a high-cadence day**: detached state lists are now converted into 15-minute bins in the executor while unload waits for that bounded processing to release its memory. A synthetic 86,401-state day that previously occupied the event loop for about one second now remains off the control path.
 - **Partial profile coverage could be reused as an understated legacy daily total**: profile-derived totals now require every physical local-day interval, while spring and autumn DST days retain their real 23/25-hour energy. Current-day accumulator migrations always use the bounded Recorder query instead of dropping an open interval or earlier gaps.

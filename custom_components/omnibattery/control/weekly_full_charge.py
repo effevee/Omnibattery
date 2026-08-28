@@ -24,6 +24,7 @@ from homeassistant.helpers.storage import Store
 from ..const import (
     DOMAIN,
     NORMAL_BALANCE_BMS_CUTOFF_VERSIONS,
+    NORMAL_BALANCE_RECAL_CUTOFF_CYCLES,
     NORMAL_BALANCE_TAPER_CELL_VOLTAGE,
     WEEKDAY_MAP,
 )
@@ -39,9 +40,9 @@ _INVERTER_STATE_STANDBY = 1
 # Battery power below this (W) is treated as "not charging" for BMS-cutoff detection.
 _BMS_CUTOFF_POWER_W = 10
 # Consecutive update cycles (~2 s each) of BMS-cutoff conditions required before
-# declaring completion at 99%.  5 × 2 s = 10 s is enough to outlast the Modbus
-# response delay after writing registers, but fast enough to react to a real cutoff.
-_BMS_CUTOFF_REQUIRED_CYCLES = 5
+# declaring completion at 99%. Keep this shared with the Venus A/D retry-acceptance
+# debounce: 5 × 2 s = 10 s outlasts the Modbus response delay while reacting quickly.
+_BMS_CUTOFF_REQUIRED_CYCLES = NORMAL_BALANCE_RECAL_CUTOFF_CYCLES
 
 
 class WeeklyFullChargeManager:
@@ -114,6 +115,15 @@ class WeeklyFullChargeManager:
         """
         ctrl = self._controller
         self.is_active()  # side effect: day-boundary flag reset
+        top_charge_manager = getattr(ctrl, "_max_soc_mgr", None)
+        tick_retry_acceptance = getattr(
+            top_charge_manager, "tick_bms_cutoff_retry_acceptance", None
+        )
+        if tick_retry_acceptance is not None:
+            # The acceptance debounce must advance once here, not from
+            # is_battery_full()/availability checks which can run repeatedly
+            # during the same control cycle.
+            tick_retry_acceptance()
         for c in ctrl.coordinators:
             if getattr(c, "battery_manual_mode_enabled", False):
                 # Individual manual mode owns the battery. Freeze its cutoff

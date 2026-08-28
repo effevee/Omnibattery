@@ -725,6 +725,7 @@ class ChargeDischargeController:
         self._normal_balance_bms_cutoff_active: dict[MarstekVenusDataUpdateCoordinator, bool] = {}
         self._normal_balance_bms_cutoff_retry_pending: dict[MarstekVenusDataUpdateCoordinator, bool] = {}
         self._normal_balance_bms_cutoff_retry_active: dict[MarstekVenusDataUpdateCoordinator, bool] = {}
+        self._normal_balance_bms_cutoff_retry_accept_count: dict[MarstekVenusDataUpdateCoordinator, int] = {}
         self._normal_balance_bms_cutoff_measurement: dict[
             MarstekVenusDataUpdateCoordinator, str
         ] = {}
@@ -2235,6 +2236,7 @@ class ChargeDischargeController:
         for attr in (
             "_normal_balance_bms_cutoff_retry_pending",
             "_normal_balance_bms_cutoff_retry_active",
+            "_normal_balance_bms_cutoff_retry_accept_count",
         ):
             retry_state = getattr(self, attr, None)
             if retry_state is not None:

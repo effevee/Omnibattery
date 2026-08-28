@@ -71,6 +71,7 @@ tracks the manager's runtime state."""
         _normal_balance_bms_cutoff_active={},
         _normal_balance_bms_cutoff_retry_pending={},
         _normal_balance_bms_cutoff_retry_active={},
+        _normal_balance_bms_cutoff_retry_accept_count={},
         _normal_balance_bms_cutoff_measurement={},
         _normal_balance_phases={},
         _normal_balance_measure_started={},
@@ -425,6 +426,86 @@ def test_venus_ad_retry_requires_a_second_confirmed_cutoff():
     assert manager.prepare_bms_cutoff_retry(c) is None
     assert c not in ctrl._normal_balance_bms_cutoff_retry_active
     assert manager.should_charge_to_bms_cutoff(c, 100) is False
+
+
+def test_venus_ad_retry_rearms_only_after_sustained_accepted_charge():
+    c = _Coord(
+        battery_version="vD",
+        data={
+            "max_cell_voltage": NORMAL_BALANCE_RECAL_RETRY_CELL_VOLTAGE,
+            "battery_soc": 94,
+            "battery_power": 200,
+        },
+        commanded_charge_power=200,
+    )
+    confirmed = {"value": False}
+    reset_calls = []
+    ctrl = _controller(
+        [c],
+        _weekly_charge_mgr=SimpleNamespace(
+            is_bms_cutoff_confirmed=lambda _coordinator: confirmed["value"],
+            reset_bms_cutoff_confirmation=lambda coordinator: (
+                reset_calls.append(coordinator), confirmed.__setitem__("value", False)
+            ),
+        ),
+    )
+    ctrl._normal_balance_bms_cutoff_retry_active[c] = True
+    manager = _mgr(ctrl)
+
+    # Query methods may run multiple times per tick; they must not advance the
+    # acceptance debounce.
+    for _ in range(NORMAL_BALANCE_RECAL_CUTOFF_CYCLES * 2):
+        assert manager.prepare_bms_cutoff_retry(c) == manager._BMS_CUTOFF_RETRY_ACTIVE
+    assert ctrl._normal_balance_bms_cutoff_retry_accept_count == {}
+
+    for _ in range(NORMAL_BALANCE_RECAL_CUTOFF_CYCLES - 1):
+        manager.tick_bms_cutoff_retry_acceptance()
+    assert ctrl._normal_balance_bms_cutoff_retry_active[c] is True
+
+    manager.tick_bms_cutoff_retry_acceptance()
+    assert c not in ctrl._normal_balance_bms_cutoff_retry_active
+    assert ctrl._normal_balance_bms_cutoff_retry_accept_count == {}
+    assert reset_calls == [c]
+
+    # The next confirmed refusal is now provisional again, ready for another
+    # coupled-pack handover instead of being treated as the final cutoff.
+    confirmed["value"] = True
+    c.data.update(battery_power=0, max_cell_voltage=NORMAL_BALANCE_PAUSE_CELL_VOLTAGE)
+    assert manager.prepare_bms_cutoff_retry(c) == manager._BMS_CUTOFF_RETRY_PENDING
+
+
+def test_venus_ad_brief_retry_acceptance_does_not_rearm_final_cutoff():
+    c = _Coord(
+        battery_version="vA",
+        data={
+            "max_cell_voltage": NORMAL_BALANCE_RECAL_RETRY_CELL_VOLTAGE,
+            "battery_soc": 94,
+            "battery_power": 200,
+        },
+        commanded_charge_power=200,
+    )
+    confirmed = {"value": False}
+    ctrl = _controller(
+        [c],
+        _weekly_charge_mgr=SimpleNamespace(
+            is_bms_cutoff_confirmed=lambda _coordinator: confirmed["value"],
+            reset_bms_cutoff_confirmation=lambda _coordinator: None,
+        ),
+    )
+    ctrl._normal_balance_bms_cutoff_retry_active[c] = True
+    manager = _mgr(ctrl)
+
+    for _ in range(NORMAL_BALANCE_RECAL_CUTOFF_CYCLES - 1):
+        manager.tick_bms_cutoff_retry_acceptance()
+    assert ctrl._normal_balance_bms_cutoff_retry_active[c] is True
+
+    # A renewed refusal clears the partial acceptance streak. Once the shared
+    # cutoff detector confirms it, the original retry is final.
+    c.data["battery_power"] = 0
+    manager.tick_bms_cutoff_retry_acceptance()
+    confirmed["value"] = True
+    assert manager.prepare_bms_cutoff_retry(c) is None
+    assert c not in ctrl._normal_balance_bms_cutoff_retry_active
 
 
 # ----------------------------------------------------------------------
