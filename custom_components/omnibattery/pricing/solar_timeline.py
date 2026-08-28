@@ -518,6 +518,12 @@ def build_solar_timeline(
 
     if selected_weights is None or effective <= _EPSILON:
         zero = tuple(0.0 for _ in boundaries)
+        fallback_reason = (
+            "zero_budget"
+            if effective <= _EPSILON
+            else ";".join(dict.fromkeys(selected_fallback_reasons))
+            or "unsafe_temporal_shape"
+        )
         return SolarTimelineResult(
             intervals_kwh=zero,
             source="zero_fallback" if selected_weights is None else selected_source,
@@ -525,9 +531,7 @@ def build_solar_timeline(
             safety_margin_kwh=margin,
             remaining_effective_kwh=effective,
             timeline_effective_kwh=0.0,
-            fallback_reason=";".join(dict.fromkeys(selected_fallback_reasons)) or (
-                "zero_budget" if effective <= _EPSILON else "unsafe_temporal_shape"
-            ),
+            fallback_reason=fallback_reason,
             candidate_reasons=tuple(dict.fromkeys(reasons)),
             shadow_selected_source=selected_source if mode == "shadow" else None,
             shadow_intervals_kwh=(),

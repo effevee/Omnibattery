@@ -4,6 +4,8 @@
 
 ### Fixed
 
+- **Solar Charge Delay could erase the yellow solar-window background in Daily Operation**: delayed intervals continue to block projected battery charging and remain marked with their unlock clocks, while any underlying solar surplus is again shown as a yellow opportunity instead of being forced to neutral; green remains reserved for solar energy actually assigned to the battery.
+- **Daily Operation could claim that a mature solar profile was still learning every night**: an empty post-sunset progress range now preserves the profile's global maturity, and a normal zero remaining-solar budget takes precedence over irrelevant candidate fallback reasons so the dashboard no longer shows a misleading alternative-estimate warning.
 - **Daily Operation could show Charge Delay clocks after the feature was disabled**: the timeline DTO now preserves the live enabled state and the dashboard requires it before rendering delay markers, suppressing residual stored boundaries without breaking older payloads.
 - **Dynamic Pricing evening re-evaluation could crash with a `NameError`**: late-day deficit scheduling now reads the asynchronous dynamic base consumption directly from the tracker, so evening recharge can complete normally.
 - **Selecting an OmniBattery solar output as the external production sensor could create runaway totals**: setup and options now reject aggregate or per-battery solar entities created by OmniBattery, including renamed and legacy entities. Existing circular configurations are also ignored at runtime, preventing the aggregate solar value from feeding itself and inflating both solar production and derived home consumption on every update.

@@ -3107,10 +3107,10 @@ class MarstekVenusPanel extends HTMLElement {
     // boundary-less waiting states are meaningful only for the current cell.
     const delay = delayEnabled && !weeklyDelayBypassed
       && ((delayUntil != null && delayUntil !== "") || topLevelDelay);
-    // A delayed interval is not an available solar window: charging is
-    // intentionally blocked until the published boundary. Keep it neutral
-    // with the clock unless part of the quarter after unlock has an action.
-    const solarWindow = solarOpportunity && !delay;
+    // Delay blocks energy entering the battery, not the underlying solar
+    // surplus. Keep that opportunity yellow and overlay the clock context;
+    // the absence of a solar action bit keeps the interval out of green.
+    const solarWindow = solarOpportunity;
     const setpointState = snapshot.setpointInfo && String(snapshot.setpointInfo.state || snapshot.setpointInfo.status || "").toLowerCase();
     const topLevelSetpoint = index === snapshot.currentIndex && ["charging_to_setpoint", "to_setpoint", "charging"].includes(setpointState);
     return {

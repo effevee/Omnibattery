@@ -1249,6 +1249,16 @@ class SolarProfileTracker:
         last = min(PROGRESS_BIN_COUNT, int(math.ceil(end * PROGRESS_BIN_COUNT)))
         requested = range(first, last)
         requested_counts = [snapshot.bin_contributions[index] for index in requested]
+        if not requested_counts:
+            # After the solar window there are no future progress bins whose
+            # coverage could invalidate an otherwise mature profile. Treat the
+            # empty request as fully covered and preserve the global verdict.
+            return SolarProfileSnapshot(
+                **{
+                    **snapshot.__dict__,
+                    "future_coverage_ratio": 1.0,
+                }
+            )
         future_coverage = (
             sum(count >= SOLAR_MIN_BIN_CONTRIBUTIONS for count in requested_counts)
             / max(1, len(requested_counts))

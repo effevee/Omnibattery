@@ -179,6 +179,22 @@ def test_automatic_timeline_falls_back_to_sinusoidal_until_profile_is_mature():
     assert "profile_not_mature" in (result.fallback_reason or "")
 
 
+def test_zero_solar_budget_suppresses_irrelevant_profile_fallback():
+    solar_start, solar_end = _solar_window()
+
+    result = build_solar_timeline(
+        _horizon(),
+        0.0,
+        learned_shape=[1.0] * 96,
+        learned_mature=False,
+        solar_start=solar_start,
+        solar_end=solar_end,
+    )
+
+    assert result.fallback_reason == "zero_budget"
+    assert "profile_not_mature" in result.candidate_reasons
+
+
 def test_shadow_keeps_sinusoidal_control_and_reports_selected_candidate():
     solar_start, solar_end = _solar_window()
     provider = [SolarForecastPeriod(solar_start, solar_end, 8.0)]

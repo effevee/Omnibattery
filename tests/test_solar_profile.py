@@ -123,6 +123,25 @@ def test_mature_profile_requires_recent_complete_days():
     assert all(count == 7 for count in snapshot.bin_contributions)
 
 
+def test_empty_future_solar_range_preserves_mature_profile():
+    profile = _profile()
+    today = date.today()
+    profile._days = {
+        today - timedelta(days=offset): _full_day(today - timedelta(days=offset))
+        for offset in range(1, 8)
+    }
+
+    snapshot = profile.get_snapshot(
+        target_date=today,
+        future_progress_start=1.0,
+        future_progress_end=1.0,
+    )
+
+    assert snapshot.mature is True
+    assert snapshot.future_coverage_ratio == pytest.approx(1.0)
+    assert snapshot.fallback_reason is None
+
+
 def test_legacy_shadow_mode_is_normalized_to_automatic_profile_mode():
     profile = _profile()
 
