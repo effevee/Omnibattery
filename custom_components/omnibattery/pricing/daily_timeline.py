@@ -1031,6 +1031,7 @@ def simulate_battery_projection(
     discharge_efficiency: float = 1.0,
     context_masks: Any = None,
     grid_charge_decisions: Any = None,
+    charge_availability: Any = None,
     system_charge_power_w: float | None = None,
     system_discharge_power_w: float | None = None,
 ) -> BatteryProjectionResult:
@@ -1046,8 +1047,10 @@ def simulate_battery_projection(
     can be used for a system-wide quota.  This helper does not infer price
     gates, whitelist windows, controller blockers, or new allocations.  Those
     must be resolved by the authoritative planner before calling it.  Optional
-    system-wide charge/discharge limits cap the aggregate AC-side flow in each
-    interval in addition to every battery's own power limit.
+    ``charge_availability`` values from 0 to 1 describe the fraction of each
+    interval in which charging is permitted.  System-wide charge/discharge
+    limits cap the aggregate AC-side flow in each interval in addition to every
+    battery's own power limit.
     """
     interval_list = [
         _coerce_interval(value, index) for index, value in enumerate(intervals)
@@ -1098,6 +1101,13 @@ def simulate_battery_projection(
         consumption = _non_negative(interval.consumption_kwh)
         direct_solar = min(solar, consumption)
         solar_surplus = max(0.0, solar - direct_solar)
+        charge_fraction = _bounded(
+            _metadata_value(charge_availability, index, interval_list),
+            0.0,
+            1.0,
+            1.0,
+        )
+        solar_charge_available = solar_surplus * charge_fraction
         deficit = max(0.0, consumption - direct_solar)
 
         solar_to_battery = 0.0
@@ -1115,7 +1125,10 @@ def simulate_battery_projection(
             else 0.0
         )
         system_charge_remaining = (
-            _non_negative(system_charge_power_w) * duration_hours / 1000.0
+            _non_negative(system_charge_power_w)
+            * duration_hours
+            * charge_fraction
+            / 1000.0
             if system_charge_power_w is not None
             else math.inf
         )
@@ -1150,14 +1163,17 @@ def simulate_battery_projection(
             ):
                 solar_input = 0.0
             else:
-                power_cap = charge_power * duration_hours / 1000.0
+                power_cap = (
+                    charge_power * duration_hours * charge_fraction / 1000.0
+                )
                 headroom_input = max(0.0, (maximum - states[key]) / charge_eff)
                 solar_input = min(
-                    solar_surplus,
+                    solar_charge_available,
                     power_cap,
                     headroom_input,
                     system_charge_remaining,
                 )
+            solar_charge_available -= solar_input
             solar_surplus -= solar_input
             system_charge_remaining = max(0.0, system_charge_remaining - solar_input)
             states[key] += solar_input * charge_eff
@@ -1184,7 +1200,9 @@ def simulate_battery_projection(
                 grid_input = 0.0
             else:
                 power_cap = max(
-                    0.0, charge_power * duration_hours / 1000.0 - solar_input
+                    0.0,
+                    charge_power * duration_hours * charge_fraction / 1000.0
+                    - solar_input,
                 )
                 headroom_input = max(0.0, (maximum - states[key]) / charge_eff)
                 grid_input = min(

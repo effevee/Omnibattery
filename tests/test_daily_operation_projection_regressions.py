@@ -342,6 +342,58 @@ def test_setpoint_context_stops_after_the_interval_that_reaches_it():
     assert not masks[2] & CONTEXT_SETPOINT
 
 
+def test_active_delay_after_setpoint_blocks_projected_charge_until_unlock():
+    now = datetime(2026, 8, 24, 13, 45, tzinfo=MADRID)
+    unlock = now.replace(hour=14, minute=49)
+    intervals = [
+        ProjectionIntervalInput(
+            start,
+            start + timedelta(minutes=15),
+            consumption_kwh=0.025,
+            solar_kwh=0.25,
+        )
+        for start in (now + timedelta(minutes=15 * index) for index in range(6))
+    ]
+    controller = _controller_for_projection(
+        now,
+        intervals,
+        [],
+        [BatteryProjectionInput("a", 5, 10, 0, 100, 4000, 4000)],
+        charge_delay_enabled=True,
+        _delay_soc_setpoint_enabled=True,
+        _delay_setpoint_reached=True,
+        _daily_operation_delay_active=lambda: True,
+        _daily_operation_delay_unlock=lambda _now: unlock,
+        _charge_delay_status={
+            "state": "Delayed (14:49 est.)",
+            "estimated_unlock_time": "14:49",
+        },
+    )
+
+    result = ChargeDischargeController._daily_operation_build_projection(
+        controller, now
+    )
+
+    assert result is not None
+    fully_blocked = result["intervals"][:4]
+    assert all(
+        item["context_mask"] & CONTEXT_CHARGE_DELAY
+        and item["delay_until"] == unlock
+        and item["solar_to_battery_kwh"] == 0.0
+        and item["action_mask"] & ACTION_SOLAR_CHARGE == 0
+        for item in fully_blocked
+    )
+    boundary = result["intervals"][4]
+    assert boundary["context_mask"] & CONTEXT_CHARGE_DELAY
+    assert boundary["delay_until"] == unlock
+    assert boundary["solar_to_battery_kwh"] == pytest.approx(0.165)
+    assert boundary["action_mask"] & ACTION_SOLAR_CHARGE
+    after_unlock = result["intervals"][5]
+    assert not after_unlock["context_mask"] & CONTEXT_CHARGE_DELAY
+    assert after_unlock.get("delay_until") is None
+    assert after_unlock["solar_to_battery_kwh"] == pytest.approx(0.225)
+
+
 def test_weekly_full_charge_bypasses_delay_and_setpoint_projection_markers():
     now = datetime(2026, 8, 24, 10, 0, tzinfo=MADRID)
     end = now + timedelta(minutes=15)

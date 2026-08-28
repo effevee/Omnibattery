@@ -172,12 +172,68 @@ def build_daily_operation_projection(
             remaining_intervals
         )
     ]
+    delay_projection = None
+    delay_starts_at = (
+        now
+        if request.delay_active
+        and (not request.setpoint_enabled or request.setpoint_reached)
+        else None
+    )
+    delay_ends_at = request.delay_unlock if delay_starts_at is not None else None
+    if (
+        request.battery_inputs
+        and request.setpoint_enabled
+        and not request.setpoint_reached
+        and not request.weekly_charge_bypasses_delay
+    ):
+        try:
+            delay_projection = project_charge_delay(
+                projection_inputs,
+                request.battery_inputs,
+                setpoint_soc_pct=request.setpoint_soc_pct,
+                enabled=request.setpoint_enabled,
+                charge_delay_enabled=request.charge_delay_enabled,
+                now=now,
+                allocations=request.allocations,
+                unlock_at=request.delay_unlock,
+                system_charge_power_w=request.system_charge_power_w,
+                system_discharge_power_w=request.system_discharge_power_w,
+            )
+            if request.delay_planned:
+                delay_starts_at = delay_projection.delay_starts_at
+                delay_ends_at = delay_projection.estimated_unlock_at
+        except Exception:  # noqa: BLE001 - projection is display-only
+            delay_projection = None
+
+    charge_availability: list[float] = []
+    for interval in projection_inputs:
+        duration_s = max(0.0, (interval.end - interval.start).total_seconds())
+        blocked_s = 0.0
+        if (
+            delay_starts_at is not None
+            and delay_ends_at is not None
+            and duration_s > 0.0
+        ):
+            blocked_s = max(
+                0.0,
+                (
+                    min(interval.end, delay_ends_at)
+                    - max(interval.start, delay_starts_at)
+                ).total_seconds(),
+            )
+        charge_availability.append(
+            max(0.0, min(1.0, 1.0 - blocked_s / duration_s))
+            if duration_s > 0.0
+            else 0.0
+        )
+
     result = simulate_battery_projection(
         projection_inputs,
         request.battery_inputs,
         allocations=request.allocations,
         context_masks=context_masks,
         grid_charge_decisions=grid_decisions,
+        charge_availability=charge_availability,
         system_charge_power_w=request.system_charge_power_w,
         system_discharge_power_w=request.system_discharge_power_w,
     )
@@ -260,34 +316,6 @@ def build_daily_operation_projection(
         item["stored_energy_end_kwh"] = _finite(
             getattr(flow, "stored_energy_end_kwh", 0.0)
         )
-
-    delay_projection = None
-    delay_starts_at = now if request.delay_active and not request.setpoint_enabled else None
-    delay_ends_at = request.delay_unlock if delay_starts_at is not None else None
-    if (
-        request.battery_inputs
-        and request.setpoint_enabled
-        and not request.setpoint_reached
-        and not request.weekly_charge_bypasses_delay
-    ):
-        try:
-            delay_projection = project_charge_delay(
-                projection_inputs,
-                request.battery_inputs,
-                setpoint_soc_pct=request.setpoint_soc_pct,
-                enabled=request.setpoint_enabled,
-                charge_delay_enabled=request.charge_delay_enabled,
-                now=now,
-                allocations=request.allocations,
-                unlock_at=request.delay_unlock,
-                system_charge_power_w=request.system_charge_power_w,
-                system_discharge_power_w=request.system_discharge_power_w,
-            )
-            if request.delay_planned:
-                delay_starts_at = delay_projection.delay_starts_at
-                delay_ends_at = delay_projection.estimated_unlock_at
-        except Exception:  # noqa: BLE001 - projection is display-only
-            delay_projection = None
 
     if delay_projection is not None and delay_projection.setpoint_reached_at is not None:
         for item in aggregates.values():

@@ -3081,7 +3081,7 @@ class MarstekVenusPanel extends HTMLElement {
       && ((plannedMask || 0) & 1) !== 0
       && ((actualMask || 0) & 1) === 0;
     const solarSurplus = solar != null && consumption != null && solar > consumption + 0.000001;
-    const solarWindow = !snapshot.isSkipped[index]
+    const solarOpportunity = !snapshot.isSkipped[index]
       && ((mask || 0) & 1) === 0
       && (projectedSolarChargePending || solarSurplus);
     const delayState = snapshot.delayInfo && String(snapshot.delayInfo.state || snapshot.delayInfo.status || "").toLowerCase();
@@ -3102,6 +3102,10 @@ class MarstekVenusPanel extends HTMLElement {
     // the feature was enabled. Historical/future clocks need a real boundary;
     // boundary-less waiting states are meaningful only for the current cell.
     const delay = !weeklyDelayBypassed && ((delayUntil != null && delayUntil !== "") || topLevelDelay);
+    // A delayed interval is not an available solar window: charging is
+    // intentionally blocked until the published boundary. Keep it neutral
+    // with the clock unless part of the quarter after unlock has an action.
+    const solarWindow = solarOpportunity && !delay;
     const setpointState = snapshot.setpointInfo && String(snapshot.setpointInfo.state || snapshot.setpointInfo.status || "").toLowerCase();
     const topLevelSetpoint = index === snapshot.currentIndex && ["charging_to_setpoint", "to_setpoint", "charging"].includes(setpointState);
     return {

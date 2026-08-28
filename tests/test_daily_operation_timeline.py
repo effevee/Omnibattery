@@ -358,6 +358,27 @@ def test_system_power_limits_cap_aggregate_charge_and_discharge():
     assert discharge.grid_to_home_kwh == pytest.approx(1.5)
 
 
+def test_charge_availability_blocks_and_prorates_interval_charging():
+    intervals = [
+        _interval(0, consumption=0.1, solar=1.1),
+        _interval(1, consumption=0.1, solar=1.1),
+        _interval(2, consumption=0.1, solar=1.1),
+    ]
+    result = simulate_battery_projection(
+        intervals,
+        [_battery(stored=2.0)],
+        charge_efficiency=1.0,
+        charge_availability=[0.0, 0.5, 1.0],
+    )
+
+    blocked, partial, available = result.intervals
+    assert blocked.solar_to_battery_kwh == 0.0
+    assert blocked.action_mask & ACTION_SOLAR_CHARGE == 0
+    assert partial.solar_to_battery_kwh == pytest.approx(0.5)
+    assert available.solar_to_battery_kwh == pytest.approx(1.0)
+    assert available.stored_energy_end_kwh == pytest.approx(3.5)
+
+
 def test_charge_delay_projection_is_pure_and_does_not_mutate_inputs():
     battery = _battery(stored=0.0, capacity=2.0, charge_power=4000.0)
     intervals = [
