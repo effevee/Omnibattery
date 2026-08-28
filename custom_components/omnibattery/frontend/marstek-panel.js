@@ -3085,6 +3085,10 @@ class MarstekVenusPanel extends HTMLElement {
       && ((mask || 0) & 1) === 0
       && (projectedSolarChargePending || solarSurplus);
     const delayState = snapshot.delayInfo && String(snapshot.delayInfo.state || snapshot.delayInfo.status || "").toLowerCase();
+    // Missing means an older payload, which remains compatible. An explicit
+    // false is authoritative and suppresses stale stored boundaries/statuses.
+    const delayEnabled = !snapshot.delayInfo || snapshot.delayInfo.enabled == null
+      || this._dailyOperationBool(snapshot.delayInfo.enabled);
     const weeklyDelayBypassed = Boolean(snapshot.delayInfo && (
       snapshot.delayInfo.weekly_full_charge_bypasses_delay === true
       || delayState.trim() === "skipped - full charge day"
@@ -3101,7 +3105,8 @@ class MarstekVenusPanel extends HTMLElement {
     // Older payloads could stamp the delay context on every cell merely because
     // the feature was enabled. Historical/future clocks need a real boundary;
     // boundary-less waiting states are meaningful only for the current cell.
-    const delay = !weeklyDelayBypassed && ((delayUntil != null && delayUntil !== "") || topLevelDelay);
+    const delay = delayEnabled && !weeklyDelayBypassed
+      && ((delayUntil != null && delayUntil !== "") || topLevelDelay);
     // A delayed interval is not an available solar window: charging is
     // intentionally blocked until the published boundary. Keep it neutral
     // with the clock unless part of the quarter after unlock has an action.

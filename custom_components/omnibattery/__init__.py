@@ -2070,8 +2070,8 @@ class ChargeDischargeController:
                 "source": "charge_delay",
             }
             delay = dict(getattr(self, "_charge_delay_status", {}) or {})
-            delay.setdefault("enabled", bool(getattr(self, "charge_delay_enabled", False)))
-            delay.setdefault("unlocked", bool(getattr(self, "_charge_delay_unlocked", False)))
+            delay["enabled"] = bool(getattr(self, "charge_delay_enabled", False))
+            delay["unlocked"] = bool(getattr(self, "_charge_delay_unlocked", False))
             weekly_delay_bypassed = (
                 ChargeDischargeController._daily_operation_weekly_delay_bypass(self)
             )

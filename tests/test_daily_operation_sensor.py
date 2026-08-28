@@ -102,6 +102,7 @@ def _snapshot() -> dict:
             "target_soc": 80,
         },
         "delay": {
+            "enabled": False,
             "status": "delayed",
             "estimated_unlock_time": "2026-08-22T16:15:00+02:00",
         },
@@ -183,6 +184,7 @@ def test_timeline_entity_publishes_fixed_96_element_json_safe_dto():
     assert attrs["operations"]["charge_to_battery_kwh"][0] == 0.1
     assert attrs["operations"]["actual_discharge_from_battery_kwh"][0] == 0.03
     assert attrs["operations"]["discharge_from_battery_kwh"][0] == 0.04
+    assert attrs["delay"]["enabled"] is False
     assert attrs["extended_horizon"]["interval_count"] == 48
     assert len(attrs["extended_horizon"]["duration_s"]) == 48
     assert attrs["extended_horizon"]["dst_skipped"][8:12] == [True] * 4

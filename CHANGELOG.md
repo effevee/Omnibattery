@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- **Daily Operation could show Charge Delay clocks after the feature was disabled**: the timeline DTO now preserves the live enabled state and the dashboard requires it before rendering delay markers, suppressing residual stored boundaries without breaking older payloads.
 - **Dynamic Pricing evening re-evaluation could crash with a `NameError`**: late-day deficit scheduling now reads the asynchronous dynamic base consumption directly from the tracker, so evening recharge can complete normally.
 - **Selecting an OmniBattery solar output as the external production sensor could create runaway totals**: setup and options now reject aggregate or per-battery solar entities created by OmniBattery, including renamed and legacy entities. Existing circular configurations are also ignored at runtime, preventing the aggregate solar value from feeding itself and inflating both solar production and derived home consumption on every update.
 

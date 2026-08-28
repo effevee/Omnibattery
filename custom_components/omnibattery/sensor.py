@@ -1710,6 +1710,7 @@ def _daily_operation_timeline_attributes(controller: object) -> dict[str, object
         source,
         ("delay", "charge_delay", "charge_delay_status"),
         {
+            "enabled": ("enabled", "is_enabled"),
             "state": ("state", "status"),
             "estimated_unlock_time": (
                 "estimated_unlock_time",
