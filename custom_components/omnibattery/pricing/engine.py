@@ -4014,7 +4014,7 @@ class PricingManager:
             self._get_consumed_today_kwh(self._controller, now)
         )
         tracker = self._controller._consumption_tracker
-        avg_daily_kwh = await get_average()
+        avg_daily_kwh = await tracker.get_dynamic_base_consumption()
         if _consumption_source == "daily_home_energy":
             window_hours_per_day = 24.0
             remaining_window_hours = 24.0 - now_h

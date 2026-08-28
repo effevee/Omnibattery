@@ -418,6 +418,46 @@ def test_remaining_consumption_invalid_accumulator_date_uses_hourly_fallback():
     assert remaining == pytest.approx(2.9)
 
 
+def test_evening_recharge_uses_dynamic_base_consumption():
+    """The evening path must resolve the tracker's async average locally."""
+    calls = []
+
+    async def get_average_consumption():
+        calls.append(True)
+        return 20.0
+
+    async def no_op(*_args, **_kwargs):
+        return None
+
+    ctrl = _controller(
+        coordinators=[
+            SimpleNamespace(
+                data={
+                    "battery_soc": 0.0,
+                    "battery_total_energy": 10.0,
+                },
+                min_soc=0.0,
+                max_soc=100.0,
+            )
+        ],
+        _consumption_tracker=SimpleNamespace(
+            get_dynamic_base_consumption=get_average_consumption,
+        ),
+        _daily_home_energy_date=datetime.now().date(),
+        _daily_home_energy_kwh=1.0,
+        _last_decision_data={},
+        _predictive_grid_charge_margin_pct=0.0,
+    )
+    manager = _mgr(ctrl)
+    manager._maybe_refresh_service_prices = no_op
+    manager._remaining_solar_today_kwh = lambda _now: 0.0
+    manager._parse_price_data = lambda horizon_end=None: []
+
+    asyncio.run(manager._evaluate_evening_recharge())
+
+    assert calls == [True]
+
+
 def test_pre_slot_reevaluation_uses_remaining_consumption_and_solar(monkeypatch):
     import asyncio
 
