@@ -1904,6 +1904,30 @@ class ChargeDischargeController:
                 system_discharge_power_w = configured_discharge
         setpoint_enabled = bool(getattr(self, "_delay_soc_setpoint_enabled", False))
         setpoint_reached = bool(getattr(self, "_delay_setpoint_reached", False))
+        target_soc_pct = None
+        solar_t_end = None
+        if setpoint_enabled:
+            target_getter = getattr(tracker, "get_today_target_soc", None)
+            if callable(target_getter):
+                try:
+                    target_soc_pct = self._daily_operation_float(
+                        target_getter(), None
+                    )
+                except Exception:  # noqa: BLE001 - dashboard projection is optional
+                    target_soc_pct = None
+            t_end_getter = getattr(tracker, "estimate_t_end", None)
+            if callable(t_end_getter):
+                try:
+                    t_end_h = self._daily_operation_float(t_end_getter(), None)
+                    if t_end_h is not None:
+                        solar_t_end = now.replace(
+                            hour=0,
+                            minute=0,
+                            second=0,
+                            microsecond=0,
+                        ) + timedelta(hours=t_end_h)
+                except Exception:  # noqa: BLE001 - dashboard projection is optional
+                    solar_t_end = None
         weekly_charge_bypasses_delay = (
             ChargeDischargeController._daily_operation_weekly_delay_bypass(self)
         )
@@ -1958,6 +1982,11 @@ class ChargeDischargeController:
                 ),
                 setpoint_soc_pct=self._daily_operation_float(
                     getattr(self, "_delay_soc_setpoint", None), 0.0
+                ),
+                target_soc_pct=target_soc_pct,
+                solar_t_end=solar_t_end,
+                safety_margin_h=self._daily_operation_float(
+                    getattr(self, "_delay_safety_margin_h", None), None
                 ),
                 system_charge_power_w=system_charge_power_w,
                 system_discharge_power_w=system_discharge_power_w,

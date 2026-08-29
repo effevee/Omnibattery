@@ -1446,6 +1446,8 @@ def project_charge_delay(
     charge_efficiency: float = CHARGE_EFFICIENCY,
     discharge_efficiency: float = 1.0,
     unlock_at: datetime | None = None,
+    solar_t_end: datetime | None = None,
+    safety_margin_h: float | None = None,
     system_charge_power_w: float | None = None,
     system_discharge_power_w: float | None = None,
 ) -> ChargeDelayProjection:
@@ -1453,10 +1455,15 @@ def project_charge_delay(
 
     The function can estimate when every eligible battery reaches a supplied
     SOC setpoint using the same interval and quota model as the flow simulator.
-    An unlock timestamp is authoritative only when supplied explicitly.  If it
-    is omitted, the conservative fallback is the first post-setpoint interval
-    whose forecasted solar is below household consumption; it does not model
-    prices, mutable latches, or reactive blockers.
+    When ``target_soc_pct``, ``solar_t_end`` and ``safety_margin_h`` are also
+    supplied, the projected unlock includes the same time-backup boundary used
+    by the live charge-delay controller: the final target must be reachable
+    before the end of solar production minus the configured margin.  An unlock
+    timestamp is authoritative only when supplied explicitly.  Otherwise the
+    fallback is the earliest available boundary between that time-backup edge
+    and the first post-setpoint interval whose forecasted solar is below
+    household consumption; it does not model prices, mutable latches, or
+    reactive blockers.
     """
     if not enabled or not charge_delay_enabled:
         return ChargeDelayProjection(None, None, None, "disabled", "disabled")
@@ -1470,12 +1477,20 @@ def project_charge_delay(
         return ChargeDelayProjection(
             None, None, None, "pure_projection", "no_batteries"
         )
-    target = target_soc_pct if target_soc_pct is not None else setpoint_soc_pct
-    if target is None:
-        target = min(
+    setpoint_target = setpoint_soc_pct
+    if setpoint_target is None:
+        setpoint_target = target_soc_pct
+    if setpoint_target is None:
+        setpoint_target = min(
             _bounded(battery.max_soc_pct, 0.0, 100.0, 0.0) for battery in valid
         )
-    target = _bounded(target, 0.0, 100.0, 0.0)
+    setpoint_target = _bounded(setpoint_target, 0.0, 100.0, 0.0)
+    final_target = _bounded(
+        target_soc_pct if target_soc_pct is not None else setpoint_target,
+        0.0,
+        100.0,
+        setpoint_target,
+    )
 
     result = simulate_battery_projection(
         interval_list,
@@ -1490,7 +1505,10 @@ def project_charge_delay(
     )
     target_energy = {
         str(battery.key): _finite(battery.capacity_kwh)
-        * min(target, _bounded(battery.max_soc_pct, 0.0, 100.0, target))
+        * min(
+            setpoint_target,
+            _bounded(battery.max_soc_pct, 0.0, 100.0, setpoint_target),
+        )
         / 100.0
         for battery in valid
     }
@@ -1522,12 +1540,76 @@ def project_charge_delay(
     unlock = unlock_at
     reason = "explicit_unlock" if unlock is not None else "no_projected_unlock"
     if unlock is None:
+        time_backup_unlock = None
+        if isinstance(solar_t_end, datetime) and safety_margin_h is not None:
+            margin_h = _finite(safety_margin_h, -1.0)
+            if margin_h >= 0.0:
+                remaining_input_kwh = 0.0
+                charge_power_w = 0.0
+                can_estimate_time = True
+                for battery in valid:
+                    limits = _battery_limits(battery)
+                    if limits is None:
+                        continue
+                    initial_stored, _minimum, maximum, power_w, _discharge, capacity = limits
+                    setpoint_stored = target_energy[str(battery.key)]
+                    stored_at_delay_start = max(initial_stored, setpoint_stored)
+                    final_stored = min(
+                        maximum,
+                        capacity * min(
+                            final_target,
+                            _bounded(battery.max_soc_pct, 0.0, 100.0, final_target),
+                        )
+                        / 100.0,
+                    )
+                    remaining_stored_kwh = max(
+                        0.0, final_stored - stored_at_delay_start
+                    )
+                    if remaining_stored_kwh <= _EPSILON:
+                        continue
+                    efficiency = _effective_efficiency(
+                        battery.charge_efficiency, charge_efficiency
+                    )
+                    if not battery.can_charge or efficiency <= _EPSILON:
+                        can_estimate_time = False
+                        break
+                    remaining_input_kwh += remaining_stored_kwh / efficiency
+                    charge_power_w += power_w
+
+                if can_estimate_time:
+                    if remaining_input_kwh <= _EPSILON:
+                        time_backup_unlock = reached_at
+                    else:
+                        if system_charge_power_w is not None:
+                            charge_power_w = min(
+                                charge_power_w,
+                                _non_negative(system_charge_power_w),
+                            )
+                        if charge_power_w > _EPSILON:
+                            charge_time_h = remaining_input_kwh / (
+                                charge_power_w / 1000.0
+                            )
+                            time_backup_unlock = solar_t_end - timedelta(
+                                hours=charge_time_h + margin_h
+                            )
+                            if _timestamp(time_backup_unlock) < _timestamp(reached_at):
+                                time_backup_unlock = reached_at
+
+        if time_backup_unlock is not None:
+            unlock = time_backup_unlock
+            reason = "projected_time_backup"
+
         for flow in result.intervals:
             if flow.end is None or _timestamp(flow.end) <= _timestamp(reached_at):
                 continue
             if flow.solar_kwh + _EPSILON < flow.consumption_kwh:
-                unlock = flow.start
-                reason = "projected_solar_deficit"
+                solar_deficit_unlock = flow.start
+                if (
+                    unlock is None
+                    or _timestamp(solar_deficit_unlock) < _timestamp(unlock)
+                ):
+                    unlock = solar_deficit_unlock
+                    reason = "projected_solar_deficit"
                 break
     if unlock is not None and _timestamp(unlock) < _timestamp(reached_at):
         unlock = reached_at

@@ -342,6 +342,54 @@ def test_setpoint_context_stops_after_the_interval_that_reaches_it():
     assert not masks[2] & CONTEXT_SETPOINT
 
 
+def test_setpoint_unlock_projection_uses_final_target_and_safety_margin():
+    now = datetime(2026, 8, 29, 10, 45, tzinfo=MADRID)
+    intervals = []
+    for index in range(44):
+        start = now + timedelta(minutes=15 * index)
+        intervals.append(
+            ProjectionIntervalInput(
+                start,
+                start + timedelta(minutes=15),
+                consumption_kwh=0.1,
+                solar_kwh=1.0 if start.hour < 19 else 0.0,
+            )
+        )
+    tracker = SimpleNamespace(
+        get_today_target_soc=lambda: 95,
+        estimate_t_end=lambda: 21.45,
+    )
+    controller = _controller_for_projection(
+        now,
+        intervals,
+        [],
+        [BatteryProjectionInput("a", 5.8125, 11.625, 0, 100, 4500, 4500)],
+        _consumption_tracker=tracker,
+        charge_delay_enabled=True,
+        _delay_soc_setpoint_enabled=True,
+        _delay_soc_setpoint=75.0,
+        _delay_setpoint_reached=False,
+        _delay_safety_margin_h=6.0,
+        _charge_delay_status={"state": "Charging to setpoint"},
+    )
+
+    result = ChargeDischargeController._daily_operation_build_projection(
+        controller, now
+    )
+
+    assert result is not None
+    delay_projection = result["_delay_projection"]
+    assert delay_projection["setpoint_reached_at"].startswith(
+        "2026-08-29T11:45:"
+    )
+    # T_end 21:27 - 0.61 h of charging from 75% to 95% - 6 h margin.
+    # The first projected solar deficit is at 19:00, so the time-backup edge
+    # must win and match the later runtime estimate of 14:50.
+    assert delay_projection["estimated_unlock_at"].startswith(
+        "2026-08-29T14:50:"
+    )
+
+
 def test_active_delay_after_setpoint_blocks_projected_charge_until_unlock():
     now = datetime(2026, 8, 24, 13, 45, tzinfo=MADRID)
     unlock = now.replace(hour=14, minute=49)

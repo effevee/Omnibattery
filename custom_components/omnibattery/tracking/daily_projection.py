@@ -59,6 +59,9 @@ class DailyOperationProjectionRequest:
     delay_unlock: datetime | None = None
     charge_delay_enabled: bool = False
     setpoint_soc_pct: float = 0.0
+    target_soc_pct: float | None = None
+    solar_t_end: datetime | None = None
+    safety_margin_h: float | None = None
     system_charge_power_w: float | None = None
     system_discharge_power_w: float | None = None
     operation_plan_source: str = "profile_projection"
@@ -191,11 +194,14 @@ def build_daily_operation_projection(
                 projection_inputs,
                 request.battery_inputs,
                 setpoint_soc_pct=request.setpoint_soc_pct,
+                target_soc_pct=request.target_soc_pct,
                 enabled=request.setpoint_enabled,
                 charge_delay_enabled=request.charge_delay_enabled,
                 now=now,
                 allocations=request.allocations,
                 unlock_at=request.delay_unlock,
+                solar_t_end=request.solar_t_end,
+                safety_margin_h=request.safety_margin_h,
                 system_charge_power_w=request.system_charge_power_w,
                 system_discharge_power_w=request.system_discharge_power_w,
             )
