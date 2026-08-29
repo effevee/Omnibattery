@@ -1071,9 +1071,11 @@ class ChargeDischargeController:
         self._charge_delay_last_date = None       # For daily reset
         self._charge_delay_forecast_cache = None  # Last forecast value used for balance check
         self._charge_delay_forecast_source_cache = None
+        self._charge_delay_forecast_conversion_cache = None
         self._charge_delay_profile_source_cache = None
         self._charge_delay_balance_needs_charge = True  # Cached balance result (conservative default)
         self._forecast_unavailable_since = None   # monotonic ts when a configured forecast sensor first read unavailable
+        self._forecast_zero_since = None          # bounded grace for a provisional midnight zero
         self._forecast_grace_s = 300              # hold the delay through forecast blips / HA-startup sensor loading before unlocking
         self._solar_t_start = None
         self._delay_last_log_time = 0           # Throttle logging to every 5 minutes
@@ -1098,6 +1100,8 @@ class ChargeDischargeController:
             "solar_forecast_diagnostic_source": None,
             "charge_time_h": None,
             "estimated_unlock_time": None,
+            "projected_unlock_time": None,
+            "estimated_setpoint_time": None,
             "unlock_reason": None,
             "safety_margin_min": int(self._delay_safety_margin_h * 60),
             "soc_setpoint": self._delay_soc_setpoint if self._delay_soc_setpoint_enabled else None,
@@ -2086,10 +2090,23 @@ class ChargeDischargeController:
             if projection is not None:
                 delay_projection = projection.pop("_delay_projection", None)
                 if isinstance(delay_projection, dict) and not weekly_delay_bypassed:
-                    delay.setdefault(
-                        "estimated_unlock_time",
-                        delay_projection.get("estimated_unlock_at"),
-                    )
+                    projected_unlock = delay_projection.get("estimated_unlock_at")
+                    if delay.get("estimated_unlock_time") is None:
+                        delay["estimated_unlock_time"] = projected_unlock
+                    # A runtime clock is authoritative once the solar decision
+                    # exists.  Before that (during SOC-setpoint charging), make
+                    # the purely projected milestones explicit rather than
+                    # presenting them as a completed delay decision.
+                    status = self._charge_delay_status
+                    if status.get("state") == "Charging to setpoint":
+                        status["projected_unlock_time"] = projected_unlock
+                        status["estimated_setpoint_time"] = delay_projection.get(
+                            "setpoint_reached_at"
+                        )
+                        delay["projected_unlock_time"] = projected_unlock
+                        delay["estimated_setpoint_time"] = status[
+                            "estimated_setpoint_time"
+                        ]
                 manager.rebuild_future_projection(
                     projection,
                     now=current,
@@ -2624,6 +2641,7 @@ class ChargeDischargeController:
             # next cycle (it is otherwise cached until the forecast value moves).
             self._charge_delay_forecast_cache = None
             self._charge_delay_forecast_source_cache = None
+            self._charge_delay_forecast_conversion_cache = None
             self._charge_delay_profile_source_cache = None
         self._charge_delay_balance_deadband_kwh = new_balance_deadband
         self._delay_soc_setpoint_enabled = self.config_entry.data.get(CONF_DELAY_SOC_SETPOINT_ENABLED, DEFAULT_DELAY_SOC_SETPOINT_ENABLED)

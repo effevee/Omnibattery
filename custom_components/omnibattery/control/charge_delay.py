@@ -35,7 +35,10 @@ from ..const import (
     PREDICTIVE_MODE_REALTIME_PRICE,
     T_START_FALLBACK_HOUR,
 )
-from ..solar_forecast import read_solar_forecast_kwh
+from ..solar_forecast import (
+    get_configured_solar_forecast_sensor,
+    read_remaining_solar_kwh,
+)
 
 # Price-aware release only makes sense when charging is actually scheduled by
 # price. In time-slot mode prices drive nothing, so a configured price_sensor
@@ -58,6 +61,30 @@ _REAL_DATETIME = datetime
 # charge delay for the rest of the day. Keeping them re-evaluable lets the delay
 # re-arm as soon as the data comes back.
 _TRANSIENT_UNLOCK_REASONS = frozenset({"no_forecast"})
+
+# Fields that describe a completed forecast decision.  The setpoint phase exits
+# before calculating a new decision, so retaining these values there makes the
+# status sensor report yesterday's (or a previous-cycle) solar balance as if it
+# were current.
+_DECISION_STATUS_FIELDS = (
+    "forecast_kwh",
+    "solar_t_start",
+    "solar_t_end",
+    "energy_needed_kwh",
+    "remaining_solar_kwh",
+    "remaining_consumption_kwh",
+    "net_solar_kwh",
+    "consumption_forecast_source",
+    "profile_coverage_ratio",
+    "profile_days",
+    "profile_fallback_reason",
+    "solar_forecast_source",
+    "solar_forecast_diagnostic_source",
+    "solar_forecast_conversion",
+    "charge_time_h",
+    "estimated_unlock_time",
+    "unlock_reason",
+)
 
 
 def _decision_now() -> datetime:
@@ -113,6 +140,13 @@ class ChargeDelayManager:
         if callable(close):
             close()
         return None
+
+    def _clear_completed_decision_status(self) -> None:
+        """Clear solar-decision details while charging to the SOC setpoint."""
+        status = self._controller._charge_delay_status
+        for key in _DECISION_STATUS_FIELDS:
+            if key in status:
+                status[key] = None
 
     async def load_state(self) -> None:
         """Restore same-day charge delay latch state from storage."""
@@ -200,6 +234,7 @@ class ChargeDelayManager:
                 ctrl._delay_setpoint_reached = False
                 ctrl._solar_t_start = None
                 ctrl._forecast_unavailable_since = None
+                ctrl._forecast_zero_since = None
             # On first cycle after HA restart (_charge_delay_last_date is None),
             # _charge_delay_unlocked may have been restored from storage by
             # _weekly_charge_mgr.load_state() — preserve it rather than wiping it.
@@ -215,6 +250,7 @@ class ChargeDelayManager:
                 ctrl._charge_delay_status["safety_margin_min"] = saved_margin
             ctrl._charge_delay_forecast_cache = None
             ctrl._charge_delay_forecast_source_cache = None
+            ctrl._charge_delay_forecast_conversion_cache = None
             ctrl._charge_delay_profile_source_cache = None
             ctrl._charge_delay_balance_needs_charge = True
             self.schedule_save()
@@ -243,6 +279,9 @@ class ChargeDelayManager:
 
         target_soc = ctrl._consumption_tracker.get_today_target_soc()
         ctrl._charge_delay_status["target_soc"] = target_soc
+        ctrl._charge_delay_status["soc_setpoint"] = (
+            ctrl._delay_soc_setpoint if ctrl._delay_soc_setpoint_enabled else None
+        )
 
         # Already unlocked today?
         if ctrl._charge_delay_unlocked:
@@ -263,6 +302,7 @@ class ChargeDelayManager:
             )
             if not ctrl._delay_setpoint_reached:
                 if min_soc < ctrl._delay_soc_setpoint:
+                    self._clear_completed_decision_status()
                     ctrl._charge_delay_status["state"] = "Charging to setpoint"
                     return False
                 ctrl._delay_setpoint_reached = True
@@ -272,6 +312,7 @@ class ChargeDelayManager:
                 if min_soc < low_threshold:
                     ctrl._delay_setpoint_reached = False
                     self.schedule_save()
+                    self._clear_completed_decision_status()
                     ctrl._charge_delay_status["state"] = "Charging to setpoint"
                     return False
 
@@ -429,7 +470,10 @@ class ChargeDelayManager:
         status["solar_t_start"] = _h_to_hhmm(ctrl._solar_t_start)
 
         # --- Exception 1: No solar forecast sensor or unavailable ---
-        if not (getattr(ctrl, "solar_forecast_remaining_sensor", None) or ctrl.solar_forecast_sensor):
+        if not (
+            get_configured_solar_forecast_sensor(ctrl, "remaining")
+            or get_configured_solar_forecast_sensor(ctrl, "today")
+        ):
             _LOGGER.info("Charge Delay: No solar forecast sensor configured - unlocking (reason: no_forecast)")
             return _unlock("no_forecast")
 
@@ -440,10 +484,16 @@ class ChargeDelayManager:
         # current delay through a short grace window and only unlock if the sensor
         # stays unavailable. (A sensor that is not configured at all still unlocks
         # immediately above — that is a deliberate fail-safe, not a transient.)
-        forecast = read_solar_forecast_kwh(ctrl.hass, ctrl)
-        raw_forecast = forecast.kwh if forecast is not None else None
+        # All Charge Delay calculations consume the shared *remaining* budget.
+        # In particular, legacy whole-day sensors are converted exactly once by
+        # this adapter, while a remaining sensor is passed through unchanged.
+        forecast = read_remaining_solar_kwh(ctrl.hass, ctrl, now=now)
+        raw_forecast = (
+            None if forecast.source == "fallback" else forecast.remaining_kwh
+        )
 
         if raw_forecast is None:
+            ctrl._forecast_zero_since = None
             mono = monotonic()
             if ctrl._forecast_unavailable_since is None:
                 ctrl._forecast_unavailable_since = mono
@@ -463,10 +513,47 @@ class ChargeDelayManager:
 
         # Forecast recovered / valid — clear the transient tracker.
         ctrl._forecast_unavailable_since = None
+        status["unlock_reason"] = None
         forecast_today = raw_forecast
-        forecast_is_remaining = forecast.source == "remaining"
-        status["solar_forecast_source"] = forecast.source
-        status["solar_forecast_diagnostic_source"] = forecast.diagnostic_source
+        forecast_origin = (
+            "today" if forecast.original_source == "today_legacy"
+            else forecast.original_source
+        )
+        # The scalar may briefly roll to zero at local midnight before the
+        # provider publishes the new day's budget.  Dated periods are already
+        # reconciled by read_remaining_solar_kwh; for a scalar-only zero, hold
+        # through the same bounded grace used for unavailable values.  This is
+        # deliberately not a permanent unlock, so a later valid update re-arms
+        # the delay instead of leaving it open for the day.
+        if raw_forecast <= 1e-9:
+            zero_since = getattr(ctrl, "_forecast_zero_since", None)
+            if zero_since is None and now_h < 1.0:
+                zero_since = monotonic()
+                ctrl._forecast_zero_since = zero_since
+            if (
+                zero_since is not None
+                and monotonic() - zero_since < ctrl._forecast_grace_s
+            ):
+                status["forecast_kwh"] = raw_forecast
+                status["solar_forecast_source"] = forecast_origin
+                status["solar_forecast_diagnostic_source"] = forecast.source
+                status["solar_forecast_conversion"] = forecast.conversion
+                status["unlock_reason"] = None
+                status["state"] = "Waiting for forecast"
+                return True
+        else:
+            ctrl._forecast_zero_since = None
+
+        # read_remaining_solar_kwh normalizes both configured sources to the
+        # same future horizon, so downstream consumers must never subtract
+        # production or apply a second temporal curve based on its origin.
+        status["unlock_reason"] = None
+        status["projected_unlock_time"] = None
+        status["estimated_setpoint_time"] = None
+        forecast_is_remaining = True
+        status["solar_forecast_source"] = forecast_origin
+        status["solar_forecast_diagnostic_source"] = forecast.source
+        status["solar_forecast_conversion"] = forecast.conversion
         status["forecast_kwh"] = raw_forecast
 
         # --- Exception 2: Energy balance check (dynamic, recalculated only when forecast changes) ---
@@ -480,15 +567,18 @@ class ChargeDelayManager:
             return _unlock("no_forecast")
 
         profile_balance = self._profile_forecast_between(
-            now_h if forecast_is_remaining else 0.0,
+            now_h,
             24.0,
         )
         profile_source = profile_balance.source if profile_balance is not None else "legacy_daily"
+        forecast_source = forecast_origin or forecast.source
         if (
             ctrl._charge_delay_forecast_cache is None
             or abs(forecast_today - ctrl._charge_delay_forecast_cache) > 0.05
             or getattr(ctrl, "_charge_delay_forecast_source_cache", None)
-            != forecast.source
+            != forecast_source
+            or getattr(ctrl, "_charge_delay_forecast_conversion_cache", None)
+            != forecast.conversion
             or getattr(ctrl, "_charge_delay_profile_source_cache", None)
             != profile_source
         ):
@@ -510,7 +600,7 @@ class ChargeDelayManager:
                 status["profile_fallback_reason"] = profile_balance.fallback_reason
             else:
                 avg_consumption_kwh = ctrl._consumption_tracker.get_avg_daily_consumption()
-            if profile_balance is None and forecast_is_remaining:
+            if profile_balance is None:
                 remaining_window_hours = ctrl._consumption_tracker.consumption_window_hours_in_range(now_h, 24.0)
                 window_hours = ctrl._consumption_tracker.get_consumption_window_hours_per_day()
                 avg_consumption_kwh *= remaining_window_hours / window_hours if window_hours > 0 else 0.0
@@ -527,7 +617,8 @@ class ChargeDelayManager:
                 < (avg_consumption_kwh - deadband_kwh)
             )
             ctrl._charge_delay_forecast_cache = forecast_today
-            ctrl._charge_delay_forecast_source_cache = forecast.source
+            ctrl._charge_delay_forecast_source_cache = forecast_source
+            ctrl._charge_delay_forecast_conversion_cache = forecast.conversion
             ctrl._charge_delay_profile_source_cache = profile_source
             _LOGGER.info(
                 "Charge Delay: Forecast %s (%.2f kWh) → "

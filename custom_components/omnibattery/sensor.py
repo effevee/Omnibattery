@@ -753,6 +753,7 @@ class ChargeDelaySensor(RestoreEntity, SensorEntity):
         attrs = {
             "state": status.get("state", "Idle"),
             "target_soc": status.get("target_soc"),
+            "soc_setpoint": status.get("soc_setpoint"),
             "safety_margin_min": status.get("safety_margin_min"),
         }
 
@@ -763,7 +764,8 @@ class ChargeDelaySensor(RestoreEntity, SensorEntity):
             "consumption_forecast_source", "profile_coverage_ratio",
             "profile_days", "profile_fallback_reason", "solar_forecast_source",
             "solar_forecast_diagnostic_source",
-            "charge_time_h", "estimated_unlock_time", "unlock_reason",
+            "solar_forecast_conversion", "charge_time_h", "estimated_unlock_time",
+            "projected_unlock_time", "estimated_setpoint_time", "unlock_reason",
         ):
             value = status.get(key)
             if value is not None:

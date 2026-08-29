@@ -4,6 +4,9 @@
 
 ### Fixed
 
+- **Solar Charge Delay could permanently unlock at the midnight forecast rollover**: it now uses the shared normalized remaining-solar input, preserves dated provider periods, and treats a scalar zero before solar hours as transient through the bounded forecast grace rather than latching a false `low_forecast` day. Legacy whole-day sensors remain converted once, without a second production subtraction or curve transform.
+- **Solar Charge Delay status could retain stale forecast details while charging to its SOC setpoint**: obsolete balance and unlock values are cleared, the configured `soc_setpoint` is published, and Daily Operation now exposes projected setpoint/unlock milestones separately until a runtime delay clock is available.
+- **Daily Operation could drop a projected Charge Delay clock when the status carried `estimated_unlock_time: null`**: projection data now replaces an absent/null clock instead of using `setdefault`.
 - **Solar Charge Delay could erase the yellow solar-window background in Daily Operation**: delayed intervals continue to block projected battery charging and remain marked with their unlock clocks, while any underlying solar surplus is again shown as a yellow opportunity instead of being forced to neutral; green remains reserved for solar energy actually assigned to the battery.
 - **Daily Operation could claim that a mature solar profile was still learning every night**: an empty post-sunset progress range now preserves the profile's global maturity, and a normal zero remaining-solar budget takes precedence over irrelevant candidate fallback reasons so the dashboard no longer shows a misleading alternative-estimate warning.
 - **Daily Operation could show Charge Delay clocks after the feature was disabled**: the timeline DTO now preserves the live enabled state and the dashboard requires it before rendering delay markers, suppressing residual stored boundaries without breaking older payloads.

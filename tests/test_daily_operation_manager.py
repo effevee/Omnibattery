@@ -637,6 +637,62 @@ def test_midnight_refresh_normalizes_utc_and_publishes_one_complete_snapshot():
     assert published[0]["operations"]["planned_action_mask"][0] == ACTION_GRID_CHARGE
 
 
+def test_projection_replaces_null_delay_clock_and_marks_setpoint_milestones():
+    now = datetime(2026, 8, 24, 0, 0, tzinfo=MADRID)
+    clock = MutableClock(now)
+    manager = _manager(clock, mode="normal")
+    projected_setpoint = now + timedelta(hours=1)
+    projected_unlock = now + timedelta(hours=11)
+
+    controller = SimpleNamespace(
+        _daily_operation_timeline=manager,
+        _consumption_tracker=SimpleNamespace(
+            consumption_profile=None, solar_profile=None
+        ),
+        _daily_operation_capture=ChargeDischargeController._daily_operation_capture,
+        _daily_operation_runtime_decision=lambda _current, **_kwargs: {
+            "action_mask": 0,
+            "context_mask": 0,
+            "simultaneous": False,
+        },
+        _daily_operation_last_runtime_at=None,
+        _dynamic_pricing_schedule=None,
+        _daily_operation_mode=lambda: "normal",
+        _daily_operation_float=ChargeDischargeController._daily_operation_float,
+        _daily_operation_last_projection_signature=None,
+        _daily_operation_last_projection_monotonic=0.0,
+        _daily_operation_build_projection=lambda _now: {
+            "intervals": [],
+            "mode": "normal",
+            "stale": False,
+            "sources": {"operation_plan": "projection"},
+            "_delay_projection": {
+                "setpoint_reached_at": projected_setpoint,
+                "estimated_unlock_at": projected_unlock,
+            },
+        },
+        _delay_soc_setpoint_enabled=True,
+        _delay_soc_setpoint=50.0,
+        _delay_setpoint_reached=False,
+        charge_delay_enabled=True,
+        _charge_delay_unlocked=False,
+        _charge_delay_status={
+            "state": "Charging to setpoint",
+            "estimated_unlock_time": None,
+        },
+        _balance_monitor_overrides_delay=lambda: False,
+    )
+
+    ChargeDischargeController._refresh_daily_operation_timeline(
+        controller, now=now, force_projection=True
+    )
+
+    assert controller._charge_delay_status["projected_unlock_time"] == projected_unlock
+    assert controller._charge_delay_status["estimated_setpoint_time"] == projected_setpoint
+    assert manager._delay_info["estimated_unlock_time"] == projected_unlock.isoformat()
+    assert manager._delay_info["projected_unlock_time"] == projected_unlock.isoformat()
+
+
 def test_fall_back_hour_keeps_the_second_occurrence_writable():
     clock = MutableClock(datetime(2026, 10, 25, 2, 0, tzinfo=MADRID, fold=0))
     manager = _manager(clock, mode="normal")
