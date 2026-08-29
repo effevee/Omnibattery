@@ -1755,10 +1755,22 @@ async def test_an_unknown_storage_falls_back_to_the_inverter_model():
 # all, and no test noticed because inspecting markers never serialises them.
 # ----------------------------------------------------------------------
 def _serialise(schema):
-    import voluptuous_serialize
     from homeassistant.helpers import config_validation as cv
 
-    return voluptuous_serialize.convert(schema, custom_serializer=cv.custom_serializer)
+    # Home Assistant 2026 serializes its probatio schemas with to_field_list;
+    # older supported test environments expose the voluptuous serializer instead.
+    try:
+        from probatio import to_field_list
+    except ImportError:
+        import voluptuous_serialize
+
+        result = voluptuous_serialize.convert(
+            schema, custom_serializer=cv.custom_serializer
+        )
+    else:
+        result = to_field_list(schema, custom_serializer=cv.custom_serializer)
+    assert isinstance(result, list), f"schema did not serialize: {result!r}"
+    return result
 
 
 def test_every_huawei_form_can_be_sent_to_the_frontend():

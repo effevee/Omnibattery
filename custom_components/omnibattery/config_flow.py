@@ -1252,6 +1252,7 @@ class MarstekVenusConfigFlow(LegacyDomainMigrationMixin, ConfigFlow, domain=DOMA
             # value instead of persisting both forecast horizons.
             forecast_sensor = user_input.get(CONF_SOLAR_FORECAST_SENSOR)
             remaining_sensor = user_input.get(CONF_SOLAR_FORECAST_REMAINING_SENSOR)
+            solar_sensor = user_input.get(CONF_SOLAR_PRODUCTION_SENSOR)
             forecast_candidates = (
                 ((CONF_SOLAR_FORECAST_REMAINING_SENSOR, remaining_sensor),)
                 if remaining_sensor
@@ -3679,6 +3680,7 @@ class OptionsFlowHandler(OptionsFlow):
                 # Validate both explicit forecast horizons.
                 forecast_sensor = user_input.get(CONF_SOLAR_FORECAST_SENSOR)
                 remaining_sensor = user_input.get(CONF_SOLAR_FORECAST_REMAINING_SENSOR)
+                solar_sensor = user_input.get(CONF_SOLAR_PRODUCTION_SENSOR)
                 forecast_candidates = (
                     ((CONF_SOLAR_FORECAST_REMAINING_SENSOR, remaining_sensor),)
                     if remaining_sensor

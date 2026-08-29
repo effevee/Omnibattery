@@ -70,7 +70,7 @@ def is_omnibattery_solar_entity(hass, entity_id: str | None) -> bool:
         return True
     try:
         entry = er.async_get(hass).async_get(entity_id)
-    except (AttributeError, KeyError):
+    except (AttributeError, KeyError, TypeError):
         return False
     return bool(
         entry
