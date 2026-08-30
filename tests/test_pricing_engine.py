@@ -156,6 +156,33 @@ def test_hacs_nordpool_current_price_and_unit_are_normalized_from_cents():
     assert manager._get_price_unit() == "€/kWh"
 
 
+def test_future_price_slots_reuses_parse_until_source_or_quarter_changes():
+    state = SimpleNamespace(last_updated=datetime(2026, 8, 30, 0, 0))
+    hass = SimpleNamespace(states=SimpleNamespace(get=lambda _entity_id: state))
+    ctrl = _controller(price_sensor="sensor.nordpool")
+    manager = PricingManager(hass, ctrl)
+    current = datetime(2026, 8, 30, 0, 5)
+    manager._now = lambda: current
+    slot = PriceSlot(current, current + timedelta(minutes=15), 0.1)
+    calls = []
+
+    def parse_slots(*, horizon_end=None, quiet=False):
+        calls.append((horizon_end, quiet))
+        return [slot]
+
+    manager._parse_price_data = parse_slots
+
+    assert manager.get_future_price_slots() == [slot]
+    assert manager.get_future_price_slots() == [slot]
+    assert calls == [(None, True)]
+
+    state.last_updated += timedelta(seconds=1)
+    assert manager.get_future_price_slots() == [slot]
+    current += timedelta(minutes=15)
+    assert manager.get_future_price_slots() == [slot]
+    assert calls == [(None, True), (None, True), (None, True)]
+
+
 # ----------------------------------------------------------------------
 # is_in_dynamic_pricing_slot
 # ----------------------------------------------------------------------

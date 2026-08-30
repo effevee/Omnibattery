@@ -18,6 +18,7 @@ from custom_components.omnibattery.pricing.chronological import (
     simulate_allocations,
 )
 from custom_components.omnibattery.pricing.engine import PricingManager
+from custom_components.omnibattery.pricing.solar_timeline import build_boundaries
 
 
 BASE = datetime(2026, 8, 18)
@@ -64,6 +65,30 @@ def test_pure_chronological_evaluation_needs_no_controller_or_mutable_state():
     assert result.plan.allocated_kwh == pytest.approx(0.5)
     assert result.diagnostics.deadline_required_kwh == pytest.approx(0.5)
     assert result.diagnostics.energy_deadlines == tuple(result.plan.deadlines)
+
+
+def test_naive_daily_horizon_allocates_slots_against_energy_deadlines():
+    """The 00:05 planner must compare provider slots and derived deadlines."""
+    now = BASE + timedelta(minutes=5)
+    horizon_end = BASE + timedelta(days=1)
+    boundaries = build_boundaries(now, horizon_end)
+    intervals = [EnergyInterval(*boundaries[0], 1.0, 0.0)]
+    deadlines = build_energy_deadlines(intervals, usable_initial_kwh=0.0)
+    slot = _slot(0, 15, 0.1)
+
+    plan = allocate_price_slots(
+        intervals,
+        deadlines,
+        [slot],
+        total_required_kwh=1.0,
+        effective_power_kw=4.0,
+        now=now,
+        horizon_end=horizon_end,
+    )
+
+    assert deadlines
+    assert plan.allocations
+    assert plan.deadline_required_kwh == pytest.approx(1.0)
 
 
 def test_manager_projection_api_matches_pure_chronological_evaluation():

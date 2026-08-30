@@ -51,6 +51,16 @@ def test_partial_first_interval_keeps_actual_start_and_duration():
     )
 
 
+def test_naive_horizon_keeps_naive_boundaries_for_runtime_price_slots():
+    start = datetime(2026, 8, 30, 0, 5)
+    end = datetime(2026, 8, 31, 0, 0)
+
+    boundaries = build_boundaries(start, end)
+
+    assert boundaries
+    assert all(item.tzinfo is None for boundary in boundaries for item in boundary)
+
+
 @pytest.mark.parametrize(
     ("local_date", "expected_intervals", "expected_hours"),
     [

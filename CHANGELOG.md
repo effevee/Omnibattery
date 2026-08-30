@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- **Dynamic Pricing could lose deadline-aware planning at the daily evaluation**: chronological solar boundaries now preserve the runtime price slots' datetime-awareness contract, preventing naive/aware comparison failures when day-ahead prices are not yet published. Charge Delay also reuses unchanged price parsing within each quarter instead of reparsing the same sensor several times per control cycle.
 - **Solar Charge Delay could permanently unlock at the midnight forecast rollover**: it now uses the shared normalized remaining-solar input, preserves dated provider periods, and treats a scalar zero before solar hours as transient through the bounded forecast grace rather than latching a false `low_forecast` day. Legacy whole-day sensors remain converted once, without a second production subtraction or curve transform.
 - **Solar Charge Delay status could retain stale forecast details while charging to its SOC setpoint**: obsolete balance and unlock values are cleared, the configured `soc_setpoint` is published, and Daily Operation now exposes projected setpoint/unlock milestones separately until a runtime delay clock is available.
 - **Daily Operation could project the Charge Delay unlock at the first solar deficit instead of the configured safety boundary**: setpoint projections now include the final SOC target, solar end time and safety margin, matching the runtime unlock estimate.

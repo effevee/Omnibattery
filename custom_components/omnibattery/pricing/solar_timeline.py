@@ -88,13 +88,22 @@ def build_boundaries(
     end_ts = _timestamp(end)
     if not math.isfinite(start_ts) or not math.isfinite(end_ts) or end_ts <= start_ts:
         return []
+    return_naive = start.tzinfo is None and end.tzinfo is None
     tz = start.tzinfo or end.tzinfo or timezone.utc
     result: list[tuple[datetime, datetime]] = []
     cursor = start_ts
     while cursor < end_ts - 1e-7:
         boundary = _next_local_quarter_timestamp(cursor, tz)
         segment_end = min(end_ts, max(cursor + 1e-7, boundary))
-        result.append((_from_timestamp(cursor, tz), _from_timestamp(segment_end, tz)))
+        segment_start = _from_timestamp(cursor, tz)
+        segment_finish = _from_timestamp(segment_end, tz)
+        if return_naive:
+            # Runtime price slots intentionally use local wall-clock datetimes.
+            # Preserve that contract when both horizon boundaries are naive so
+            # the derived energy deadlines remain comparable with those slots.
+            segment_start = segment_start.replace(tzinfo=None)
+            segment_finish = segment_finish.replace(tzinfo=None)
+        result.append((segment_start, segment_finish))
         cursor = segment_end
     return result
 

@@ -193,6 +193,8 @@ class PricingManager:
     def __init__(self, hass: "HomeAssistant", controller: Any) -> None:
         self._hass = hass
         self._controller = controller
+        self._future_price_slots_cache_key: tuple[Any, ...] | None = None
+        self._future_price_slots_cache: tuple[PriceSlot, ...] = ()
 
     def _now(self) -> datetime:
         """Return local wall-clock time, isolated for deterministic slot tests."""
@@ -801,7 +803,34 @@ class PricingManager:
         (e.g. the charge-delay price-aware release) that poll prices every control
         cycle and must not spam the log. Logging is demoted to debug level here.
         """
-        return self._parse_price_data(horizon_end=horizon_end, quiet=True)
+        now = self._now()
+        state = None
+        states = getattr(self._hass, "states", None)
+        price_sensor = getattr(self._controller, "price_sensor", None)
+        if states is not None and price_sensor:
+            try:
+                state = states.get(price_sensor)
+            except (AttributeError, TypeError):
+                state = None
+        cache_key = (
+            horizon_end,
+            now.date(),
+            now.hour,
+            now.minute // 15,
+            price_sensor,
+            id(state),
+            getattr(state, "last_updated", None),
+            id(getattr(self._controller, "_tibber_price_slots", None)),
+            getattr(self._controller, "_tibber_prices_fetched_at", None),
+            id(getattr(self._controller, "_nordpool_price_slots", None)),
+            getattr(self._controller, "_nordpool_prices_fetched_at", None),
+        )
+        if cache_key == self._future_price_slots_cache_key:
+            return list(self._future_price_slots_cache)
+        slots = self._parse_price_data(horizon_end=horizon_end, quiet=True)
+        self._future_price_slots_cache_key = cache_key
+        self._future_price_slots_cache = tuple(slots)
+        return list(slots)
 
     def _parse_price_data(self, *, horizon_end=None, quiet=False) -> list:
         """Read price sensor and return list[PriceSlot] for remaining slots up to horizon_end.
@@ -2753,7 +2782,11 @@ class PricingManager:
                 self._store_chronological_diagnostics(decision_data)
             return plan
         except (AttributeError, IndexError, TypeError, ValueError) as exc:
-            _LOGGER.warning("Dynamic pricing: chronological planning fallback: %s", exc)
+            _LOGGER.warning(
+                "Dynamic pricing: chronological planning fallback: %s",
+                exc,
+                exc_info=True,
+            )
             decision_data.update({
                 "chronological_planning_active": False,
                 "chronological_plan_reason": f"fallback: {exc}",
