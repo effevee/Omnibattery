@@ -28,6 +28,8 @@ from ..drivers.sessy import SessyLocalDriver
 from ..drivers.hoymiles import HoymilesMqttDriver
 from ..drivers.huawei import HuaweiSolarDriver
 from ..drivers.base import SetpointResult
+from ..backup_discharge_store import BackupDischargeEnergyStore
+from ..energy import BackupDischargeAccumulator
 from .alarm_notifier import AlarmNotifier
 from .mac_tracking import normalise_mac
 
@@ -133,7 +135,9 @@ class MarstekVenusDataUpdateCoordinator(DataUpdateCoordinator):
                  device_max_charge_power: int | None = None,
                  device_max_discharge_power: int | None = None,
                  ems_version: object = None,
-                 mac: str | None = None) -> None:
+                 mac: str | None = None,
+                 backup_discharge_store: BackupDischargeEnergyStore | None = None,
+                 backup_discharge_store_key: str | None = None) -> None:
         """Initialize the data update coordinator."""
         super().__init__(
             hass,
@@ -169,6 +173,31 @@ class MarstekVenusDataUpdateCoordinator(DataUpdateCoordinator):
             self.battery_version = DEFAULT_VERSION
         else:
             self.battery_version = battery_version
+
+        # Venus E v3's lifetime discharge register excludes energy delivered by
+        # the backup socket while the grid is down (#321). Integrate that one
+        # missing leg from fresh power samples. Other models remain untouched
+        # until their hardware-counter behaviour is confirmed independently.
+        self._backup_discharge_store = backup_discharge_store
+        self._backup_discharge_store_key = backup_discharge_store_key
+        self._backup_discharge_accumulator = None
+        if self.brand == "marstek" and self.battery_version == "v3":
+            today = dt_util.now().date().isoformat()
+            restored = (
+                backup_discharge_store.get(backup_discharge_store_key, today)
+                if backup_discharge_store is not None
+                and backup_discharge_store_key is not None
+                else {
+                    "total_kwh": 0.0,
+                    "daily_kwh": 0.0,
+                    "reset_date": today,
+                }
+            )
+            self._backup_discharge_accumulator = BackupDischargeAccumulator(
+                kwh=restored["total_kwh"],
+                daily_kwh=restored["daily_kwh"],
+                reset_date=restored["reset_date"],
+            )
 
         # Installation topology is distinct from the model's hardware MPPT
         # capability. Only Venus A/D expose those inputs; existing callers keep
@@ -1058,6 +1087,10 @@ class MarstekVenusDataUpdateCoordinator(DataUpdateCoordinator):
             dependency_keys_set.update(
                 {"total_charging_energy", "total_discharging_energy"}
             )
+        if getattr(self, "_backup_discharge_accumulator", None) is not None:
+            # The software accumulator is integration-owned and must keep
+            # working even if either source entity is disabled in the registry.
+            dependency_keys_set.update({"ac_offgrid_power", "inverter_state"})
         # Cell voltage keys are always needed by the balance monitor
         dependency_keys_set.update({"max_cell_voltage", "min_cell_voltage"})
         # Control registers must keep polling even when the user disables their
@@ -1291,6 +1324,12 @@ class MarstekVenusDataUpdateCoordinator(DataUpdateCoordinator):
         # Update the coordinator's data
         self.data.update(updated_data)
 
+        update_backup_discharge = getattr(
+            self, "_update_backup_discharge_energy", None
+        )
+        if update_backup_discharge is not None:
+            update_backup_discharge(updated_data)
+
         sync_marstek_ceiling = getattr(self, "_sync_marstek_ems_power_ceiling", None)
         if sync_marstek_ceiling is not None:
             sync_marstek_ceiling()
@@ -1387,6 +1426,34 @@ class MarstekVenusDataUpdateCoordinator(DataUpdateCoordinator):
             )
 
         return self.data
+
+    def _update_backup_discharge_energy(self, updated_data: dict) -> None:
+        """Integrate fresh Venus E v3 backup output and publish corrected totals."""
+        accumulator = self._backup_discharge_accumulator
+        if accumulator is None:
+            return
+
+        changed = False
+        if "ac_offgrid_power" in updated_data:
+            changed = accumulator.observe(
+                now_monotonic=time.monotonic(),
+                power_w=self.data.get("ac_offgrid_power"),
+                inverter_state=self.data.get("inverter_state"),
+                local_date=dt_util.now().date().isoformat(),
+            )
+        accumulator.publish(self.data)
+
+        if (
+            changed
+            and self._backup_discharge_store is not None
+            and self._backup_discharge_store_key is not None
+        ):
+            self._backup_discharge_store.set(
+                self._backup_discharge_store_key,
+                total_kwh=accumulator.kwh,
+                daily_kwh=accumulator.daily_kwh,
+                reset_date=accumulator.reset_date,
+            )
 
     def _get_entity_type(self, sensor_definition: dict, fallback_key: str | None = None) -> str:
         """Determine entity type based on sensor definition.

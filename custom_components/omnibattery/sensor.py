@@ -40,6 +40,10 @@ from .const import (
 )
 from .infra.coordinator import MarstekVenusDataUpdateCoordinator
 from .drivers.base import has_connected_mppt_pv
+from .energy import (
+    BACKUP_DISCHARGING_ENERGY_KEY,
+    effective_total_discharging_energy,
+)
 from .tracking.consumption_profile import INTERVAL_COUNT, INTERVAL_MINUTES
 from .sensors.aggregate_sensors import AGGREGATE_SENSOR_DEFINITIONS, SYSTEM_BATTERY_CELL_POWER_DEFINITION, MarstekVenusAggregateSensor, DailyGridAtMinSocSensor, SystemAlarmSensor, PdControlQualitySensor
 from .sensors.calculated_sensors import (
@@ -328,7 +332,12 @@ class MarstekVenusSensor(CoordinatorEntity, SensorEntity):
         """Return the state of the sensor."""
         if self.coordinator.data is None:
             return None
-        value = self.coordinator.data.get(self.definition["key"])
+        key = self.definition["key"]
+        value = self.coordinator.data.get(key)
+        if key == "total_discharging_energy":
+            corrected = effective_total_discharging_energy(self.coordinator.data)
+            if corrected is not None:
+                value = round(corrected, self.definition.get("precision", 2))
         
         if value is None:
             return None
@@ -372,6 +381,16 @@ class MarstekVenusSensor(CoordinatorEntity, SensorEntity):
         (Marstek version / Zendure product) rides along here on the always-present
         battery_soc entity the panel already reads.
         """
+        if self.definition["key"] == "total_discharging_energy":
+            backup = self.coordinator.data.get(BACKUP_DISCHARGING_ENERGY_KEY)
+            if backup is None:
+                return None
+            return {
+                "hardware_discharging_energy": self.coordinator.data.get(
+                    "total_discharging_energy"
+                ),
+                "backup_discharging_energy": backup,
+            }
         if self.definition["key"] != "battery_soc":
             return None
         model = getattr(self.coordinator.driver, "model_label", None)
@@ -562,7 +581,9 @@ class ActiveBatteriesSensor(SensorEntity):
         for c in self._coordinators:
             if c.data:
                 soc = c.data.get("battery_soc", "N/A")
-                discharge_kwh = c.data.get("total_discharging_energy", "N/A")
+                discharge_kwh = effective_total_discharging_energy(c.data)
+                if discharge_kwh is None:
+                    discharge_kwh = "N/A"
                 charge_kwh = c.data.get("total_charging_energy", "N/A")
                 attrs[f"{c.name}_soc"] = f"{soc}%"
                 attrs[f"{c.name}_total_discharged"] = f"{discharge_kwh} kWh"

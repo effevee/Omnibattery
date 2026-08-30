@@ -9525,6 +9525,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # platforms set up their entities (so the sensors find it cached, no race).
     from .synthetic_energy_backup import async_get_backup
     await async_get_backup(hass)
+    from .backup_discharge_store import async_get_backup_discharge_store
+    backup_discharge_store = await async_get_backup_discharge_store(hass)
 
     coordinators = []
     # A MAC shared by several batteries belongs to a Modbus gateway, not to a
@@ -9556,6 +9558,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 CONF_FULL_CHARGE_VOLTAGE_TAPER_ENABLED,
                 DEFAULT_FULL_CHARGE_VOLTAGE_TAPER_ENABLED,
             ),
+            backup_discharge_store=backup_discharge_store,
+            backup_discharge_store_key=f"{entry.entry_id}:{battery_index}",
             brand=battery_config.get("brand", "marstek"),
             zendure_model=battery_config.get("zendure_model", "2400ac_pro"),
             hoymiles_model=battery_config.get("hoymiles_model"),
