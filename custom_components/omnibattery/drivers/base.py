@@ -294,6 +294,32 @@ class BatteryDriver(ABC):
         Missing/failed values are omitted rather than set to None.
         """
 
+    @property
+    def supplemental_discharge_dependency_keys(self) -> frozenset[str]:
+        """Telemetry required to derive discharge omitted by hardware counters.
+
+        The coordinator treats this as a semantic driver hook: an empty set means
+        the hardware's cumulative discharge counter is complete. Drivers whose
+        counter omits a discharge path return the native telemetry keys needed to
+        identify and measure that path.
+        """
+        return frozenset()
+
+    def supplemental_discharge_power_w(
+        self,
+        data: dict,
+        updated_keys: frozenset[str],
+    ) -> Optional[float]:
+        """Return a fresh, normalized discharge sample missing from the counter.
+
+        ``None`` means no relevant sample was refreshed in this poll. ``0`` means
+        a relevant sample was refreshed but no supplemental discharge is active.
+        A positive value is integrated by the shared energy layer. Drivers own
+        all native key, state and model interpretation so callers never branch on
+        a brand or firmware version.
+        """
+        return None
+
     # --- control (write) ----------------------------------------------------
 
     @abstractmethod

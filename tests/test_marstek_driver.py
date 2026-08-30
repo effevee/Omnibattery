@@ -172,6 +172,43 @@ def test_rs485_control_capability(version):
     assert _driver(version).capabilities.has_rs485_control is True
 
 
+def test_v3_driver_declares_supplemental_discharge_inputs():
+    driver = _driver("v3")
+
+    assert driver.supplemental_discharge_dependency_keys == frozenset(
+        {"ac_offgrid_power", "inverter_state"}
+    )
+
+
+@pytest.mark.parametrize("version", ["v2", "vA", "vD"])
+def test_other_marstek_models_do_not_declare_supplemental_discharge(version):
+    driver = _driver(version)
+
+    assert driver.supplemental_discharge_dependency_keys == frozenset()
+    assert driver.supplemental_discharge_power_w(
+        {"ac_offgrid_power": 1000, "inverter_state": 4},
+        frozenset({"ac_offgrid_power"}),
+    ) is None
+
+
+def test_v3_driver_normalizes_only_fresh_backup_mode_output():
+    driver = _driver("v3")
+    backup_data = {"ac_offgrid_power": 1000, "inverter_state": 4}
+
+    assert driver.supplemental_discharge_power_w(
+        backup_data,
+        frozenset(),
+    ) is None
+    assert driver.supplemental_discharge_power_w(
+        backup_data,
+        frozenset({"ac_offgrid_power"}),
+    ) == 1000.0
+    assert driver.supplemental_discharge_power_w(
+        {"ac_offgrid_power": 1000, "inverter_state": 6},
+        frozenset({"ac_offgrid_power"}),
+    ) == 0.0
+
+
 # ----------------------------------------------------------------------
 # entity definitions (loaded from the version, Phase 4b)
 # ----------------------------------------------------------------------

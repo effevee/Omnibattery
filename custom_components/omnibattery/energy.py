@@ -34,49 +34,45 @@ def effective_total_discharging_energy(data: dict | None) -> float | None:
 
 @dataclass
 class BackupDischargeAccumulator:
-    """Integrate backup-port power only while the inverter is off-grid."""
+    """Integrate driver-normalized discharge omitted by a hardware counter."""
 
     kwh: float = 0.0
     daily_kwh: float = 0.0
     reset_date: str | None = None
     last_sample_monotonic: float | None = None
-    last_sample_in_backup_mode: bool = False
+    last_sample_active: bool = False
 
     def observe(
         self,
         *,
         now_monotonic: float,
         power_w: object,
-        inverter_state: object,
         local_date: str,
     ) -> bool:
-        """Consume one fresh backup-power sample and report whether kWh changed."""
+        """Consume one driver-normalized power sample and report whether kWh changed."""
         if self.reset_date != local_date:
             self.daily_kwh = 0.0
             self.reset_date = local_date
         last = self.last_sample_monotonic
         self.last_sample_monotonic = now_monotonic
         try:
-            is_backup_mode = int(inverter_state) == 4
             power = float(power_w)
         except (TypeError, ValueError, OverflowError):
-            self.last_sample_in_backup_mode = False
+            self.last_sample_active = False
             return False
-        current_sample_in_backup_mode = (
-            is_backup_mode and math.isfinite(power) and power > 0
-        )
-        previous_sample_in_backup_mode = self.last_sample_in_backup_mode
-        self.last_sample_in_backup_mode = current_sample_in_backup_mode
+        current_sample_active = math.isfinite(power) and power > 0
+        previous_sample_active = self.last_sample_active
+        self.last_sample_active = current_sample_active
         if last is None:
             return False
 
         elapsed_s = now_monotonic - last
         if elapsed_s <= 0 or elapsed_s > _MAX_BACKUP_INTEGRATION_GAP_S:
             return False
-        # Require both endpoints to be in Backup Mode. This deliberately loses
-        # at most one poll interval at each transition instead of ever charging
-        # grid-passthrough energy to the battery.
-        if not previous_sample_in_backup_mode or not current_sample_in_backup_mode:
+        # Require both endpoints to be active. This deliberately loses at most
+        # one poll interval at each transition rather than attributing energy
+        # from an inactive interval. The driver owns the definition of active.
+        if not previous_sample_active or not current_sample_active:
             return False
 
         energy_kwh = power * elapsed_s / 3_600_000.0

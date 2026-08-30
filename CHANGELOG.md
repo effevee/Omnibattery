@@ -1,10 +1,15 @@
 # Changelog
 
+## [1.4.0b8] - 2026-08-30
+
+### Fixed
+
+- **Backup-port discharge omitted from energy totals and round-trip efficiency** (#321): the shared energy layer can now integrate supplemental discharge declared through semantic driver hooks, keeping accumulation, persistence, total/daily discharge, calculated cycles, RTE and entity representation brand/model agnostic while each driver decides whether and how the correction applies. The Marstek driver enables it for the confirmed Venus E v3 case, counting fresh off-grid output only in Backup Mode and excluding grid passthrough power.
+
 ## [1.4.0b7] - 2026-08-28
 
 ### Fixed
 
-- **Venus E v3 backup-port discharge was omitted from energy totals and round-trip efficiency** (#321): fresh off-grid output is now integrated only while the inverter reports Backup Mode, persisted across reloads and restarts, and added to total/daily discharge, calculated cycles and RTE without counting grid passthrough power.
 - **Venus A/D installations can now declare whether panels are connected** (#361): battery setup now distinguishes available MPPT hardware from the installation topology. Panel-equipped installations retain the AC+MPPT flow model; installations with unused MPPT inputs keep AC power as the battery-flow source without contributing MPPT capability to solar totals. Existing Venus A/D entries migrate with panels enabled to preserve their current behaviour.
 - **Dynamic Pricing could lose deadline-aware planning at the daily evaluation**: chronological solar boundaries now preserve the runtime price slots' datetime-awareness contract, preventing naive/aware comparison failures when day-ahead prices are not yet published. Charge Delay also reuses unchanged price parsing within each quarter instead of reparsing the same sensor several times per control cycle.
 - **Daily Operation could compress the remaining solar forecast into the next hour after Charge Delay was disabled**: its solar window now derives both boundaries from the same observed or astronomical start instead of reusing Charge Delay's persisted start and active-charging `now + 1 hour` extension. A residual marker can no longer move or inflate the dashboard forecast, including when Charge Delay stays disabled across midnight.

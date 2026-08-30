@@ -21,6 +21,7 @@ import asyncio
 from copy import deepcopy
 from dataclasses import replace
 import logging
+import math
 from typing import Optional
 
 from ..const import (
@@ -386,6 +387,33 @@ class MarstekModbusDriver(BatteryDriver):
     def get_register(self, key: str) -> Optional[int]:
         """Resolve a logical control-register name for this version, or None."""
         return REGISTER_MAP.get(self._version, {}).get(key)
+
+    @property
+    def supplemental_discharge_dependency_keys(self) -> frozenset[str]:
+        """Telemetry needed to supplement Venus E v3's discharge counter."""
+        if self._version != "v3":
+            return frozenset()
+        return frozenset({"ac_offgrid_power", "inverter_state"})
+
+    def supplemental_discharge_power_w(
+        self,
+        data: dict,
+        updated_keys: frozenset[str],
+    ) -> Optional[float]:
+        """Return backup output omitted by the Venus E v3 lifetime counter."""
+        if (
+            not self.supplemental_discharge_dependency_keys
+            or "ac_offgrid_power" not in updated_keys
+        ):
+            return None
+        try:
+            in_backup_mode = int(data.get("inverter_state")) == 4
+            power_w = float(data.get("ac_offgrid_power"))
+        except (TypeError, ValueError, OverflowError):
+            return 0.0
+        if not in_backup_mode or not math.isfinite(power_w) or power_w <= 0:
+            return 0.0
+        return power_w
 
     @property
     def _power_dtype(self) -> str:

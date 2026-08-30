@@ -1,4 +1,4 @@
-"""Regression coverage for Venus E v3 backup-port discharge energy (#321)."""
+"""Regression coverage for driver-declared backup discharge energy (#321)."""
 from __future__ import annotations
 
 from types import SimpleNamespace
@@ -25,19 +25,17 @@ from custom_components.omnibattery.sensors.calculated_sensors import (
 )
 
 
-def test_accumulator_counts_only_positive_backup_mode_output():
+def test_accumulator_counts_only_positive_driver_normalized_output():
     accumulator = BackupDischargeAccumulator()
 
     assert accumulator.observe(
         now_monotonic=100.0,
         power_w=1000,
-        inverter_state=4,
         local_date="2026-08-30",
     ) is False
     assert accumulator.observe(
         now_monotonic=460.0,
         power_w=1000,
-        inverter_state=4,
         local_date="2026-08-30",
     ) is True
     assert accumulator.kwh == pytest.approx(0.1)
@@ -45,14 +43,12 @@ def test_accumulator_counts_only_positive_backup_mode_output():
 
     assert accumulator.observe(
         now_monotonic=560.0,
-        power_w=1000,
-        inverter_state=6,
+        power_w=0,
         local_date="2026-08-30",
     ) is False
     assert accumulator.observe(
         now_monotonic=660.0,
         power_w=-1000,
-        inverter_state=4,
         local_date="2026-08-30",
     ) is False
     assert accumulator.kwh == pytest.approx(0.1)
@@ -63,32 +59,28 @@ def test_accumulator_rejects_stalled_sample_gap():
     accumulator.observe(
         now_monotonic=0.0,
         power_w=1000,
-        inverter_state=4,
         local_date="2026-08-30",
     )
 
     assert accumulator.observe(
         now_monotonic=601.0,
         power_w=1000,
-        inverter_state=4,
         local_date="2026-08-30",
     ) is False
     assert accumulator.kwh == 0.0
 
 
-def test_transition_from_grid_passthrough_does_not_count_previous_interval():
+def test_transition_from_inactive_does_not_count_previous_interval():
     accumulator = BackupDischargeAccumulator()
 
     accumulator.observe(
         now_monotonic=0.0,
-        power_w=1000,
-        inverter_state=6,
+        power_w=0,
         local_date="2026-08-30",
     )
     accumulator.observe(
         now_monotonic=2.0,
         power_w=1000,
-        inverter_state=4,
         local_date="2026-08-30",
     )
 
@@ -96,7 +88,6 @@ def test_transition_from_grid_passthrough_does_not_count_previous_interval():
     assert accumulator.observe(
         now_monotonic=4.0,
         power_w=1000,
-        inverter_state=4,
         local_date="2026-08-30",
     ) is True
     assert accumulator.kwh == pytest.approx(1000 * 2 / 3_600_000)
@@ -131,6 +122,9 @@ def test_coordinator_persists_only_after_a_fresh_counted_sample(monkeypatch):
     )
     coordinator._backup_discharge_store = SimpleNamespace(set=Mock())
     coordinator._backup_discharge_store_key = "entry:0"
+    coordinator.driver = SimpleNamespace(
+        supplemental_discharge_power_w=Mock(return_value=1000.0)
+    )
     samples = iter((100.0, 460.0))
     monkeypatch.setattr(
         "custom_components.omnibattery.infra.coordinator.time.monotonic",
@@ -147,6 +141,10 @@ def test_coordinator_persists_only_after_a_fresh_counted_sample(monkeypatch):
         total_kwh=pytest.approx(0.1),
         daily_kwh=pytest.approx(0.1),
         reset_date=dt_util.now().date().isoformat(),
+    )
+    coordinator.driver.supplemental_discharge_power_w.assert_called_with(
+        coordinator.data,
+        frozenset({"ac_offgrid_power"}),
     )
 
 

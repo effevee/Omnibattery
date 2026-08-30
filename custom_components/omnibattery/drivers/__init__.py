@@ -6,6 +6,11 @@ brand-agnostic interface (:class:`base.BatteryDriver`). The coordinator and the
 control loop talk only to that interface, so a second battery brand is added by
 writing a new driver, not by editing the control logic.
 
+Architectural rule: shared calculations, state representations, orchestration,
+and user-facing behavior remain brand/model agnostic. Hardware differences are
+expressed through semantic driver capabilities or hooks; brand/model branches
+are limited to driver selection, configuration, and migrations.
+
 Drivers:
   - ``marstek``: Modbus-TCP, register based, polled (the original hardware).
   - ``zendure``: local HTTP REST, property based, polled (SolarFlow series).
