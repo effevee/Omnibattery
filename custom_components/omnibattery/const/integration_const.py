@@ -24,6 +24,7 @@ SCAN_INTERVAL = {
 
 # Battery version support
 CONF_BATTERY_VERSION = "battery_version"
+CONF_DC_PV_CONNECTED = "dc_pv_connected"
 SUPPORTED_VERSIONS = ["v2", "v3", "vA", "vD"]
 
 # Modbus slave/unit id. Default 1 (Marstek factory default for a direct

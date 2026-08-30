@@ -389,11 +389,23 @@ class MarstekVenusAggregateSensor(RestoreEntity, SensorEntity):
             data = coordinator.data
             ac = data.get("ac_power")
             if ac is not None:
-                mppt_values = [
-                    data.get(mk)
-                    for mk in ("mppt1_power", "mppt2_power", "mppt3_power", "mppt4_power")
-                    if data.get(mk) is not None
-                ]
+                mppt_values = (
+                    [
+                        data.get(mk)
+                        for mk in (
+                            "mppt1_power",
+                            "mppt2_power",
+                            "mppt3_power",
+                            "mppt4_power",
+                        )
+                        if data.get(mk) is not None
+                    ]
+                    # Coordinators predating the topology setting retain the
+                    # historical MPPT-inclusive calculation. Production Venus
+                    # A/D coordinators set this explicitly from configuration.
+                    if getattr(coordinator, "dc_pv_connected", True)
+                    else []
+                )
                 if mppt_values:
                     mppt = sum(mppt_values)
                 elif getattr(

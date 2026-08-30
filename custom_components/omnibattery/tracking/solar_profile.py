@@ -27,6 +27,7 @@ from ..const import (
     normalize_solar_profile_mode,
 )
 from ..pricing.solar_timeline import PROGRESS_BIN_COUNT
+from ..drivers.base import has_connected_mppt_pv
 from .consumption_profile import (
     INTERVAL_COUNT,
     INTERVAL_SECONDS,
@@ -541,10 +542,7 @@ class SolarProfileTracker:
         aggregate = False
         for coordinator in getattr(self._controller, "coordinators", ()) or ():
             capabilities = getattr(coordinator, "capabilities", None)
-            mppt = mppt or bool(
-                getattr(capabilities, "has_mppt_pv", False)
-                or getattr(coordinator, "has_mppt_pv", False)
-            )
+            mppt = mppt or has_connected_mppt_pv(coordinator)
             aggregate = aggregate or bool(
                 getattr(capabilities, "has_solar_telemetry", False)
                 or getattr(coordinator, "has_solar_telemetry", False)
@@ -567,10 +565,7 @@ class SolarProfileTracker:
         aggregate_sources = []
         for coordinator in getattr(self._controller, "coordinators", ()) or ():
             capabilities = getattr(coordinator, "capabilities", None)
-            has_mppt = bool(
-                getattr(capabilities, "has_mppt_pv", False)
-                or getattr(coordinator, "has_mppt_pv", False)
-            )
+            has_mppt = has_connected_mppt_pv(coordinator)
             has_aggregate = bool(
                 getattr(capabilities, "has_solar_telemetry", False)
                 or getattr(coordinator, "has_solar_telemetry", False)

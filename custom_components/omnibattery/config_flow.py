@@ -91,6 +91,7 @@ from .const import (
     CONF_ENABLE_TEMP_CHARGE_LIMIT,
     CONF_DELAY_SOC_SETPOINT_ENABLED,
     CONF_BATTERY_VERSION,
+    CONF_DC_PV_CONNECTED,
     CONF_SLAVE_ID,
     DEFAULT_SLAVE_ID,
     CONF_SERIAL_PORT,
@@ -1160,7 +1161,7 @@ def _apply_mac_tracking(user_input: dict, merged: dict) -> None:
 class MarstekVenusConfigFlow(LegacyDomainMigrationMixin, ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Omnibattery."""
 
-    VERSION = 11
+    VERSION = 12
 
     def __init__(self):
         """Initialize the config flow."""
@@ -2000,6 +2001,9 @@ class MarstekVenusConfigFlow(LegacyDomainMigrationMixin, ConfigFlow, domain=DOMA
                     int(user_input.get("charge_hysteresis_percent", DEFAULT_CHARGE_HYSTERESIS_PERCENT)),
                 )
                 merged["backup_offgrid_threshold"] = int(user_input.get("backup_offgrid_threshold", 50))
+                merged[CONF_DC_PV_CONNECTED] = bool(
+                    user_input.get(CONF_DC_PV_CONNECTED, True)
+                ) if merged.get(CONF_BATTERY_VERSION) in ("vA", "vD") else False
                 merged[CONF_FULL_CHARGE_VOLTAGE_TAPER_ENABLED] = (
                     False if brand in ("zendure", "anker", "sessy", "hoymiles", "huawei")
                     else user_input.get(CONF_FULL_CHARGE_VOLTAGE_TAPER_ENABLED, DEFAULT_FULL_CHARGE_VOLTAGE_TAPER_ENABLED)
@@ -2045,6 +2049,11 @@ class MarstekVenusConfigFlow(LegacyDomainMigrationMixin, ConfigFlow, domain=DOMA
             vol.Required("backup_offgrid_threshold", default=50):
                 NumberSelector(NumberSelectorConfig(min=0, max=2500, step=10, unit_of_measurement="W", mode=NumberSelectorMode.SLIDER)),
         })
+        if (
+            brand == "marstek"
+            and self._current_battery_data.get(CONF_BATTERY_VERSION) in ("vA", "vD")
+        ):
+            _schema[vol.Required(CONF_DC_PV_CONNECTED, default=True)] = BooleanSelector()
         if brand not in ("zendure", "anker", "sessy", "hoymiles", "huawei"):
             _schema[vol.Required(CONF_FULL_CHARGE_VOLTAGE_TAPER_ENABLED, default=DEFAULT_FULL_CHARGE_VOLTAGE_TAPER_ENABLED)] = bool
         if brand == "sessy":
@@ -4612,6 +4621,9 @@ class OptionsFlowHandler(OptionsFlow):
                     int(user_input.get("charge_hysteresis_percent", DEFAULT_CHARGE_HYSTERESIS_PERCENT)),
                 )
                 merged["backup_offgrid_threshold"] = int(user_input.get("backup_offgrid_threshold", 50))
+                merged[CONF_DC_PV_CONNECTED] = bool(
+                    user_input.get(CONF_DC_PV_CONNECTED, True)
+                ) if merged.get(CONF_BATTERY_VERSION) in ("vA", "vD") else False
                 merged[CONF_FULL_CHARGE_VOLTAGE_TAPER_ENABLED] = (
                     False if brand in ("zendure", "anker", "sessy", "hoymiles", "huawei")
                     else user_input.get(CONF_FULL_CHARGE_VOLTAGE_TAPER_ENABLED, DEFAULT_FULL_CHARGE_VOLTAGE_TAPER_ENABLED)
@@ -4645,6 +4657,10 @@ class OptionsFlowHandler(OptionsFlow):
                         int(current_battery.get("charge_hysteresis_percent", DEFAULT_CHARGE_HYSTERESIS_PERCENT)),
                     ),
                     "backup_offgrid_threshold": current_battery.get("backup_offgrid_threshold", 50),
+                    CONF_DC_PV_CONNECTED: current_battery.get(
+                        CONF_DC_PV_CONNECTED,
+                        current_battery.get(CONF_BATTERY_VERSION) in ("vA", "vD"),
+                    ),
                     CONF_FULL_CHARGE_VOLTAGE_TAPER_ENABLED: current_battery.get(
                         CONF_FULL_CHARGE_VOLTAGE_TAPER_ENABLED,
                         DEFAULT_FULL_CHARGE_VOLTAGE_TAPER_ENABLED,
@@ -4678,6 +4694,9 @@ class OptionsFlowHandler(OptionsFlow):
                     "min_soc": soc_min_default,
                     "charge_hysteresis_percent": DEFAULT_CHARGE_HYSTERESIS_PERCENT,
                     "backup_offgrid_threshold": 50,
+                    CONF_DC_PV_CONNECTED: self._current_battery_data.get(
+                        CONF_BATTERY_VERSION
+                    ) in ("vA", "vD"),
                     CONF_FULL_CHARGE_VOLTAGE_TAPER_ENABLED: DEFAULT_FULL_CHARGE_VOLTAGE_TAPER_ENABLED,
                     "battery_capacity_kwh": (
                         _hoymiles_capacity_default(self._current_battery_data)
@@ -4707,6 +4726,16 @@ class OptionsFlowHandler(OptionsFlow):
             vol.Required("backup_offgrid_threshold", default=defaults["backup_offgrid_threshold"]):
                 NumberSelector(NumberSelectorConfig(min=0, max=2500, step=10, unit_of_measurement="W", mode=NumberSelectorMode.SLIDER)),
         })
+        if (
+            brand == "marstek"
+            and self._current_battery_data.get(CONF_BATTERY_VERSION) in ("vA", "vD")
+        ):
+            _schema[
+                vol.Required(
+                    CONF_DC_PV_CONNECTED,
+                    default=defaults[CONF_DC_PV_CONNECTED],
+                )
+            ] = BooleanSelector()
         if brand not in ("zendure", "anker", "sessy", "hoymiles", "huawei"):
             _schema[vol.Required(CONF_FULL_CHARGE_VOLTAGE_TAPER_ENABLED, default=defaults[CONF_FULL_CHARGE_VOLTAGE_TAPER_ENABLED])] = bool
         if brand == "sessy":

@@ -5313,11 +5313,13 @@ class MarstekVenusPanel extends HTMLElement {
       const socObj = byTk[K.batterySoc];
       if (!socObj) continue; // not a battery device
       const acW = this._watts(byTk[K.acPower]);
+      const batteryW = this._watts(byTk[K.batteryPower]);
       const offgridW = this._watts(byTk[K.acOffgridPower]);
       const cmax = this._num(byTk[K.cellMax]);
       const cmin = this._num(byTk[K.cellMin]);
       const mppt = MPPT_KEYS.map((k) => this._num(byTk[k]));
-      const hasMppt = mppt.some((v) => v != null);
+      const dcPvConnected = socObj.attributes?.dc_pv_connected;
+      const hasMppt = dcPvConnected !== false && mppt.some((v) => v != null);
       const mpptTotalW = hasMppt ? mppt.reduce((sum, value) => sum + (value || 0), 0) : null;
       const inverter = byTk[K.inverterState] || null;
       const invBackup = /backup/i.test(this._sval(inverter) || "");
@@ -5329,7 +5331,7 @@ class MarstekVenusPanel extends HTMLElement {
           ? -acW - (invBackup ? offgridW || 0 : 0) + (mpptTotalW || 0)
           : acW != null
             ? -acW
-            : this._watts(byTk[K.batteryPower]);
+            : batteryW;
       const devReg = (hass.devices && hass.devices[dev]) || null;
       const name =
         (devReg && (devReg.name_by_user || devReg.name)) ||
@@ -5348,6 +5350,7 @@ class MarstekVenusPanel extends HTMLElement {
         // AC-port convention: +output to home/grid, -input from the AC bus.
         acFlowW: acW,
         mpptTotalW,
+        dcPvConnected,
         offgridW,
         backupOn: (byTk[K.backupFunction] || {}).state === "on",
         hysteresisActive: (() => {

@@ -56,6 +56,8 @@ from .const import (
     CONF_PHASE_2_CURRENT_SENSOR,
     CONF_PHASE_3_CURRENT_SENSOR,
     CONF_BATTERY_PHASE,
+    CONF_BATTERY_VERSION,
+    CONF_DC_PV_CONNECTED,
     normalize_battery_phase,
     DEFAULT_THREE_PHASE_ENABLED,
     DEFAULT_BASE_CONSUMPTION_KWH,
@@ -206,6 +208,7 @@ from .const import (
 )
 from .infra.lifecycle import is_reload_pending
 from .control.charge_delay import ChargeDelayManager
+from .drivers.base import has_connected_mppt_pv
 from .infra.coordinator import MarstekVenusDataUpdateCoordinator
 from .infra.mac_tracking import publishable_macs
 from .tracking.hourly_balance import HourlyBalanceManager
@@ -321,7 +324,7 @@ def _has_battery_reported_solar(coordinators) -> bool:
     """Return whether any connected model has an independent PV source."""
     return any(
         bool(
-            getattr(getattr(coordinator, "capabilities", None), "has_mppt_pv", False)
+            has_connected_mppt_pv(coordinator)
             or getattr(
                 getattr(coordinator, "capabilities", None),
                 "has_solar_telemetry",
@@ -1483,7 +1486,7 @@ class ChargeDischargeController:
             # meaning that energy is entering the cells.
             data = getattr(coordinator, "data", None) or {}
             capabilities = getattr(coordinator, "capabilities", None)
-            has_mppt = bool(getattr(capabilities, "has_mppt_pv", False))
+            has_mppt = has_connected_mppt_pv(coordinator)
             has_aggregate_pv = bool(
                 getattr(capabilities, "has_solar_telemetry", False)
             )
@@ -8944,8 +8947,10 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     v9 -> v10: rename config entry title to "Omnibattery".
     v10 -> v11: add the disabled-by-default three-phase protection schema and
                 normalize an empty battery phase on existing batteries.
+    v11 -> v12: distinguish MPPT-capable Venus A/D hardware from installations
+                that actually have panels connected; preserve existing behaviour.
     """
-    if entry.version >= 11:
+    if entry.version >= 12:
         return True
 
     new_data = dict(entry.data)
@@ -9188,11 +9193,29 @@ async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             "(three-phase protection disabled; battery phases normalized)",
         )
 
+    if entry.version < 12:
+        new_data["batteries"] = [
+            {
+                **dict(battery),
+                CONF_DC_PV_CONNECTED: bool(
+                    battery.get(
+                        CONF_DC_PV_CONNECTED,
+                        battery.get(CONF_BATTERY_VERSION) in ("vA", "vD"),
+                    )
+                ),
+            }
+            for battery in new_data.get("batteries", [])
+        ]
+        _LOGGER.info(
+            "Omnibattery: migrated config entry to version 12 "
+            "(recorded whether Venus A/D MPPT panels are connected)",
+        )
+
     hass.config_entries.async_update_entry(
         entry,
         title="Omnibattery",
         data=new_data,
-        version=11,
+        version=12,
     )
     return True
 
@@ -9545,6 +9568,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             password=battery_config.get(CONF_PASSWORD, ""),
             battery_manual_mode_enabled=battery_config.get(
                 CONF_BATTERY_MANUAL_MODE_ENABLED, False
+            ),
+            dc_pv_connected=battery_config.get(
+                CONF_DC_PV_CONNECTED,
+                battery_config.get(CONF_BATTERY_VERSION) in ("vA", "vD"),
             ),
             mac=entry_macs[battery_index],
         )

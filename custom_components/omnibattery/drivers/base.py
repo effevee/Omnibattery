@@ -137,6 +137,21 @@ class DriverCapabilities:
     min_discharge_power_w: int = 0
 
 
+def has_connected_mppt_pv(coordinator) -> bool:
+    """Return whether an MPPT-capable battery has panels connected.
+
+    ``has_mppt_pv`` remains a hardware capability. Marstek Venus A/D users can
+    explicitly declare that their physical MPPT inputs are unused; coordinators
+    and test doubles without that installation setting retain the historical
+    capability-based behaviour.
+    """
+    capabilities = getattr(coordinator, "capabilities", None)
+    return bool(
+        getattr(capabilities, "has_mppt_pv", False)
+        and getattr(coordinator, "dc_pv_connected", True)
+    )
+
+
 @dataclass(frozen=True)
 class SetpointResult:
     """Outcome of an :meth:`BatteryDriver.apply_setpoint` call.

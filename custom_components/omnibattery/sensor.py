@@ -39,6 +39,7 @@ from .const import (
     DEFAULT_SLOT_ALLOW_DISCHARGE,
 )
 from .infra.coordinator import MarstekVenusDataUpdateCoordinator
+from .drivers.base import has_connected_mppt_pv
 from .tracking.consumption_profile import INTERVAL_COUNT, INTERVAL_MINUTES
 from .sensors.aggregate_sensors import AGGREGATE_SENSOR_DEFINITIONS, SYSTEM_BATTERY_CELL_POWER_DEFINITION, MarstekVenusAggregateSensor, DailyGridAtMinSocSensor, SystemAlarmSensor, PdControlQualitySensor
 from .sensors.calculated_sensors import (
@@ -58,22 +59,33 @@ from .sensors.calculated_sensors import (
 _LOGGER = logging.getLogger(__name__)
 
 
-def _remove_obsolete_anker_solar_entities(
+def _remove_obsolete_solar_entities(
     hass: HomeAssistant,
     config_entry: ConfigEntry,
     coordinators: list[MarstekVenusDataUpdateCoordinator],
 ) -> None:
-    """Remove PV entities left by the pre-model-aware Anker implementation.
+    """Remove PV entities that no longer belong to the configured topology.
 
     Entity setup is additive from Home Assistant's point of view: omitting a
-    definition on reload does not remove an old registry entry. Clean only
-    Anker entities whose live driver says that the SKU has no independent PV;
-    compatible E5000 entities and all non-Anker PV entities are untouched.
+    definition on reload does not remove an old registry entry. Clean model-
+    incompatible Anker solar entities and Venus A/D calculated PV entities when
+    the user declares that no panels are connected.
     """
     from homeassistant.helpers import entity_registry as er
 
     registry = er.async_get(hass)
     for coordinator in coordinators:
+        if (
+            getattr(coordinator, "brand", None) == "marstek"
+            and getattr(coordinator.capabilities, "has_mppt_pv", False)
+            and not has_connected_mppt_pv(coordinator)
+        ):
+            for suffix in ("solar_power", "battery_cell_power"):
+                unique_id = f"{coordinator.device_key}_{suffix}"
+                entity_id = registry.async_get_entity_id("sensor", DOMAIN, unique_id)
+                registered = registry.async_get(entity_id) if entity_id else None
+                if registered and registered.config_entry_id == config_entry.entry_id:
+                    registry.async_remove(entity_id)
         if getattr(coordinator, "brand", None) != "anker":
             continue
         if getattr(getattr(coordinator, "driver", None), "has_independent_pv", False):
@@ -94,7 +106,7 @@ def _remove_obsolete_anker_solar_entities(
     # configured external sensor remains the sole source for AC-only Anker.
     has_independent_solar = any(
         bool(
-            getattr(getattr(coordinator, "capabilities", None), "has_mppt_pv", False)
+            has_connected_mppt_pv(coordinator)
             or getattr(
                 getattr(coordinator, "capabilities", None),
                 "has_solar_telemetry",
@@ -120,7 +132,7 @@ async def async_setup_entry(
     """Set up the sensor platform."""
     coordinators: list[MarstekVenusDataUpdateCoordinator] = hass.data[DOMAIN][entry.entry_id]["coordinators"]
 
-    _remove_obsolete_anker_solar_entities(hass, entry, coordinators)
+    _remove_obsolete_solar_entities(hass, entry, coordinators)
 
     entities = []
 
@@ -173,7 +185,7 @@ async def async_setup_entry(
         # exposes individual MPPT inputs. Verified Anker E5000 entities expose
         # their aggregate ``solar_power`` through the driver definitions; Max/XE
         # do not create that per-battery entity.
-        if coordinator.capabilities.has_mppt_pv:
+        if has_connected_mppt_pv(coordinator):
             for definition in SOLAR_POWER_SENSOR_DEFINITIONS:
                 entities.append(MarstekVenusSolarPowerSensor(coordinator, definition))
             for definition in BATTERY_CELL_POWER_SENSOR_DEFINITIONS:
@@ -234,7 +246,7 @@ async def async_setup_entry(
     # DC-coupled PV (individual MPPT channels or verified Anker aggregate).
     has_solar_telemetry = any(
         bool(
-            getattr(getattr(c, "capabilities", None), "has_mppt_pv", False)
+            has_connected_mppt_pv(c)
             or getattr(
                 getattr(c, "capabilities", None), "has_solar_telemetry", False
             )
@@ -363,7 +375,10 @@ class MarstekVenusSensor(CoordinatorEntity, SensorEntity):
         if self.definition["key"] != "battery_soc":
             return None
         model = getattr(self.coordinator.driver, "model_label", None)
-        return {"model": model} if model else None
+        attributes = {"model": model} if model else {}
+        if getattr(self.coordinator.capabilities, "has_mppt_pv", False):
+            attributes["dc_pv_connected"] = has_connected_mppt_pv(self.coordinator)
+        return attributes or None
 
     @property
     def device_info(self):

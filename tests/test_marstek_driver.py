@@ -10,6 +10,7 @@ phases move out of the coordinator and control loop:
 """
 from __future__ import annotations
 
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
@@ -920,6 +921,106 @@ async def test_config_flow_uses_detected_venus_d_firmware(
     assert flow._current_battery_data["ems_version"] == ems_version
     assert fields["max_charge_power"].config["max"] == expected
     assert fields["max_discharge_power"].config["max"] == expected
+    assert "dc_pv_connected" in fields
+
+
+async def test_config_flow_persists_unused_venus_mppt_inputs():
+    from custom_components.omnibattery.config_flow import MarstekVenusConfigFlow
+
+    flow = MarstekVenusConfigFlow()
+    flow.config_data = {"num_batteries": 2}
+    flow._current_battery_data = {
+        "brand": "marstek",
+        "name": "Venus D",
+        "host": "1.2.3.4",
+        "port": 502,
+        "slave_id": 1,
+        "battery_version": "vD",
+        "ems_version": 149,
+    }
+
+    result = await flow.async_step_battery_limits({
+        "max_charge_power": 2500,
+        "max_discharge_power": 2500,
+        "max_soc": 100,
+        "min_soc": 12,
+        "charge_hysteresis_percent": 2,
+        "backup_offgrid_threshold": 50,
+        "full_charge_voltage_taper_enabled": True,
+        "dc_pv_connected": False,
+    })
+
+    assert result["step_id"] == "battery_brand"
+    assert flow.battery_configs[0]["dc_pv_connected"] is False
+
+
+async def test_config_flow_hides_dc_pv_option_for_venus_e():
+    from custom_components.omnibattery.config_flow import MarstekVenusConfigFlow
+
+    flow = MarstekVenusConfigFlow()
+    flow.config_data = {"num_batteries": 1}
+    flow._current_battery_data = {
+        "brand": "marstek",
+        "battery_version": "v3",
+    }
+
+    form = await flow.async_step_battery_limits()
+
+    assert "dc_pv_connected" not in {
+        marker.schema for marker in form["data_schema"].schema
+    }
+
+
+async def test_options_flow_preserves_unused_venus_mppt_inputs():
+    from custom_components.omnibattery.config_flow import OptionsFlowHandler
+
+    battery = {
+        "brand": "marstek",
+        "name": "Venus D",
+        "battery_version": "vD",
+        "max_charge_power": 2500,
+        "max_discharge_power": 2500,
+        "max_soc": 100,
+        "min_soc": 12,
+        "charge_hysteresis_percent": 2,
+        "backup_offgrid_threshold": 50,
+        "full_charge_voltage_taper_enabled": True,
+        "dc_pv_connected": False,
+    }
+    entry = SimpleNamespace(
+        entry_id="venus-d-entry",
+        data={"num_batteries": 2, "batteries": [battery]},
+        options={},
+    )
+    flow = OptionsFlowHandler(entry)
+    flow.hass = SimpleNamespace(
+        config_entries=SimpleNamespace(
+            async_get_known_entry=lambda entry_id: (
+                entry if entry_id == entry.entry_id else None
+            )
+        )
+    )
+    flow.handler = entry.entry_id
+    flow.config_data = {"num_batteries": 2}
+    flow._current_battery_data = dict(battery)
+
+    form = await flow.async_step_battery_limits()
+    dc_pv_marker = next(
+        marker
+        for marker in form["data_schema"].schema
+        if marker.schema == "dc_pv_connected"
+    )
+    assert dc_pv_marker.default() is False
+
+    user_input = {
+        marker.schema: marker.default()
+        for marker in form["data_schema"].schema
+        if callable(marker.default)
+    }
+    result = await flow.async_step_battery_limits(user_input)
+
+    assert result["step_id"] == "battery_brand"
+    assert flow.battery_configs[0]["dc_pv_connected"] is False
 
 
 async def test_probe_returns_false_when_connection_fails(monkeypatch):

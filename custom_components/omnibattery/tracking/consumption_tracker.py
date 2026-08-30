@@ -28,6 +28,7 @@ from homeassistant.util import dt as dt_util
 
 from ..const import DEFAULT_BASE_CONSUMPTION_KWH, DOMAIN
 from ..infra.entity_naming import is_omnibattery_solar_entity
+from ..drivers.base import has_connected_mppt_pv
 from .backfill import BackfillToken, RecorderBackfillCoordinator, local_day_bounds
 from .consumption_profile import ConsumptionForecast, ConsumptionProfileTracker, INTERVAL_COUNT
 from .solar_profile import SolarProfileTracker
@@ -871,7 +872,7 @@ class ConsumptionTracker:
             # Skip disconnected units: their PV readings go stale (merged dict,
             # never expired) and would inflate the integrated daily solar total.
             capabilities = getattr(coordinator, "capabilities", None)
-            has_mppt = bool(getattr(capabilities, "has_mppt_pv", False))
+            has_mppt = has_connected_mppt_pv(coordinator)
             # ``has_solar_telemetry`` means an independent PV source here. In
             # particular, Solarbank Max/XE expose a PV-looking AC calculation
             # but must stay on the configured external-sensor-only path.
@@ -907,7 +908,7 @@ class ConsumptionTracker:
         solar_coordinators = []
         for coordinator in getattr(ctrl, "coordinators", ()) or ():
             capabilities = getattr(coordinator, "capabilities", None)
-            has_mppt = bool(getattr(capabilities, "has_mppt_pv", False))
+            has_mppt = has_connected_mppt_pv(coordinator)
             has_aggregate = bool(getattr(capabilities, "has_solar_telemetry", False))
             if (
                 (has_mppt or has_aggregate)

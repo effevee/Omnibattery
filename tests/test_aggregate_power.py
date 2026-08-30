@@ -208,6 +208,25 @@ def test_cell_power_max_ac_does_not_add_derived_solar_power():
     assert sensor._calculate_battery_cell_power() == 200
 
 
+def test_cell_power_uses_ac_power_when_venus_mppt_inputs_are_unused():
+    venus_d = SimpleNamespace(
+        is_available=True,
+        data={
+            "ac_power": -783,
+            "battery_power": 712,
+            "mppt1_power": 0,
+            "mppt2_power": 0,
+            "mppt3_power": 0,
+            "mppt4_power": 0,
+        },
+        capabilities=SimpleNamespace(has_mppt_pv=True, has_solar_telemetry=False),
+        dc_pv_connected=False,
+    )
+    sensor = _sensor([venus_d], "system_battery_cell_power")
+
+    assert sensor._calculate_battery_cell_power() == 783
+
+
 def test_cell_power_solar_bypass_net_discharge():
     # PV bypassing out the AC port (ac_power +500 discharge) with 300 W on MPPT →
     # net cell power = -500 + 300 = -200 W (still discharging the cells).

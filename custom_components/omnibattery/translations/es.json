@@ -159,7 +159,8 @@
           "backup_offgrid_threshold": "Umbral de carga offgrid de backup (W)",
           "full_charge_voltage_taper_enabled": "Activar reduccion por voltaje al cargar al 100%",
           "battery_capacity_kwh": "Capacidad nominal de la batería (kWh)",
-          "battery_phase": "Fase física de la batería"
+          "battery_phase": "Fase física de la batería",
+          "dc_pv_connected": "Hay paneles solares conectados directamente a esta batería"
         },
         "data_description": {
           "max_charge_power": "Potencia máxima permitida para cargar la batería",
@@ -170,7 +171,8 @@
           "backup_offgrid_threshold": "Una carga offgrid superior a este valor se considera un evento de backup activo, excluyendo la batería del control PD. Auméntalo si tienes cargas permanentes (router, cámaras) en el puerto offgrid.",
           "full_charge_voltage_taper_enabled": "Cuando el objetivo es 100%, limita la carga a 200 W desde 3.48 V de celda máxima. En Venus E se detiene a 3.60 V para medir el desbalanceo tras 60 segundos; Venus A/D con packs acoplados siguen a 200 W hasta que corta la BMS.",
           "battery_capacity_kwh": "Capacidad utilizable nominal del pack de baterías. Se usa para calcular la energía almacenada y la eficiencia a partir del SOC. Para Sessy, introduce la capacidad real; en otras baterías puedes dejar 0 si no la conoces.",
-          "battery_phase": "Fase AC física (L1/L2/L3) donde está cableada esta batería, o Sin asignar si queda fuera del esquema de fases protegidas. Una batería sin fase queda fuera de la envolvente trifásica y sigue funcionando normalmente en automático."
+          "battery_phase": "Fase AC física (L1/L2/L3) donde está cableada esta batería, o Sin asignar si queda fuera del esquema de fases protegidas. Una batería sin fase queda fuera de la envolvente trifásica y sigue funcionando normalmente en automático.",
+          "dc_pv_connected": "Solo Venus A/D. Actívalo cuando haya paneles conectados a las entradas MPPT de la batería. Desactívalo si esas entradas no se usan para que la potencia de batería siga basándose en la potencia AC sin añadir producción MPPT."
         }
       },
       "time_slots": {
@@ -881,7 +883,8 @@
           "backup_offgrid_threshold": "Umbral de carga offgrid de backup (W)",
           "full_charge_voltage_taper_enabled": "Activar reduccion por voltaje al cargar al 100%",
           "battery_capacity_kwh": "Capacidad nominal de la batería (kWh)",
-          "battery_phase": "Fase física de la batería"
+          "battery_phase": "Fase física de la batería",
+          "dc_pv_connected": "Hay paneles solares conectados directamente a esta batería"
         },
         "data_description": {
           "max_charge_power": "Potencia máxima permitida para cargar la batería",
@@ -892,7 +895,8 @@
           "backup_offgrid_threshold": "Una carga offgrid superior a este valor se considera un evento de backup activo, excluyendo la batería del control PD. Auméntalo si tienes cargas permanentes (router, cámaras) en el puerto offgrid.",
           "full_charge_voltage_taper_enabled": "Cuando el objetivo es 100%, limita la carga a 200 W desde 3.48 V de celda máxima. En Venus E se detiene a 3.60 V para medir el desbalanceo tras 60 segundos; Venus A/D con packs acoplados siguen a 200 W hasta que corta la BMS.",
           "battery_capacity_kwh": "Capacidad utilizable nominal del pack de baterías. Se usa para calcular la energía almacenada y la eficiencia a partir del SOC. Para Sessy, introduce la capacidad real; en otras baterías puedes dejar 0 si no la conoces.",
-          "battery_phase": "Fase AC física (L1/L2/L3) donde está cableada esta batería, o Sin asignar si queda fuera del esquema de fases protegidas. Una batería sin fase queda fuera de la envolvente trifásica y sigue funcionando normalmente en automático."
+          "battery_phase": "Fase AC física (L1/L2/L3) donde está cableada esta batería, o Sin asignar si queda fuera del esquema de fases protegidas. Una batería sin fase queda fuera de la envolvente trifásica y sigue funcionando normalmente en automático.",
+          "dc_pv_connected": "Solo Venus A/D. Actívalo cuando haya paneles conectados a las entradas MPPT de la batería. Desactívalo si esas entradas no se usan para que la potencia de batería siga basándose en la potencia AC sin añadir producción MPPT."
         }
       },
       "time_slots": {

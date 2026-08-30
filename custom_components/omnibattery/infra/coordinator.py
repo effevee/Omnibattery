@@ -129,6 +129,7 @@ class MarstekVenusDataUpdateCoordinator(DataUpdateCoordinator):
                  username: str = "",
                  password: str = "",
                  battery_manual_mode_enabled: bool = False,
+                 dc_pv_connected: bool = True,
                  device_max_charge_power: int | None = None,
                  device_max_discharge_power: int | None = None,
                  ems_version: object = None,
@@ -168,6 +169,13 @@ class MarstekVenusDataUpdateCoordinator(DataUpdateCoordinator):
             self.battery_version = DEFAULT_VERSION
         else:
             self.battery_version = battery_version
+
+        # Installation topology is distinct from the model's hardware MPPT
+        # capability. Only Venus A/D expose those inputs; existing callers keep
+        # the historical connected default until config-entry migration runs.
+        self.dc_pv_connected = bool(
+            dc_pv_connected and self.battery_version in ("vA", "vD")
+        )
 
         _LOGGER.info("[%s] Initialized as %s battery", name, self.battery_version)
 
