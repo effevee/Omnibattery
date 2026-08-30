@@ -2213,7 +2213,14 @@ class PricingManager:
         if observed_start is not None and observed_start <= now:
             start = observed_start
         else:
-            start_hour = getattr(self._controller, "_solar_t_start", None)
+            # Charge Delay owns its persisted start marker. Once disabled it
+            # may legitimately remain in runtime state across midnight, but it
+            # must no longer define the read-only dashboard forecast window.
+            start_hour = (
+                getattr(self._controller, "_solar_t_start", None)
+                if bool(getattr(self._controller, "charge_delay_enabled", False))
+                else None
+            )
             if start_hour is None and tracker is not None:
                 try:
                     start_hour = tracker.calculate_sunrise()
@@ -2231,14 +2238,17 @@ class PricingManager:
             end = observed_end
         if end is None and tracker is not None:
             try:
-                end_hour = tracker.estimate_t_end()
+                # Keep both ends of the dashboard window on the same temporal
+                # basis. ``estimate_t_end()`` uses Charge Delay's persisted
+                # ``_solar_t_start`` and may extend a past estimate to
+                # ``now + 1 hour`` while a battery is charging. Reusing it here
+                # could compress the entire remaining solar budget into that
+                # moving hour even after Charge Delay was disabled.
+                end_hour = 2 * tracker.calculate_solar_noon() - (
+                    start - midnight
+                ).total_seconds() / 3600.0
             except (AttributeError, TypeError, ValueError):
-                try:
-                    end_hour = 2 * tracker.calculate_solar_noon() - (
-                        start - midnight
-                    ).total_seconds() / 3600.0
-                except (AttributeError, TypeError, ValueError):
-                    end_hour = None
+                end_hour = None
             if end_hour is not None:
                 end = midnight + timedelta(hours=float(end_hour))
         if end is None or end <= start:
