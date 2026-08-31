@@ -2365,7 +2365,7 @@ class MarstekVenusPanel extends HTMLElement {
       `<span class="daily-op-legend-item"><i class="daily-op-swatch daily-op-swatch-solar-window"></i>${this._t("dailyOperationSolarWindow")}</span>` +
       `<span class="daily-op-legend-item"><i class="daily-op-swatch daily-op-swatch-solar"></i>${this._t("dailyOperationSolarCharge")}</span>` +
       `<span class="daily-op-legend-item"><i class="daily-op-swatch daily-op-swatch-grid"></i>${this._t("dailyOperationGridCharge")}</span>` +
-      `<span class="daily-op-legend-item"><i class="daily-op-swatch daily-op-swatch-hourly-balance"></i>${this._t("dailyOperationHourlyBalance")}</span>` +
+      `<span class="daily-op-legend-item daily-op-legend-hourly-balance"><i class="daily-op-swatch daily-op-swatch-hourly-balance"></i>${this._t("dailyOperationHourlyBalance")}</span>` +
       `<span class="daily-op-legend-item"><i class="daily-op-swatch daily-op-swatch-discharge"></i>${this._t("dailyOperationDischarge")}</span>` +
       `<span class="daily-op-legend-item"><i class="daily-op-swatch daily-op-swatch-not-needed"></i>${this._t("dailyOperationNotNeeded")}</span>` +
       `<span class="daily-op-legend-item"><i class="daily-op-line daily-op-line-solar"></i>${this._t("dailyOperationSolar")}</span>` +
@@ -2560,7 +2560,9 @@ class MarstekVenusPanel extends HTMLElement {
     viewport.addEventListener("touchstart", markManualScroll, { passive: true });
     viewport.addEventListener("pointerdown", markManualScroll, { passive: true });
     this._r.dailyOperation = {
-      card, badge, notice, yAxis, socAxis, viewport, stage, svg, tooltip, previous, next,
+      card, badge, notice, legend,
+      hourlyBalanceLegend: legend.querySelector(".daily-op-legend-hourly-balance"),
+      yAxis, socAxis, viewport, stage, svg, tooltip, previous, next,
       cells, labels, hours,
       paths: {
         solarActual: svg.querySelector(".daily-op-path-solar-actual"),
@@ -2861,8 +2863,10 @@ class MarstekVenusPanel extends HTMLElement {
     const hasActionEvidence = [actualMask, plannedActions]
       .some((array) => Array.isArray(array) && array.some((value) => (this._dailyOperationNumber(value) || 0) !== 0));
     const hasValues = data.timeline_available !== false && (hasSeriesEvidence || hasActionEvidence);
+    const hourlyBalanceState = this._stateFor(this._index().byKey, "hourly_balance");
     return {
       entityId, stateObj, data, unavailable, hasValues,
+      hourlyBalanceEnabled: Boolean(hourlyBalanceState && hourlyBalanceState.state === "on"),
       localDate: data.local_date || null,
       timezone: data.timezone || null,
       generatedAt: data.generated_at || null,
@@ -3117,7 +3121,8 @@ class MarstekVenusPanel extends HTMLElement {
       index, status, statusLabel: this._dailyOperationStatusLabel(status),
       timeRange: this._dailyOperationTimeRange(index),
       mask: mask || 0, actions, solarWindow, context: context || 0,
-      hourlyBalance: ((context || 0) & DAILY_OPERATION_CONTEXT_HOURLY_BALANCE) !== 0,
+      hourlyBalance: snapshot.hourlyBalanceEnabled
+        && ((context || 0) & DAILY_OPERATION_CONTEXT_HOURLY_BALANCE) !== 0,
       decision,
       operationSource,
       observationTrusted: status === "forecast" || this._dailyOperationSourceIsObserved(operationSource),
@@ -3583,6 +3588,7 @@ class MarstekVenusPanel extends HTMLElement {
       this._hideDailyOperationTooltip();
     }
     ref.card.hidden = false;
+    ref.hourlyBalanceLegend.hidden = !snapshot.hourlyBalanceEnabled;
     const badgeText = `${this._t("dailyOperationReal")} / ${this._t("dailyOperationForecast")}`;
     ref.badge.querySelector("span:last-child").textContent = badgeText;
     ref.badge.classList.toggle("daily-op-badge-stale", snapshot.stale);

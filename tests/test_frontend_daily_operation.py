@@ -31,3 +31,13 @@ def test_disabled_charge_delay_suppresses_stale_clock_markers():
 
     assert "const delayEnabled = !snapshot.delayInfo" in panel
     assert "const delay = delayEnabled && !weeklyDelayBypassed" in panel
+
+
+def test_disabled_hourly_balance_suppresses_feature_legend_and_markers():
+    panel = PANEL.read_text(encoding="utf-8")
+
+    assert "daily-op-legend-hourly-balance" in panel
+    assert 'const hourlyBalanceState = this._stateFor(this._index().byKey, "hourly_balance");' in panel
+    assert "hourlyBalanceEnabled: Boolean(hourlyBalanceState" in panel
+    assert "ref.hourlyBalanceLegend.hidden = !snapshot.hourlyBalanceEnabled;" in panel
+    assert "hourlyBalance: snapshot.hourlyBalanceEnabled" in panel

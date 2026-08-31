@@ -39,6 +39,9 @@ es contexto, no otro color. El Retraso de
 Carga usa un reloj y una hora estimada de desbloqueo. El tooltip muestra también
 la energía que ha entrado o salido realmente de la batería durante una franja
 observada. Para una franja futura muestra la carga o descarga proyectada.
+Los patrones diagonales indican acciones realmente simultáneas y son
+independientes del balance neto horario; su leyenda y marca de causa solo se
+muestran cuando la función está activada.
 
 ## Contrato de la entidad
 

@@ -37,6 +37,9 @@ another color. Charge Delay uses
 a clock marker and an estimated unlock time. The tooltip also shows the energy
 that actually entered or left the battery during an observed interval. For a
 future interval it shows the corresponding projected charge or discharge.
+Diagonal patterns indicate genuinely simultaneous actions and are independent of
+Hourly Net Balance; its legend and cause marker are shown only while that
+feature is enabled.
 
 ## Entity contract
 
