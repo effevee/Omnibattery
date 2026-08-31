@@ -67,6 +67,7 @@ class ExternalLoads:
         self._dynamic_yield_until: dict[str, datetime] = {}
         self._dynamic_next_probe: dict[str, datetime] = {}
         self._dynamic_solar_reference_w: dict[str, float] = {}
+        self._dynamic_device_reference_w: dict[str, float] = {}
         self._dynamic_was_drawing: dict[str, bool] = {}
         self.dynamic_power_control_status: dict[str, Any] = {
             "active": False,
@@ -83,6 +84,7 @@ class ExternalLoads:
         self._dynamic_yield_until.pop(key, None)
         self._dynamic_next_probe.pop(key, None)
         self._dynamic_solar_reference_w.pop(key, None)
+        self._dynamic_device_reference_w.pop(key, None)
         self._dynamic_was_drawing.pop(key, None)
 
     @staticmethod
@@ -108,7 +110,8 @@ class ExternalLoads:
         * active state before demand: charging stays blocked until load appears;
         * first detection (>100 W): battery charging yields for 30 seconds;
         * while drawing: charging may resume for genuine residual export;
-        * a >=200 W solar rise starts a new 20-second yield;
+        * a >=200 W rise in available margin (solar power minus device power)
+          starts a new 20-second yield;
         * without a solar sensor, a 20-second probe runs every five minutes;
         * when power drops: charging remains blocked for a short restart grace
           so the external controller can restart after clouds or a phase
@@ -169,6 +172,7 @@ class ExternalLoads:
                     self._dynamic_next_probe[key] = now + DYNAMIC_CONTROL_FALLBACK_PROBE
                     if solar_w is not None:
                         self._dynamic_solar_reference_w[key] = solar_w
+                        self._dynamic_device_reference_w[key] = device_power
                     _LOGGER.info(
                         "Dynamic power control for %s: %.0fW detected, yielding battery charge for %ds",
                         sensor_id,
@@ -180,23 +184,34 @@ class ExternalLoads:
                 yield_until = self._dynamic_yield_until.get(key, now)
 
                 if solar_w is not None:
-                    reference_w = self._dynamic_solar_reference_w.get(key, solar_w)
-                    if solar_w < reference_w:
+                    reference_solar_w = self._dynamic_solar_reference_w.get(key, solar_w)
+                    reference_device_w = self._dynamic_device_reference_w.get(
+                        key, device_power
+                    )
+                    reference_margin_w = reference_solar_w - reference_device_w
+                    margin_w = solar_w - device_power
+                    if margin_w < reference_margin_w:
                         # Follow reductions immediately so a later recovery can
                         # trigger a fresh yield after a cumulative 200 W rise.
                         self._dynamic_solar_reference_w[key] = solar_w
+                        self._dynamic_device_reference_w[key] = device_power
                     elif now < yield_until:
                         # The external controller is already being given room;
-                        # use the newest level as the next comparison baseline.
+                        # use the newest margin as the next comparison baseline.
                         self._dynamic_solar_reference_w[key] = solar_w
-                    elif solar_w - reference_w >= DYNAMIC_CONTROL_SOLAR_STEP_W:
+                        self._dynamic_device_reference_w[key] = device_power
+                    elif margin_w - reference_margin_w >= DYNAMIC_CONTROL_SOLAR_STEP_W:
                         yield_until = now + DYNAMIC_CONTROL_REYIELD
                         self._dynamic_yield_until[key] = yield_until
                         self._dynamic_solar_reference_w[key] = solar_w
+                        self._dynamic_device_reference_w[key] = device_power
                         _LOGGER.debug(
-                            "Dynamic power control for %s: solar rose %.0fW, re-yielding for %ds",
+                            "Dynamic power control for %s: available margin rose %.0fW "
+                            "(solar %.0fW, device %.0fW), re-yielding for %ds",
                             sensor_id,
-                            solar_w - reference_w,
+                            margin_w - reference_margin_w,
+                            solar_w,
+                            device_power,
                             int(DYNAMIC_CONTROL_REYIELD.total_seconds()),
                         )
                 else:
@@ -248,14 +263,33 @@ class ExternalLoads:
                         self._dynamic_yield_until[key] = yield_until
                         if solar_w is not None:
                             self._dynamic_solar_reference_w[key] = solar_w
+                            if device_power is not None:
+                                self._dynamic_device_reference_w[key] = device_power
                     else:
                         yield_until = self._dynamic_yield_until.get(key, now)
 
                     if solar_w is not None:
-                        reference_w = self._dynamic_solar_reference_w.get(key, solar_w)
-                        if solar_w < reference_w:
+                        if device_power is None:
+                            # A missing device reading cannot produce a margin;
+                            # retain the existing solar-only fallback safely.
+                            reference_w = self._dynamic_solar_reference_w.get(key, solar_w)
+                            margin_rise_w = solar_w - reference_w
+                        else:
+                            reference_solar_w = self._dynamic_solar_reference_w.get(
+                                key, solar_w
+                            )
+                            reference_device_w = self._dynamic_device_reference_w.get(
+                                key, device_power
+                            )
+                            reference_margin_w = reference_solar_w - reference_device_w
+                            margin_w = solar_w - device_power
+                            margin_rise_w = margin_w - reference_margin_w
+
+                        if margin_rise_w < 0:
                             self._dynamic_solar_reference_w[key] = solar_w
-                        elif solar_w - reference_w >= DYNAMIC_CONTROL_SOLAR_STEP_W:
+                            if device_power is not None:
+                                self._dynamic_device_reference_w[key] = device_power
+                        elif margin_rise_w >= DYNAMIC_CONTROL_SOLAR_STEP_W:
                             # Keep an existing grace intact if it is longer
                             # than the re-yield; otherwise start a fresh
                             # twenty-second opportunity for the wallbox.
@@ -263,10 +297,13 @@ class ExternalLoads:
                             yield_until = max(yield_until, re_yield_until)
                             self._dynamic_yield_until[key] = yield_until
                             self._dynamic_solar_reference_w[key] = solar_w
+                            if device_power is not None:
+                                self._dynamic_device_reference_w[key] = device_power
                             _LOGGER.debug(
-                                "Dynamic power control for %s: solar rose %.0fW during restart hold, re-yielding for %ds",
+                                "Dynamic power control for %s: available margin rose %.0fW "
+                                "during restart hold, re-yielding for %ds",
                                 sensor_id,
-                                solar_w - reference_w,
+                                margin_rise_w,
                                 int(DYNAMIC_CONTROL_REYIELD.total_seconds()),
                             )
 
@@ -286,7 +323,11 @@ class ExternalLoads:
 
         # Remove runtime state for devices deleted or made ineligible since the
         # previous options hot-reload.
-        known_keys = set(self._dynamic_hold_until) | set(self._dynamic_yield_until)
+        known_keys = (
+            set(self._dynamic_hold_until)
+            | set(self._dynamic_yield_until)
+            | set(self._dynamic_device_reference_w)
+        )
         for stale_key in known_keys - eligible_keys:
             self._clear_dynamic_power_control_state(stale_key)
 

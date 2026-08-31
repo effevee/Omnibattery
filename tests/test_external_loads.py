@@ -387,6 +387,11 @@ def _dynamic_device(**overrides):
     return _device(**values)
 
 
+def _expire_dynamic_yield(loads):
+    """Move the initial yield into the past without depending on wall-clock time."""
+    loads._dynamic_yield_until["0:sensor.dev"] -= timedelta(days=1)
+
+
 @pytest.mark.parametrize(
     "activity_state",
     [
@@ -554,7 +559,7 @@ def test_dynamic_control_solar_rise_starts_new_yield():
         solar_production_sensor="sensor.solar",
     )
     loads.refresh_dynamic_power_control()
-    loads._dynamic_yield_until["0:sensor.dev"] = dt_util.utcnow() - timedelta(seconds=1)
+    _expire_dynamic_yield(loads)
     assert loads.refresh_dynamic_power_control()["charge_blocked"] is False
 
     states["sensor.solar"] = _state(5250)
@@ -563,6 +568,71 @@ def test_dynamic_control_solar_rise_starts_new_yield():
     assert status["charge_blocked"] is True
     assert status["phases"] == {"sensor.dev": "yielding"}
     assert 0 < status["yield_remaining_s"] <= 20
+
+
+def test_dynamic_control_re_yields_when_wallbox_power_drops_with_stable_solar():
+    states = {
+        "sensor.dev": _state(3600),
+        "sensor.solar": _state(5000),
+    }
+    loads = _controller(
+        [_dynamic_device()],
+        states,
+        solar_production_sensor="sensor.solar",
+    )
+    loads.refresh_dynamic_power_control()
+    _expire_dynamic_yield(loads)
+    assert loads.refresh_dynamic_power_control()["charge_blocked"] is False
+
+    states["sensor.dev"] = _state(3300)
+    status = loads.refresh_dynamic_power_control()
+
+    assert status["charge_blocked"] is True
+    assert status["phases"] == {"sensor.dev": "yielding"}
+    assert 0 < status["yield_remaining_s"] <= 20
+
+
+def test_dynamic_control_does_not_reyield_when_solar_and_wallbox_drop_together():
+    states = {
+        "sensor.dev": _state(3600),
+        "sensor.solar": _state(5000),
+    }
+    loads = _controller(
+        [_dynamic_device()],
+        states,
+        solar_production_sensor="sensor.solar",
+    )
+    loads.refresh_dynamic_power_control()
+    _expire_dynamic_yield(loads)
+    assert loads.refresh_dynamic_power_control()["charge_blocked"] is False
+
+    states["sensor.dev"] = _state(3300)
+    states["sensor.solar"] = _state(4700)
+    status = loads.refresh_dynamic_power_control()
+
+    assert status["charge_blocked"] is False
+    assert status["phases"] == {"sensor.dev": "monitoring_residual"}
+
+
+def test_dynamic_control_does_not_reyield_for_small_margin_rise():
+    states = {
+        "sensor.dev": _state(3600),
+        "sensor.solar": _state(5000),
+    }
+    loads = _controller(
+        [_dynamic_device()],
+        states,
+        solar_production_sensor="sensor.solar",
+    )
+    loads.refresh_dynamic_power_control()
+    loads._dynamic_yield_until["0:sensor.dev"] = dt_util.utcnow() - timedelta(seconds=1)
+    assert loads.refresh_dynamic_power_control()["charge_blocked"] is False
+
+    states["sensor.dev"] = _state(3450)
+    status = loads.refresh_dynamic_power_control()
+
+    assert status["charge_blocked"] is False
+    assert status["phases"] == {"sensor.dev": "monitoring_residual"}
 
 
 def test_dynamic_control_zero_power_is_held_for_restart():
