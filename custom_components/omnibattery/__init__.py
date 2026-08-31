@@ -3275,14 +3275,13 @@ class ChargeDischargeController:
 
     def _effective_charge_max_soc(self, coordinator, weekly_100_unlocked: bool) -> tuple[float, str]:
         """Return the current per-battery charge ceiling and the source of that ceiling."""
-        # A typed opportunity must stop at its explicit target even when a
-        # weekly-full-charge window happens to overlap.  The weekly routine can
-        # continue toward 100% after opportunistic grid ownership is released.
+        # A predictive grid-charge target must stop at its explicit target even
+        # when a weekly-full-charge window happens to overlap. The weekly
+        # routine can continue toward 100% with solar after grid ownership is
+        # released.
         if (
             self.grid_charging_active
             and self._predictive_charge_target_soc is not None
-            and getattr(self, "_active_dynamic_slot_purpose", None)
-            in {SLOT_PURPOSE_NEGATIVE_PRICE, SLOT_PURPOSE_COMBINED}
         ):
             per_battery_target = self._predictive_charge_target_soc.get(coordinator)
             if per_battery_target is not None:

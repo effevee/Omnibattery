@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- **Weekly Full Charge could override a normal predictive grid-charge target**: an overlapping weekly cycle now only permits later solar charging toward 100%; while predictive charging owns the session, its per-battery target remains authoritative and grid import stops at the planned quota.
 - **Backup-port discharge omitted from energy totals and round-trip efficiency** (#321): the shared energy layer can now integrate supplemental discharge declared through semantic driver hooks, keeping accumulation, persistence, total/daily discharge, calculated cycles, RTE and entity representation brand/model agnostic while each driver decides whether and how the correction applies. The Marstek driver enables it for the confirmed Venus E v3 case, counting fresh off-grid output only in Backup Mode and excluding grid passthrough power.
 
 ## [1.4.0b7] - 2026-08-28

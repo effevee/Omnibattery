@@ -328,6 +328,22 @@ def test_opportunity_target_stays_authoritative_during_weekly_full_charge():
     assert (ceiling, source) == (90.0, "predictive_target")
 
 
+def test_normal_predictive_target_stays_authoritative_during_weekly_full_charge():
+    """Weekly full charge permits solar top-up, never extra grid charging."""
+    battery = _Battery("b1", 20, 10, max_soc=95)
+    ctrl = SimpleNamespace(
+        grid_charging_active=True,
+        _active_dynamic_slot_purpose=SLOT_PURPOSE_DEFICIT,
+        _predictive_charge_target_soc={battery: 30.0},
+    )
+
+    ceiling, source = ChargeDischargeController._effective_charge_max_soc(
+        ctrl, battery, weekly_100_unlocked=True
+    )
+
+    assert (ceiling, source) == (30.0, "predictive_target")
+
+
 def test_unavailable_battery_does_not_create_opportunistic_energy():
     battery = _Battery("offline", 10, 10, available=False)
     ctrl = _controller([battery])

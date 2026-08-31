@@ -380,6 +380,23 @@ def test_floor_recovered_stops_charging():
     assert ctrl.grid_charging_active is False
 
 
+def test_floor_recovered_stops_when_the_current_window_has_no_quota():
+    """A floor re-evaluation must not retain a stale grid-charge command."""
+    engine, ctrl, calls = _make_engine_recovered(
+        soc=20.0, floor=20.0, last_evaluation_soc=12.0
+    )
+    engine._apply_time_slot_chronological_plan = lambda data, *, now: {
+        **data,
+        "active_slot_energy_target_kwh": 0.0,
+        "should_charge": False,
+    }
+
+    asyncio.run(engine.handle_time_slot_predictive_charging())
+
+    assert calls["activate"] == 1
+    assert ctrl.grid_charging_active is False
+
+
 def test_floor_recovered_does_not_fire_below_floor():
     # SOC at 18% (below floor=20%) while charging → floor_recovered must NOT fire,
     # charging continues.

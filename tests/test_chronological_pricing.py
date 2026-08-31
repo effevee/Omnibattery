@@ -199,6 +199,26 @@ def test_current_slot_uses_only_remaining_duration():
     assert plan.allocated_kwh == pytest.approx(1.0)
 
 
+def test_current_slot_is_eligible_after_its_start_time():
+    """A configured 00:00-08:00 window remains usable at 00:04."""
+    now = BASE + timedelta(minutes=4)
+    slot = _slot(0, 8 * 60, 0.0)
+
+    plan = allocate_price_slots(
+        [],
+        [],
+        [slot],
+        total_required_kwh=1.0,
+        effective_power_kw=1.0,
+        charge_efficiency=1.0,
+        now=now,
+        horizon_end=BASE + timedelta(days=1),
+    )
+
+    assert plan.reason == "ok"
+    assert plan.allocated_kwh == pytest.approx(1.0)
+
+
 def test_price_ceiling_reports_deadline_shortfall():
     interval = _interval(0, 0.5)
     plan = allocate_price_slots(
