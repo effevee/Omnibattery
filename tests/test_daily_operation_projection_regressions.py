@@ -650,3 +650,81 @@ def test_previous_command_is_not_reported_as_measured_operation():
     assert decision["action_mask"] == ACTION_GRID_CHARGE
     assert decision["charge_power_w"] == pytest.approx(750.0)
     assert decision["source"] == "runtime_command"
+
+
+def test_informational_schedule_is_not_painted_as_grid_charge():
+    """A no-deficit 00:05 cheap-hour calendar must not become planned grid charge.
+
+    ``charging_needed=False`` means the runtime slot resolver never activates
+    these slots.  Without a chronological plan they also carry no energy
+    target, so the projection used to fall back to a full-power grid quota and
+    paint "grid charge" over an interval that solar covers on its own.
+    """
+    now = datetime(2026, 9, 1, 12, 0, tzinfo=MADRID)
+    end = now + timedelta(minutes=15)
+    slot = PriceSlot(now, end, 0.216)
+    controller = _controller_for_projection(
+        now,
+        [ProjectionIntervalInput(now, end, consumption_kwh=0.136, solar_kwh=0.945)],
+        [],
+        [BatteryProjectionInput("a", 7.0, 10.0, 0, 100, 4000, 4000)],
+        _daily_operation_mode=lambda: "dynamic_pricing",
+        predictive_charging_enabled=True,
+        _last_decision_data={"should_charge": False},
+        _dynamic_pricing_schedule=SimpleNamespace(
+            selected_slots=[slot],
+            slot_energy_targets_kwh={},
+            slot_deadlines={},
+            slot_plan_kinds={},
+            charging_needed=False,
+            evaluation_time=now,
+        ),
+        max_contracted_power=6000,
+        max_charge_capacity=4000,
+    )
+
+    result = ChargeDischargeController._daily_operation_build_projection(
+        controller, now
+    )
+
+    assert result is not None
+    item = result["intervals"][0]
+    assert item["grid_to_battery_kwh"] == pytest.approx(0.0)
+    assert not item["action_mask"] & ACTION_GRID_CHARGE
+    assert item["action_mask"] & ACTION_SOLAR_CHARGE
+    assert item["grid_charge_decision"] == "not_needed"
+
+
+def test_executable_schedule_still_plans_grid_charge():
+    """The same calendar with ``charging_needed`` set stays visible."""
+    now = datetime(2026, 9, 1, 12, 0, tzinfo=MADRID)
+    end = now + timedelta(minutes=15)
+    slot = PriceSlot(now, end, 0.216)
+    controller = _controller_for_projection(
+        now,
+        [ProjectionIntervalInput(now, end, consumption_kwh=0.136, solar_kwh=0.945)],
+        [],
+        [BatteryProjectionInput("a", 7.0, 10.0, 0, 100, 4000, 4000)],
+        _daily_operation_mode=lambda: "dynamic_pricing",
+        predictive_charging_enabled=True,
+        _last_decision_data={"should_charge": True},
+        _dynamic_pricing_schedule=SimpleNamespace(
+            selected_slots=[slot],
+            slot_energy_targets_kwh={slot: 0.5},
+            slot_deadlines={},
+            slot_plan_kinds={},
+            charging_needed=True,
+            evaluation_time=now,
+        ),
+        max_contracted_power=6000,
+        max_charge_capacity=4000,
+    )
+
+    result = ChargeDischargeController._daily_operation_build_projection(
+        controller, now
+    )
+
+    assert result is not None
+    item = result["intervals"][0]
+    assert item["grid_to_battery_kwh"] > 0.0
+    assert item["action_mask"] & ACTION_GRID_CHARGE

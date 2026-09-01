@@ -175,6 +175,15 @@ def build_daily_operation_projection(
             remaining_intervals
         )
     ]
+    # The simulation must only see the energy left in an in-progress interval,
+    # but the published forecast series has to stay a full-quarter quantity.
+    full_forecasts = [
+        (
+            _finite(getattr(interval, "solar_kwh", 0.0)),
+            _finite(getattr(interval, "consumption_kwh", 0.0)),
+        )
+        for interval, _remaining_start, _remaining_ratio in remaining_intervals
+    ]
     delay_projection = None
     delay_starts_at = (
         now
@@ -251,7 +260,7 @@ def build_daily_operation_projection(
         or "profile_projection"
     )
     aggregates: dict[tuple[Any, int], dict[str, Any]] = {}
-    for flow in result.intervals:
+    for flow_index, flow in enumerate(result.intervals):
         if flow.start is None:
             continue
         flow_start = flow.start
@@ -279,6 +288,8 @@ def build_daily_operation_projection(
                 "_extended": is_extended,
                 "solar_kwh": 0.0,
                 "consumption_kwh": 0.0,
+                "solar_forecast_kwh": 0.0,
+                "consumption_forecast_kwh": 0.0,
                 "solar_to_battery_kwh": 0.0,
                 "grid_to_battery_kwh": 0.0,
                 "battery_to_home_kwh": 0.0,
@@ -310,6 +321,9 @@ def build_daily_operation_projection(
         ):
             target_key = "duration_s" if key == "duration_seconds" else key
             item[target_key] += _finite(getattr(flow, key, 0.0))
+        if flow_index < len(full_forecasts):
+            item["solar_forecast_kwh"] += full_forecasts[flow_index][0]
+            item["consumption_forecast_kwh"] += full_forecasts[flow_index][1]
         item["action_mask"] |= int(getattr(flow, "action_mask", 0) or 0)
         item["context_mask"] |= int(getattr(flow, "context_mask", 0) or 0)
         if getattr(flow, "grid_charge_decision", None) == GRID_CHARGE_SCHEDULED:

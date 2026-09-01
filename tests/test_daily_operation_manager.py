@@ -15,6 +15,10 @@ from custom_components.omnibattery.pricing.daily_timeline import (
     BatteryProjectionInput,
     ProjectionIntervalInput,
 )
+from custom_components.omnibattery.tracking.daily_projection import (
+    DailyOperationProjectionRequest,
+    build_daily_operation_projection,
+)
 from custom_components.omnibattery.tracking.daily_timeline import (
     ACTION_DISCHARGE,
     ACTION_GRID_CHARGE,
@@ -23,7 +27,10 @@ from custom_components.omnibattery.tracking.daily_timeline import (
     CONTEXT_DYNAMIC_PRICE,
     CONTEXT_HOURLY_BALANCE,
     CONTEXT_SETPOINT,
+    GRID_CHARGE_DECISIONS,
+    GRID_CHARGE_SCHEDULED,
     DailyOperationTimelineManager,
+    _normalize_grid_decision,
 )
 
 MADRID = ZoneInfo("Europe/Madrid")
@@ -1146,3 +1153,72 @@ def test_realtime_price_keeps_real_current_decision_but_no_future_plan():
     assert snapshot["operations"]["planned_action_mask"][42] == 0
     assert snapshot["series"]["solar_forecast_kwh"][41] is None
     assert snapshot["series"]["solar_forecast_kwh"][42] is None
+
+
+def test_canonical_grid_decisions_round_trip_through_the_normalizer():
+    for decision in GRID_CHARGE_DECISIONS:
+        assert _normalize_grid_decision(decision) == decision
+
+
+def test_charge_power_infers_grid_charge_from_a_scheduled_decision():
+    clock = MutableClock(datetime(2026, 8, 23, 10, 7, tzinfo=MADRID))
+    manager = _manager(clock)
+
+    manager.record_runtime_decision(
+        {"grid_charge_decision": GRID_CHARGE_SCHEDULED, "charge_power_w": 1200.0},
+        duration_s=90,
+    )
+    snapshot = manager.build_public_snapshot()
+
+    assert snapshot["operations"]["actual_action_mask"][40] == ACTION_GRID_CHARGE
+    assert (
+        snapshot["operations"]["actual_grid_charge_decision"][40]
+        == GRID_CHARGE_SCHEDULED
+    )
+    assert snapshot["operations"]["actual_context_mask"][40] & CONTEXT_DYNAMIC_PRICE
+
+
+def test_in_progress_interval_publishes_the_full_quarter_forecast():
+    now = datetime(2026, 8, 23, 13, 7, tzinfo=MADRID)
+    interval_start = now.replace(minute=0)
+    intervals = [
+        ProjectionIntervalInput(
+            interval_start + timedelta(minutes=15 * offset),
+            interval_start + timedelta(minutes=15 * (offset + 1)),
+            consumption_kwh=0.2,
+            solar_kwh=0.4,
+        )
+        for offset in range(2)
+    ]
+    projection = build_daily_operation_projection(
+        DailyOperationProjectionRequest(
+            now=now,
+            plan_intervals=tuple(intervals),
+            allocations=(),
+            battery_inputs=(BatteryProjectionInput("a", 5, 10, 0, 100, 4000, 4000),),
+            mode="normal",
+            decision_data={},
+        )
+    )
+    # The in-progress interval only keeps 8 of its 15 minutes, so the battery
+    # simulation must still see the prorated remainder.
+    current = next(item for item in projection["intervals"] if item["index"] == 52)
+    assert current["consumption_kwh"] == pytest.approx(0.2 * 8 / 15)
+    assert current["solar_kwh"] == pytest.approx(0.4 * 8 / 15)
+
+    clock = MutableClock(now)
+    manager = _manager(clock, mode="normal")
+    manager.rebuild_future_projection(projection, mode="normal")
+    series = manager.build_public_snapshot()["series"]
+
+    assert series["consumption_forecast_kwh"][52] == pytest.approx(0.2)
+    assert series["solar_forecast_kwh"][52] == pytest.approx(0.4)
+    assert series["consumption_forecast_kwh"][53] == pytest.approx(0.2)
+    assert series["solar_forecast_kwh"][53] == pytest.approx(0.4)
+
+    # Closing the interval must not freeze a prorated remnant into the past.
+    clock.value = now.replace(minute=20)
+    manager.rebuild_future_projection(projection, mode="normal")
+    closed = manager.build_public_snapshot()["series"]
+    assert closed["consumption_forecast_kwh"][52] == pytest.approx(0.2)
+    assert closed["solar_forecast_kwh"][52] == pytest.approx(0.4)

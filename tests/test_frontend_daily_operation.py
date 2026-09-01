@@ -41,3 +41,57 @@ def test_disabled_hourly_balance_suppresses_feature_legend_and_markers():
     assert "hourlyBalanceEnabled: Boolean(hourlyBalanceState" in panel
     assert "ref.hourlyBalanceLegend.hidden = !snapshot.hourlyBalanceEnabled;" in panel
     assert "hourlyBalance: snapshot.hourlyBalanceEnabled" in panel
+
+
+def test_open_cell_below_a_minute_of_coverage_is_omitted_not_plotted_raw():
+    panel = PANEL.read_text(encoding="utf-8")
+
+    assert "if (value != null && seconds != null && seconds < 900) {" in panel
+    assert "plotted[index] = seconds >= 60 ? value * 900 / seconds : null;" in panel
+    assert "seconds >= 60 && seconds < 900" not in panel
+
+
+def test_forecast_handoff_drops_the_open_cell_when_there_is_no_observed_point():
+    panel = PANEL.read_text(encoding="utf-8")
+
+    assert "if (!snapshot.isSkipped[index]) plotted[index] = observed;" in panel
+    assert "if (observed != null && !snapshot.isSkipped[index]) plotted[index] = observed;" not in panel
+
+
+def test_solar_forecast_needs_a_sustained_zero_run_before_erasing_the_day():
+    panel = PANEL.read_text(encoding="utf-8")
+
+    assert "const DAILY_OPERATION_SUNSET_ZERO_INTERVALS = 4;" in panel
+    assert "// ponytail:" in panel
+    assert (
+        'return zeroIntervals >= DAILY_OPERATION_SUNSET_ZERO_INTERVALS ? "after" : "during";'
+        in panel
+    )
+    assert 'if (this._dailyOperationSolarPhase(snapshot) !== "after") return plotted;' in panel
+    assert "if (zeroIntervals < 1 || !priorProduction)" not in panel
+
+
+def test_solar_phase_skips_an_open_cell_without_a_minute_of_coverage():
+    panel = PANEL.read_text(encoding="utf-8")
+
+    # Otherwise the phase would flip back to "during" for the first minute of
+    # every quarter, making the post-sunset suppression flicker.
+    assert (
+        "const last = openCoverage != null && openCoverage >= 60 ? index : index - 1;"
+        in panel
+    )
+
+
+def test_no_sun_left_reasons_are_silenced_outside_the_producing_window():
+    panel = PANEL.read_text(encoding="utf-8")
+
+    assert 'if (reason === "zero_budget") return phase === "during";' in panel
+    assert (
+        'if (reason === "learned_shape_no_future_energy") return phase !== "after";'
+        in panel
+    )
+    assert 'const solarPhase = this._dailyOperationSolarPhase(snapshot);' in panel
+    assert "this._dailyOperationFallbackReasonLabel(reason, solarPhase)" in panel
+    # The old unconditional filter hid a zero budget even at midday, which is
+    # exactly when it is worth showing.
+    assert 'part.toLowerCase() !== "zero_budget"' not in panel

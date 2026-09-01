@@ -35,6 +35,12 @@ const DAILY_OPERATION_EXTENSION_INTERVALS = 48;
 const DAILY_OPERATION_TOTAL_INTERVALS = DAILY_OPERATION_BASE_INTERVALS + DAILY_OPERATION_EXTENSION_INTERVALS;
 const DAILY_OPERATION_TOTAL_HOURS = DAILY_OPERATION_TOTAL_INTERVALS / 4;
 const DAILY_OPERATION_CONTEXT_HOURLY_BALANCE = 32;
+// Covered zero PV intervals (the open cell plus three completed quarters, so
+// ~45-60 minutes) before the remaining solar forecast is treated as
+// post-sunset and removed.
+// ponytail: a clock-blind counter, so an outage longer than an hour at midday
+// still erases the afternoon curve; the real fix is a sunset timestamp.
+const DAILY_OPERATION_SUNSET_ZERO_INTERVALS = 4;
 
 // --- i18n ------------------------------------------------------------------
 // All user-facing panel strings, keyed by a stable id and resolved at render
@@ -2993,10 +2999,18 @@ class MarstekVenusPanel extends HTMLElement {
     return DAILY_OPERATION_REASON_I18N[this._lang2()] || DAILY_OPERATION_REASON_I18N.en;
   }
 
-  _dailyOperationFallbackReasonLabel(value) {
+  _dailyOperationFallbackReasonLabel(value, phase = "during") {
     const dictionary = this._dailyOperationReasonDict();
     const labels = String(value || "").split(";").map((part) => part.trim()).filter(Boolean)
-      .filter((part) => part.toLowerCase() !== "zero_budget")
+      // A day with no sun left legitimately has no budget and no future energy
+      // in the learned profile. Both are diagnostics only while PV could still
+      // be producing, otherwise every installation warns all night.
+      .filter((part) => {
+        const reason = part.toLowerCase();
+        if (reason === "zero_budget") return phase === "during";
+        if (reason === "learned_shape_no_future_energy") return phase !== "after";
+        return true;
+      })
       .map((part) => {
         const normalized = part.toLowerCase();
         let key = DAILY_OPERATION_REASON_KEYS[normalized];
@@ -3370,9 +3384,11 @@ class MarstekVenusPanel extends HTMLElement {
     const seconds = this._dailyOperationValueAt(coverage, index);
     // The live capture contains energy accumulated so far. Extrapolate only
     // the open cell so it remains comparable with the completed 15-minute
-    // cells and does not create a false drop at the now marker.
-    if (value != null && seconds != null && seconds >= 60 && seconds < 900) {
-      plotted[index] = value * 900 / seconds;
+    // cells and does not create a false drop at the now marker. Below a
+    // minute of coverage the factor exceeds 15x and would amplify noise, so
+    // the point is omitted instead of plotting a near-zero partial.
+    if (value != null && seconds != null && seconds < 900) {
+      plotted[index] = seconds >= 60 ? value * 900 / seconds : null;
     }
     return plotted;
   }
@@ -3386,39 +3402,50 @@ class MarstekVenusPanel extends HTMLElement {
     // while the observed series is plotted as a complete quarter. Do not put
     // those different quantities at the same "now" coordinate: use the
     // observed point as the visual hand-off and keep forecast data unchanged
-    // from the next interval onward.
-    if (observed != null && !snapshot.isSkipped[index]) plotted[index] = observed;
+    // from the next interval onward. Without an observed point the open cell
+    // is dropped as well, so the forecast never draws its partial remainder
+    // at the now marker.
+    if (!snapshot.isSkipped[index]) plotted[index] = observed;
     return plotted;
   }
 
-  _dailyOperationSolarForecastPlotValues(values, actual, snapshot) {
-    const plotted = this._dailyOperationForecastPlotValues(values, actual, snapshot);
-    if (!Array.isArray(plotted) || !Array.isArray(actual)) return plotted;
-
+  // Where the local day sits relative to observed PV: "before" until the first
+  // production, "during" while it can still produce, "after" once a sustained
+  // run of covered zero intervals says it has stopped. A provider curve can
+  // remain optimistic past that point, and several fallback reasons only
+  // describe the ordinary state of a day with no sun left.
+  // ponytail: clock-blind, so an outage longer than the run still reads as
+  // sunset; the real fix is a sunset timestamp in the payload.
+  _dailyOperationSolarPhase(snapshot) {
+    const actual = snapshot.actualSolar;
+    if (!Array.isArray(actual)) return "before";
     const index = snapshot.currentIndex;
-    const coverageAt = this._dailyOperationValueAt(snapshot.solarCoverage, index);
-    const currentSolar = this._dailyOperationValueAt(actual, index);
-    // A provider curve can remain optimistic after the live PV capture has
-    // already reached zero. Require one covered zero interval and prior
-    // production so an unobserved cell does not erase a genuine forecast.
-    if (currentSolar == null || currentSolar > 0.000001 || coverageAt == null || coverageAt < 60) {
-      return plotted;
-    }
+    // The open cell is not evidence until it has a minute of coverage, so step
+    // over it rather than letting it break the run every quarter of an hour.
+    const openCoverage = this._dailyOperationValueAt(snapshot.solarCoverage, index);
+    const last = openCoverage != null && openCoverage >= 60 ? index : index - 1;
+    const produced = actual
+      .slice(0, Math.max(0, last + 1))
+      .some((value) => (this._dailyOperationNumber(value) || 0) > 0.000001);
+    if (!produced) return "before";
     let zeroIntervals = 0;
-    for (let cursor = index; cursor >= 0; cursor--) {
+    for (let cursor = last; cursor >= 0; cursor--) {
       const sample = this._dailyOperationValueAt(actual, cursor);
       const coverage = this._dailyOperationValueAt(snapshot.solarCoverage, cursor);
       if (sample == null || coverage == null || coverage < 60 || sample > 0.000001) break;
       zeroIntervals++;
     }
-    const priorProduction = actual
-      .slice(0, index)
-      .some((value) => (this._dailyOperationNumber(value) || 0) > 0.000001);
-    if (zeroIntervals < 1 || !priorProduction) return plotted;
+    return zeroIntervals >= DAILY_OPERATION_SUNSET_ZERO_INTERVALS ? "after" : "during";
+  }
+
+  _dailyOperationSolarForecastPlotValues(values, actual, snapshot) {
+    const plotted = this._dailyOperationForecastPlotValues(values, actual, snapshot);
+    if (!Array.isArray(plotted)) return plotted;
+    if (this._dailyOperationSolarPhase(snapshot) !== "after") return plotted;
 
     // Keep the optional next-day extension intact; only today's impossible
     // post-sunset forecast is removed from the graph.
-    for (let cursor = index + 1; cursor < DAILY_OPERATION_BASE_INTERVALS; cursor++) {
+    for (let cursor = snapshot.currentIndex + 1; cursor < DAILY_OPERATION_BASE_INTERVALS; cursor++) {
       plotted[cursor] = null;
     }
     return plotted;
@@ -3598,9 +3625,10 @@ class MarstekVenusPanel extends HTMLElement {
       const staleReason = this._dailyOperationStaleReasonLabel(snapshot.staleReason);
       notices.push(staleReason ? `${this._t("dailyOperationStale")}: ${staleReason}` : this._t("dailyOperationStale"));
     }
+    const solarPhase = this._dailyOperationSolarPhase(snapshot);
     for (const kind of ["solar", "consumption"]) {
       const reason = snapshot.fallbackReason(kind);
-      const reasonLabel = this._dailyOperationFallbackReasonLabel(reason);
+      const reasonLabel = this._dailyOperationFallbackReasonLabel(reason, solarPhase);
       if (reasonLabel) notices.push(this._t("dailyOperationFallback", { reason: reasonLabel }));
       const source = snapshot.source(kind);
       if (!reason && source && /fallback|sinus/i.test(source)) {

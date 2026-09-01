@@ -365,6 +365,8 @@ def _normalize_grid_decision(value: Any) -> str:
     if normalized is None:
         return GRID_CHARGE_NOT_APPLICABLE
     normalized = normalized.lower().replace("-", "_").replace(" ", "_")
+    if normalized in GRID_CHARGE_DECISIONS:
+        return normalized
     aliases = {
         "scheduled_charge": GRID_CHARGE_SCHEDULED,
         "schedule": GRID_CHARGE_SCHEDULED,
@@ -2326,10 +2328,10 @@ class DailyOperationTimelineManager:
                     ) if mapping is not None else default
 
                 solar_value = _finite_non_negative(
-                    item_value("solar_kwh", "solar_forecast_kwh", default=None)
+                    item_value("solar_forecast_kwh", "solar_kwh", default=None)
                 )
                 consumption_value = _finite_non_negative(
-                    item_value("consumption_kwh", "consumption_forecast_kwh", default=None)
+                    item_value("consumption_forecast_kwh", "consumption_kwh", default=None)
                 )
                 if solar_value is not None:
                     self._planned_solar_kwh[item_index] = solar_value

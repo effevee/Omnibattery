@@ -1772,6 +1772,12 @@ class ChargeDischargeController:
         decision_data = dict(base_decision_data)
         raw_slots = []
         schedule = getattr(self, "_dynamic_pricing_schedule", None)
+        # The 00:05 evaluation also publishes a purely informational cheap-hour
+        # calendar when no charge is needed.  Runtime never executes it (the
+        # slot purpose resolver gates on ``charging_needed``), so the timeline
+        # must not paint it as planned grid charge either.
+        if schedule is not None and not getattr(schedule, "charging_needed", True):
+            schedule = None
         local_midnight = now.replace(
             hour=0, minute=0, second=0, microsecond=0
         ) + timedelta(days=1)
