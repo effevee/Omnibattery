@@ -351,10 +351,15 @@ def test_zero_capacity_unlocks():
     assert ctrl._charge_delay_status["unlock_reason"] == "no_forecast"
 
 
-def test_balance_needs_charge_unlocks_low_forecast():
+def test_balance_needs_charge_unlocks_low_forecast(monkeypatch):
     # avg_soc 30, min_soc 20, capacity 10 -> usable 1 kWh; RAW forecast 1.0;
     # consumption 5, deadband 0.5 -> (1 + 1.0) < (5 - 0.5) -> grid needed.
     # No pricing manager -> price-aware release is a no-op -> unlock(low_forecast).
+    # The clock is pinned: consumption is trimmed to the hours left in the day,
+    # so an unpinned run follows whatever hour the suite starts at and stops
+    # being a deficit after midday.
+    now = dt_util.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    monkeypatch.setattr(charge_delay_module, "_decision_now", lambda: now)
     ctrl = _controller(
         coordinators=[_coord(soc=30, total_energy=10.0, min_soc=20)],
         _consumption_tracker=_tracker(get_avg_daily_consumption=lambda: 5.0),
