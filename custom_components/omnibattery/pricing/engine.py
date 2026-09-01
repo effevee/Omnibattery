@@ -4905,8 +4905,14 @@ class PricingManager:
                     # next cycle can retry instead of publishing a misleading
                     # safe-mode notification. Once the existing five-minute
                     # grace expires, the normal conservative fallback is safe.
+                    # A slot that opens on the day boundary (00:00) reads the
+                    # provider's exhausted previous-day remainder for the few
+                    # hundred milliseconds before it republishes the new day, so
+                    # a zero remaining forecast is treated as "not published
+                    # yet" and retried within the same grace.
+                    forecast = read_solar_forecast_kwh(self._hass, self._controller)
                     forecast_unavailable = (
-                        read_solar_forecast_kwh(self._hass, self._controller) is None
+                        forecast is None or forecast.remaining_kwh <= 0.0
                     )
                     if forecast_unavailable:
                         forecast_unavailable_elapsed_s = (
@@ -4935,7 +4941,7 @@ class PricingManager:
                 decision_forecast_unavailable = (
                     is_initial_eval
                     and forecast_configured
-                    and decision_data.get("solar_forecast_kwh") is None
+                    and not decision_data.get("solar_forecast_kwh")
                 )
                 if decision_forecast_unavailable:
                     if not forecast_unavailable:
@@ -4968,11 +4974,16 @@ class PricingManager:
                     now=now,
                 )
 
+                was_active = self._controller.grid_charging_active
                 self._controller.grid_charging_active = decision_data["should_charge"]
                 self._controller.last_evaluation_soc = current_avg_soc
                 self._controller._last_decision_data = decision_data
 
-                if is_initial_eval:
+                # A re-evaluation that reverses the slot's decision replaces the
+                # notification: otherwise a "STARTED" notice stays on screen for
+                # the rest of the slot while nothing is charging, and the
+                # "Not required" result is never reported.
+                if is_initial_eval or was_active != self._controller.grid_charging_active:
                     await self._send_predictive_charging_notification(
                         decision_data=decision_data
                     )

@@ -4,6 +4,8 @@
 
 ### Fixed
 
+- **A midnight predictive slot could announce a charge it never made**: a slot opening at 00:00 read the solar provider's exhausted previous-day remainder, invented a deficit and notified "STARTED"; a zero remaining forecast is now retried within the existing grace, and any re-evaluation that reverses the decision replaces the notification instead of leaving it on screen.
+
 - **Weekly Full Charge could override a normal predictive grid-charge target**: an overlapping weekly cycle now only permits later solar charging toward 100%; while predictive charging owns the session, its per-battery target remains authoritative and grid import stops at the planned quota.
 - **Daily Operation could show Hourly Net Balance visuals while the feature was disabled**: the live switch now gates its legend and cause markers, while diagonal overlays for genuinely simultaneous solar and battery actions remain visible as coexistence indicators.
 - **Backup-port discharge omitted from energy totals and round-trip efficiency** (#321): the shared energy layer can now integrate supplemental discharge declared through semantic driver hooks, keeping accumulation, persistence, total/daily discharge, calculated cycles, RTE and entity representation brand/model agnostic while each driver decides whether and how the correction applies. The Marstek driver enables it for the confirmed Venus E v3 case, counting fresh off-grid output only in Backup Mode and excluding grid passthrough power.

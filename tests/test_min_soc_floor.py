@@ -106,7 +106,7 @@ def test_soc_in_hysteresis_band_no_charge():
 
 
 def _make_engine(soc, floor, *, grid_charging_active, last_evaluation_soc):
-    calls = {"activate": 0, "handle": 0}
+    calls = {"activate": 0, "handle": 0, "notify": 0}
 
     async def _activate():
         calls["activate"] += 1
@@ -114,6 +114,9 @@ def _make_engine(soc, floor, *, grid_charging_active, last_evaluation_soc):
 
     async def _handle():
         calls["handle"] += 1
+
+    async def _notify(**_kwargs):
+        calls["notify"] += 1
 
     controller = SimpleNamespace(
         charging_time_slots=["slot"],
@@ -133,6 +136,7 @@ def _make_engine(soc, floor, *, grid_charging_active, last_evaluation_soc):
         _handle_predictive_grid_charging=_handle,
     )
     engine = PricingManager(hass=SimpleNamespace(), controller=controller)
+    engine._send_predictive_charging_notification = _notify
     return engine, controller, calls
 
 
@@ -146,6 +150,7 @@ def test_floor_below_re_evaluates_when_clamped():
     asyncio.run(engine.handle_time_slot_predictive_charging())
     assert calls["activate"] == 1
     assert ctrl.grid_charging_active is True
+    assert calls["notify"] == 1
 
 
 def test_no_re_evaluation_while_already_charging():
@@ -279,6 +284,32 @@ def test_initial_evaluation_retries_when_configured_forecast_is_unavailable():
     assert controller.grid_charging_active is True
 
 
+def test_initial_evaluation_retries_when_forecast_still_reads_the_previous_day():
+    """A midnight slot must not invent a deficit from the exhausted remainder.
+
+    A 00:00 slot opens a few hundred milliseconds before the provider publishes
+    the new day, so its remaining-today sensor still reads 0 kWh. Evaluating it
+    produced a phantom full-day deficit and a "STARTED" notification for a
+    charge that the next evaluation immediately cancelled.
+    """
+    engine, controller, calls, state, _clock = _make_initial_slot_engine(
+        forecast_configured=True,
+        forecast_state="0",
+    )
+
+    asyncio.run(engine.handle_time_slot_predictive_charging())
+
+    assert calls["activate"] == 0
+    assert calls["notify"] == 0
+    assert controller.grid_charging_active is False
+
+    state["value"] = "40.9"
+    asyncio.run(engine.handle_time_slot_predictive_charging())
+
+    assert calls["activate"] == 1
+    assert calls["notify"] == 1
+
+
 def test_unavailable_forecast_uses_conservative_fallback_after_grace():
     engine, controller, calls, _state, clock = _make_initial_slot_engine(
         forecast_configured=True,
@@ -342,12 +373,15 @@ def test_above_floor_no_swing_no_re_evaluation():
 
 def _make_engine_recovered(soc, floor, *, last_evaluation_soc):
     """Grid charging IS active (floor_crossed already fired); SOC has climbed back."""
-    calls = {"activate": 0}
+    calls = {"activate": 0, "notify": 0}
 
     async def _activate():
         calls["activate"] += 1
         # Solar-positive day: re-eval at floor finds no deficit → stop charging.
         return {"should_charge": False, "energy_deficit_kwh": 0.0}
+
+    async def _notify(**_kwargs):
+        calls["notify"] += 1
 
     controller = SimpleNamespace(
         charging_time_slots=["slot"],
@@ -367,6 +401,7 @@ def _make_engine_recovered(soc, floor, *, last_evaluation_soc):
         _handle_predictive_grid_charging=_noop,
     )
     engine = PricingManager(hass=SimpleNamespace(), controller=controller)
+    engine._send_predictive_charging_notification = _notify
     return engine, controller, calls
 
 
@@ -395,6 +430,20 @@ def test_floor_recovered_stops_when_the_current_window_has_no_quota():
 
     assert calls["activate"] == 1
     assert ctrl.grid_charging_active is False
+
+
+def test_reversed_decision_replaces_the_slot_notification():
+    """A re-evaluation that stops charging must report "Not required".
+
+    Otherwise the slot-entry "STARTED" notification stays on screen for the rest
+    of the slot while nothing is charging.
+    """
+    engine, ctrl, calls = _make_engine_recovered(
+        soc=20.0, floor=20.0, last_evaluation_soc=12.0
+    )
+    asyncio.run(engine.handle_time_slot_predictive_charging())
+    assert ctrl.grid_charging_active is False
+    assert calls["notify"] == 1
 
 
 def test_floor_recovered_does_not_fire_below_floor():
@@ -482,6 +531,8 @@ if __name__ == "__main__":
     test_no_re_evaluation_while_already_charging()
     test_above_floor_no_swing_no_re_evaluation()
     test_floor_recovered_stops_charging()
+    test_reversed_decision_replaces_the_slot_notification()
+    test_initial_evaluation_retries_when_forecast_still_reads_the_previous_day()
     test_floor_recovered_does_not_fire_below_floor()
     test_floor_recovered_does_not_fire_twice()
     test_slot_exit_resets_eval_soc_after_no_charge_day()
