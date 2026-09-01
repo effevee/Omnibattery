@@ -4,6 +4,7 @@
 
 ### Fixed
 
+- **Predictive charging could not go below 800 W on Marstek v2/v3**: the driver read the lowest configurable charge *limit* as a minimum operating power, so predictive slots held an 800 W grid-import floor and the thermal derate could not throttle under it. Peak shaving is unaffected.
 - **Daily Operation left a 30-minute hole and a false spike around the now marker**: the open quarter is now completed from the previous closed one (energy seen so far plus its prorated remainder) instead of being dropped below a minute of coverage or scaled by `900 / seconds`, which collapsed the point and made the forecast hand-off read as a peak.
 
 ## [1.4.0b8] - 2026-08-30
