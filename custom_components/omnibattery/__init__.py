@@ -229,6 +229,7 @@ from .tracking.daily_timeline import (
     GRID_CHARGE_NOT_NEEDED,
     GRID_CHARGE_SCHEDULED,
 )
+from .control.pack_soc import soc_vs_ceiling, soc_vs_floor
 from .control.weekly_full_charge import WeeklyFullChargeManager
 from .control.max_soc_charge import MaxSocChargeManager
 from .control.temperature_limit import TemperatureChargeLimitManager
@@ -3382,6 +3383,10 @@ class ChargeDischargeController:
                 coordinator,
                 weekly_100_unlocked,
             )
+            # A coupled-pack battery is full when its *least* full pack reaches
+            # the ceiling; its aggregate gets there while the last pack is still
+            # filling (issue #350). Equals current_soc without pack telemetry.
+            ceiling_soc = soc_vs_ceiling(coordinator, current_soc)
 
             should_charge_to_bms = getattr(self, "_should_charge_to_bms_cutoff", None)
             if should_charge_to_bms is not None and should_charge_to_bms(
@@ -3433,9 +3438,11 @@ class ChargeDischargeController:
                     coordinator._hysteresis_active = False
                     coordinator._hysteresis_base_soc = None
 
-                if current_soc >= coordinator.max_soc or bms_cutoff or taper_at_top_voltage:
+                if ceiling_soc >= coordinator.max_soc or bms_cutoff or taper_at_top_voltage:
                     coordinator._hysteresis_active = True
                     if coordinator._hysteresis_base_soc is None:
+                        # Base stays the aggregate: it answers "how far must the
+                        # whole battery fall before recharging", not "is it full".
                         coordinator._hysteresis_base_soc = current_soc
 
                 hysteresis_base = (
@@ -3450,7 +3457,7 @@ class ChargeDischargeController:
                     coordinator._hysteresis_base_soc = None
 
                 if coordinator._hysteresis_active:
-                    if current_soc >= effective_max_soc or bms_cutoff:
+                    if ceiling_soc >= effective_max_soc or bms_cutoff:
                         self.set_charge_block(
                             "max_soc",
                             "max_soc",
@@ -3484,7 +3491,7 @@ class ChargeDischargeController:
 
             self.remove_charge_block("charge_hysteresis", coordinator=coordinator)
 
-            if current_soc >= effective_max_soc or bms_cutoff:
+            if ceiling_soc >= effective_max_soc or bms_cutoff:
                 self.set_charge_block(
                     "max_soc",
                     "max_soc",
@@ -3495,6 +3502,7 @@ class ChargeDischargeController:
                         "effective_max_soc": effective_max_soc,
                         "source": max_soc_source,
                         "bms_cutoff": bms_cutoff,
+                        **({"min_pack_soc": ceiling_soc} if ceiling_soc != current_soc else {}),
                     },
                     coordinator=coordinator,
                 )
@@ -3521,7 +3529,11 @@ class ChargeDischargeController:
 
             current_soc = coordinator.data.get("battery_soc", 0)
             effective_min_soc, min_soc_source = self._effective_discharge_min_soc(coordinator)
-            if current_soc <= effective_min_soc:
+            # A coupled-pack battery is empty when its *fullest* pack reaches the
+            # floor, not when its aggregate does (issue #350). Falls back to the
+            # aggregate on every battery that publishes no per-pack telemetry.
+            floor_soc = soc_vs_floor(coordinator, current_soc)
+            if floor_soc <= effective_min_soc:
                 self.set_discharge_block(
                     "min_soc",
                     "min_soc",
@@ -3531,6 +3543,7 @@ class ChargeDischargeController:
                         "min_soc": coordinator.min_soc,
                         "effective_min_soc": effective_min_soc,
                         "source": min_soc_source,
+                        **({"max_pack_soc": floor_soc} if floor_soc != current_soc else {}),
                     },
                     coordinator=coordinator,
                 )
@@ -3804,6 +3817,10 @@ class ChargeDischargeController:
                     should_charge_to_bms is not None
                     and should_charge_to_bms(coordinator, effective_max_soc)
                 )
+                # Judged on the least full pack for a coupled-pack battery, so a
+                # finished first pack cannot end the charge (issue #350).
+                # Identical to current_soc without pack telemetry.
+                ceiling_soc = soc_vs_ceiling(coordinator, current_soc)
 
                 # Update hysteresis state if enabled
                 if coordinator.enable_charge_hysteresis:
@@ -3857,7 +3874,7 @@ class ChargeDischargeController:
                             coordinator._hysteresis_active = False
                             coordinator._hysteresis_base_soc = None
 
-                        if current_soc >= coordinator.max_soc or _taper_at_top:
+                        if ceiling_soc >= coordinator.max_soc or _taper_at_top:
                             coordinator._hysteresis_active = True
                             # Capture the actual SOC that triggered hysteresis (may be 100% after full charge)
                             if coordinator._hysteresis_base_soc is None:
@@ -3919,7 +3936,7 @@ class ChargeDischargeController:
                     continue
 
                 # Only charge if below effective max SOC
-                if current_soc < effective_max_soc or charge_to_bms_cutoff:
+                if ceiling_soc < effective_max_soc or charge_to_bms_cutoff:
                     available_batteries.append(coordinator)
             else:  # discharging
                 # MIN-SOC RE-ENTRY HYSTERESIS: after emptying to min_soc the
@@ -3927,11 +3944,15 @@ class ChargeDischargeController:
                 # the battery for a sliver of discharge — relay ping-pong and
                 # micro-cycles at the worst SOC region. Latch the exclusion at
                 # min_soc; release only after a real recovery margin.
-                if current_soc <= coordinator.min_soc:
+                # Judged on the fullest pack for a coupled-pack battery: the
+                # aggregate hits the floor while a pack still has charge to give
+                # (issue #350). Identical to current_soc without pack telemetry.
+                floor_soc = soc_vs_floor(coordinator, current_soc)
+                if floor_soc <= coordinator.min_soc:
                     coordinator._discharge_min_soc_latched = True
-                elif current_soc >= coordinator.min_soc + DISCHARGE_MIN_SOC_REENTRY_MARGIN:
+                elif floor_soc >= coordinator.min_soc + DISCHARGE_MIN_SOC_REENTRY_MARGIN:
                     coordinator._discharge_min_soc_latched = False
-                if current_soc > coordinator.min_soc:
+                if floor_soc > coordinator.min_soc:
                     if getattr(coordinator, "_discharge_min_soc_latched", False):
                         _LOGGER.debug(
                             "%s: Skipping discharge - min-SOC re-entry hysteresis "
