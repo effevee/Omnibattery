@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.4.0b10] - 2026-09-04
+
+### Fixed
+
+- **Daily Operation marked the SOC setpoint while Charge Delay was off**: the timeline read the setpoint switch on its own, so leaving "minimum SOC before delay" enabled with the delay disabled painted the setpoint marker on charge cells the controller never treats as setpoint charging.
+
 ## [1.4.0b9] - 2026-09-03
 
 ### Added
