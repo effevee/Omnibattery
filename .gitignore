@@ -37,6 +37,14 @@ CLAUDE.md
 *.tmp
 .env
 
+# Generated GitHub feature reports and poll drafts
+feature-requests-*.md
+feature-requests-*.json
+feature-poll-draft-*.md
+
+# Project-local Codex skills
+/.agents/skills/
+
 CLAUDE.md
 .agents/scripts/publish_release.py
 .agents/workflows/publish_release.md
@@ -56,3 +64,5 @@ design_handoff_mvem_dashboard/
 MULTI_BATTERY_MIGRATION_PLAN.md
 ROADMAP.md
 bash.exe.stackdump
+.codex/github-review/ffunes--omnibattery.json
+resumen-2026-08-25.md
